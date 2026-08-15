@@ -1,10 +1,12 @@
 #include "config.h"
 #include "mqtt.h"
+#include "shot_log.h"
 #include "temp_sensor.h"
 #include "web.h"
 #include <Arduino.h>
 #include <PID_v1.h>
 #include <Preferences.h>
+#include <time.h>
 
 // Global Variables
 float currentTemperature = 0.0;
@@ -279,6 +281,53 @@ static void runAutotuneStep(unsigned long now) {
   }
 }
 
+// ============================================================================
+// Shot timer + history log
+// ----------------------------------------------------------------------------
+// Manually triggered from the Web UI (Start/Stop button) - the ESP32 has no
+// visibility into the machine's own Brew switch/pump yet. See AGENTS.md
+// roadmap item 7 for the sense-only hardware path that would automate this.
+// ============================================================================
+bool shotInProgress = false;
+unsigned long shotStartMillis = 0;
+float shotPeakTemp = 0.0;
+
+// Descale / maintenance reminder - both persisted in NVS.
+unsigned long shotCount = 0;         // shots since the last descale/reset
+time_t lastDescaleTime = 0;          // epoch seconds; 0 = never set (unknown)
+unsigned long descaleShotThreshold = DESCALE_SHOT_THRESHOLD_DEFAULT;
+unsigned long descaleDayThreshold = DESCALE_DAY_THRESHOLD_DEFAULT;
+
+void startShot() {
+  if (shotInProgress) return;
+  shotInProgress = true;
+  shotStartMillis = millis();
+  shotPeakTemp = currentTemperature;
+}
+
+void stopShot() {
+  if (!shotInProgress) return;
+  shotInProgress = false;
+  unsigned long durationMs = millis() - shotStartMillis;
+  shotLogAppend(time(nullptr), durationMs, shotPeakTemp, 0.0);
+
+  shotCount++;
+  Preferences preferences;
+  preferences.begin("gaggia", false);
+  preferences.putULong("shot_count", shotCount);
+  preferences.end();
+}
+
+void markDescaled() {
+  shotCount = 0;
+  lastDescaleTime = time(nullptr);
+  Preferences preferences;
+  preferences.begin("gaggia", false);
+  preferences.putULong("shot_count", shotCount);
+  preferences.putULong("last_descale", (unsigned long)lastDescaleTime);
+  preferences.end();
+}
+
 void setup() {
   Serial.begin(115200);
   delay(1000);
@@ -305,7 +354,20 @@ void setup() {
   steamKd = preferences.getDouble("steam_kd", STEAM_KD_DEFAULT);
   steamMaxSafety = preferences.getDouble("steam_max_safety", STEAM_MAX_SAFETY_DEFAULT);
   ecoTimeoutMin = preferences.getULong("eco_min", ECO_TIMEOUT_MIN_DEFAULT);
+  shotCount = preferences.getULong("shot_count", 0);
+  lastDescaleTime = (time_t)preferences.getULong("last_descale", 0);
+  descaleShotThreshold =
+      preferences.getULong("descale_shots", DESCALE_SHOT_THRESHOLD_DEFAULT);
+  descaleDayThreshold =
+      preferences.getULong("descale_days", DESCALE_DAY_THRESHOLD_DEFAULT);
   preferences.end();
+
+  // Shot history log (LittleFS)
+  shotLogInit();
+
+  // NTP time sync, for real shot timestamps. Stored/compared in UTC
+  // throughout - the Web UI converts to local time for display.
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
 
   Serial.printf("Loaded brew: target=%.1f Kp=%.1f Ki=%.1f Kd=%.1f\n",
                 brewSetpoint, brewKp, brewKi, brewKd);
@@ -375,6 +437,10 @@ void loop() {
       if (currentTemperature > activeMaxSafety) {
         Serial.println("SAFETY CUTOFF TRIGGERED");
          // Additional safety logic could go here
+      }
+
+      if (shotInProgress && currentTemperature > shotPeakTemp) {
+        shotPeakTemp = currentTemperature;
       }
     }
   }

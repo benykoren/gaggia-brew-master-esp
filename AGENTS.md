@@ -458,26 +458,146 @@ Steam LED's function, or to make Thermostat 2 do real work again).
   Section 10 for the decision and procedure. Will need its own `nextion.cpp`
   driver once hardware is in hand, following the same "external component
   over UART" pattern as `temp_sensor.cpp`.
-- **Phased future roadmap (2026-08-16), sequenced by risk/dependency:**
-  1. **Sensing expansion** (lowest risk, no new actuators): water tank level
-     sensor (magnetic float switch → GPIO interlock, prevents dry-running
-     the pump once Phase 2 exists) + real-time pressure transducer (ADC1
-     only — ADC2 is WiFi-contaminated, same lesson as elsewhere in this
-     project — with a live pressure graph mirroring the existing temp
-     sparkline).
-  2. **Advanced actuation — pump flow/pressure profiling**: AC phase-control
-     dimmer (zero-cross + TRIAC, e.g. RobotDyn) for the vibration pump,
-     enabling programmable pre-infusion/extraction profiles. **A second real
-     mains-voltage subsystem** - apply the same bench-first safety discipline
-     as the original SSR/heater build. If this becomes a must-have, evaluate
-     migrating to [GaggiMate](https://github.com/jniebuhr/gaggimate) (mature
-     ESP32-S3 pressure-profiling platform - but it uses a K-type
-     thermocouple, not PT100).
-  3. **IoT - Bluetooth smart scale + auto-stop**: needs a *specific* scale
-     model chosen upfront (Acaia/Decent/Bookoo/Felicita all use different,
-     often community-reverse-engineered BLE protocols - "any BLE scale"
-     isn't realistically one firmware). Auto-stops the shot at a target
-     weight; pairs naturally with Phase 2's shot timing once both exist.
+
+### Competitive research (2026-08-16)
+
+Before committing further to the phased plan below, researched two mature
+open-source projects solving the same problem — **Gaggiuino**
+([github.com/Zer0-bit/gaggiuino](https://github.com/Zer0-bit/gaggiuino),
+2,600+ stars) and **GaggiMate**
+([github.com/jniebuhr/gaggimate](https://github.com/jniebuhr/gaggimate),
+~900 stars) — plus the actual coffee-science parameters behind espresso/
+cappuccino extraction (SCA guidelines, Barista Hustle, etc.). Findings that
+change/confirm the plan:
+
+- **Both use a pressure transducer at the pump outlet, 0-1.2 to 1.6MPa
+  range** (12-16 bar) — concrete spec confirmation for Phase 1 below.
+- **Neither uses a dedicated flow sensor** — flow is estimated from pressure
+  + pump behavior, not physically metered. Simplifies Phase 2 - no separate
+  flow meter to source.
+- **Both structure pressure/flow profiles as ordered phases** (pump power/
+  pressure/flow target + time/volume/pressure stop conditions per phase),
+  editable on the **web UI, not the on-device touchscreen** - independently
+  validates the exact call already made for the Nextion display (deep
+  config stays on phone/web, screen is for live status + basic control).
+- **GaggiMate's software autotune is reported buggy** (e.g. returning
+  `0,0,0,0`, GitHub #672). Worth noting: **our own hand-built relay-feedback
+  autotune worked cleanly on the first real-hardware run** (Section 10,
+  2026-08-15) - a genuine point of confidence in this project's approach.
+- **GaggiMate's confirmed BLE scale list** includes Bookoo, Felicita, Acaia,
+  Decent, and others - reconfirms Bookoo/Felicita as the DIY-friendliest
+  choices already favored in Phase 3 below.
+- **Both use a K-type thermocouple, not PT100** - this project intentionally
+  stays on PT100 (already working, more stable at espresso temps); not a
+  reason to switch, just noting the divergence.
+- **Coffee science take**: 9 bar is a historical convention, not a physical
+  optimum - real "pressure profiling" is about **pre-infusion** (a gentle
+  low-pressure soak before ramping up, reduces channeling) and sometimes a
+  **declining pressure curve** near the end of a shot, not "hold flat at 9
+  bar." This is exactly why Phase 2 below is phase-based, not a single fixed
+  target. Brew-by-weight is also confirmed as more repeatable than
+  brew-by-time (weight is the actual outcome; time is a proxy confounded by
+  grind/dose/tamp) - reinforces Phase 3's priority.
+- **A genuine gap in both competitors**: neither addresses **milk
+  temperature for steaming/cappuccino** at all - they focus entirely on
+  brew pressure/flow. Real dairy science says ideal steaming range is
+  ~55-65°C with ~70°C as a hard scald/foam-collapse ceiling. Added as a new
+  near-term item below since it's cheap, low-complexity, and a real
+  differentiator.
+
+### Phased future roadmap, sequenced by risk/dependency
+
+#### Can be done now — pure software, zero new hardware
+1. **Shot timer** - elapsed time display during Brew mode (target window is
+   ~25-30s per shot, per SCA-referenced extraction guidelines).
+2. **Shot history log** - duration + peak temp per shot now; extends
+   naturally once pressure/weight data exist later. Both competitors treat
+   this as core.
+3. **Descale / maintenance reminder** - shot count or days-since-reset,
+   surfaced in the Web UI (matches Gaggiuino's "Service Log").
+
+#### Needs new hardware, but cheap + low-voltage (no mains wiring)
+
+4. **Milk temperature probe for cappuccino/steaming.**
+   **Hardware:** one waterproof **DS18B20** digital temp probe (~$2-3),
+   one free GPIO (OneWire protocol, needs a 4.7kΩ pull-up resistor). Dipped
+   into the milk pitcher during steaming.
+   **Why:** neither competitor addresses milk temperature at all - real
+   dairy science says the sweet spot is ~55-65°C with ~70°C as a hard
+   scald/foam-collapse ceiling. Cheapest, simplest hardware item on this
+   whole list, and a genuine differentiator.
+
+5. **Water tank level sensor.**
+   **Hardware:** one magnetic float switch (~$2-5), one free GPIO (digital
+   input, internal pull-up).
+   **Why:** low-water warning now; becomes a real pump interlock once the
+   pump dimmer (item 9) exists.
+
+6. **Real-time pressure transducer + live pressure graph.**
+   **Hardware:** one analog pressure transducer, **0-1.2 to 1.6MPa
+   (12-16 bar) range** (confirmed spec - matches both competitor projects),
+   plumbed at the **pump outlet** via a T-fitting (a real plumbing job, not
+   just wiring) - roughly $15-30 for the sensor itself. Wired to an **ADC1**
+   pin specifically (ADC2 is WiFi-contaminated, same lesson as elsewhere in
+   this project).
+   **Why:** the prerequisite for any real pressure profiling in item 9, and
+   useful as a pure monitoring/graph feature even before that exists.
+
+7. **Automatic shot start/stop detection (sense-only).**
+   **Hardware:** a non-invasive AC current-transformer clamp (e.g. SCT-013,
+   ~$3-5) around the pump's own wire, read via one ADC1 pin - no mains
+   wiring touched at all, since it only senses the magnetic field around an
+   existing conductor. Detects "pump is drawing current" i.e. the physical
+   Brew switch is on.
+   **Why:** today items 1-3 (shot timer/history/descale count) start and
+   stop from a manual Web UI button, because the ESP32 has no visibility
+   into the machine's own Brew switch (left untouched by design - the panel
+   wiring couldn't be fully verified without a multimeter, see Section 7).
+   This closes that gap without any of the risk of tapping the switch's own
+   (mains-carrying) wiring directly. Sense-only - does not let the ESP32
+   control the pump, just observe it. Full active control (auto-*stop*, not
+   just auto-*detect*) needs item 9.
+
+#### Needs new hardware, wireless purchase (no wiring at all)
+
+8. **Bluetooth smart scale + brew-by-weight auto-stop.**
+   **Hardware:** buy the scale itself - **Bookoo Themis or Felicita Arc**
+   confirmed as the DIY-friendliest choice (open protocols, both appear in
+   GaggiMate's supported-scale list; Acaia/Decent use different, often
+   community-reverse-engineered protocols, so "any BLE scale" isn't
+   realistically one firmware). No new ESP32-side hardware - BLE is already
+   built into the S3.
+   **Why:** brew-by-weight is confirmed more repeatable than brew-by-time
+   (weight is the actual outcome; time is a proxy confounded by grind/dose/
+   tamp). Pairs naturally with item 1's shot timing once both exist. Reading
+   a weight is not the same as *acting* on it - actually cutting the pump at
+   a target weight still needs item 9's active pump control.
+
+#### Needs new hardware, a second real mains-voltage subsystem (serious)
+
+9. **AC phase-control pump dimmer — programmable pressure/flow profiling,
+   plus active auto-start/auto-stop.**
+   **Hardware:** a zero-cross detection + TRIAC module (e.g. RobotDyn AC
+   dimmer, ~$10-15), wired into the pump's AC line. **The same category of
+   seriousness as the original SSR/heater build** - bench-test on low
+   voltage first, verify zero-cross/firing logic thoroughly before ever
+   connecting the pump's real AC line, insulate every mains joint. No
+   dedicated flow sensor needed (see competitive research above - both
+   competitors estimate flow from pressure + pump behavior instead).
+   **Why:** enables a phase-based profile system (pump power/pressure/flow
+   target + time/volume/pressure stop conditions per phase, matching both
+   competitor projects' architecture) - real pre-infusion and
+   declining-pressure-at-shot-end, not a flat 9-bar target, per the
+   pressure-profiling research above. This is also the item that turns
+   "detect"/"read" into "act": once the ESP32 can actually drive the pump,
+   auto-stop by a configured **time** (a plain countdown, no other hardware
+   needed) or by a configured **weight** (paired with item 8's BLE scale)
+   both become real closed-loop features, not just displayed numbers - and
+   combined with item 7's sense-only detection, the whole shot (start
+   *and* stop) can run with zero manual buttons. If full profiling becomes
+   a must-have, evaluate migrating to
+   [GaggiMate](https://github.com/jniebuhr/gaggimate) outright rather than
+   rebuilding its years of profiling work from scratch.
 
 ---
 
@@ -546,6 +666,36 @@ Steam LED's function, or to make Thermostat 2 do real work again).
 ---
 
 ## 10. Change Log
+
+### 2026-08-16 — Claude Code (Sonnet 5) — Competitive research (Gaggiuino/GaggiMate) + coffee science; roadmap refined
+- **Researched two mature sibling open-source projects** (parallel background
+  agents): [Gaggiuino](https://github.com/Zer0-bit/gaggiuino) (2,600+ stars)
+  and [GaggiMate](https://github.com/jniebuhr/gaggimate) (~900 stars), plus
+  the actual coffee-science parameters behind espresso/cappuccino extraction
+  (SCA guidelines, Barista Hustle, dairy-science sources on milk texturing).
+  Full findings recorded in Section 8's new "Competitive research" subsection
+  - key takeaways: both use a 0-1.2/1.6MPa pressure transducer at the pump
+  outlet with **no dedicated flow sensor** (estimated instead), both
+  architect profiles as ordered phases edited on a **web UI** (not the
+  on-device screen - validates the Nextion design already chosen), and
+  GaggiMate's own autotune is reported buggy where **ours already worked
+  cleanly on the first real-hardware run**. Coffee science confirmed 9 bar
+  is a historical convention (not a physical optimum - real technique is
+  pre-infusion + declining pressure curves) and brew-by-weight beats
+  brew-by-time for repeatability. Found a genuine gap neither competitor
+  covers: milk temperature for steaming/cappuccino.
+- **Rewrote Section 8 (Roadmap)** around this research, reorganized
+  explicitly by hardware cost/complexity tier: pure-software items (shot
+  timer, shot history, descale reminder), cheap low-voltage sensors (milk
+  temp probe - new item, water level, pressure transducer with confirmed
+  spec), wireless-only (BLE scale - Bookoo/Felicita reconfirmed as the
+  DIY-friendly choice), and the one remaining mains-voltage subsystem (pump
+  dimmer, now explicitly phase-based per both competitors' architecture).
+- **Mirrored a condensed version into `README.md`'s Roadmap section**,
+  organized the same way (by hardware tier) for public-facing readers, with
+  a pointer back here for full sourcing/reasoning.
+- Documentation only in this entry - no firmware changes. **Not yet
+  committed/pushed to the public repo** - ask before doing so.
 
 ### 2026-08-15 — Claude Code (Sonnet 5) — Project renamed to GaggiaBrewMasterESP; LICENSE added; README rewritten
 - **Renamed the project from the working name "Gaggia PID" to
