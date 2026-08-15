@@ -124,9 +124,13 @@ void wakeFromSleep() {
 // PID Autotune (relay feedback / Astrom-Hagglund method)
 // ----------------------------------------------------------------------------
 // While RUNNING, this OWNS `Output` directly (PID is in MANUAL) - toggles it
-// between a fixed high/low around the target profile's setpoint, measures
-// the resulting oscillation period + amplitude, and derives Kp/Ki/Kd via
-// classic Ziegler-Nichols relay-tuning formulas. The existing safety-ceiling
+// between a fixed high/low around the target profile's setpoint, discards
+// the initial non-oscillating warm-up cycle, then keeps measuring full
+// cycles into a small trailing window until that window's amplitudes agree
+// with each other (convergence) or a hard cycle cap is hit - see config.h
+// for the full reasoning and finishAutotune()/autotuneHasConverged() below
+// for the implementation. Derives Kp/Ki/Kd from the converged window via the
+// "no overshoot" Ziegler-Nichols relay formula. The existing safety-ceiling
 // force-off check in loop() (activeMaxSafety / sensor fault) still applies
 // unconditionally underneath this - autotune adds its own abort checks on
 // top rather than replacing that layer.
@@ -140,9 +144,25 @@ static bool autotuneRelayHigh = false;
 static double autotuneMinTemp = 0, autotuneMaxTemp = 0;
 static unsigned long autotuneLastSwitchTime = 0;
 static unsigned long autotuneStartTime = 0;
+// The first HIGH->LOW transition spans the initial climb from whatever
+// temperature autotune was started at up to the target, not a real
+// oscillation - its "amplitude" is just (target - starting temp)/2, unrelated
+// to the boiler's actual relay-feedback dynamics. Discarding it prevents that
+// arbitrary starting-temperature-dependent value from skewing the Ku/Pu
+// average (confirmed on real hardware: Ku varied 58.86 vs 208.31 between two
+// runs started at different temperatures, 2026-08-16).
+static bool autotuneWarmupDiscarded = false;
+
+// Trailing ring buffer of the last AUTOTUNE_CONVERGE_CYCLES good cycles -
+// see config.h for why convergence, not a fixed count, decides when enough
+// data has been gathered. autotuneCycleCount counts every good cycle ever
+// seen (used only to gate "have we got at least a full window yet" and "have
+// we hit the hard cap"); the buffers themselves always hold just the most
+// recent window, oldest overwritten first.
+static double autotuneRecentAmplitudes[AUTOTUNE_CONVERGE_CYCLES];
+static double autotuneRecentPeriodsMs[AUTOTUNE_CONVERGE_CYCLES];
+static int autotuneRecentIndex = 0;
 static int autotuneCycleCount = 0;
-static double autotunePeriodSumMs = 0;
-static double autotuneAmplitudeSum = 0;
 
 void startAutotune(OpMode forMode) {
   if (autotuneState == AutotuneState::RUNNING) return;
@@ -158,8 +178,8 @@ void startAutotune(OpMode forMode) {
   autotuneMinTemp = currentTemperature;
   autotuneMaxTemp = currentTemperature;
   autotuneCycleCount = 0;
-  autotunePeriodSumMs = 0;
-  autotuneAmplitudeSum = 0;
+  autotuneRecentIndex = 0;
+  autotuneWarmupDiscarded = false;
   autotuneLastSwitchTime = millis();
   autotuneStartTime = millis();
   autotuneState = AutotuneState::RUNNING;
@@ -185,6 +205,98 @@ static void abortAutotune(const char *reason) {
 void stopAutotune() {
   if (autotuneState != AutotuneState::RUNNING) return;
   abortAutotune("stopped by user");
+}
+
+// True once the last AUTOTUNE_CONVERGE_CYCLES measured amplitudes agree with
+// each other within AUTOTUNE_CONVERGE_TOLERANCE of their mean - i.e. the
+// relay-induced oscillation has settled into a genuine, repeatable limit
+// cycle rather than still drifting toward one. Checked on amplitude
+// specifically, not period: Ku = 4d/(pi*amplitude) is inversely proportional
+// to amplitude, so amplitude drift is exactly what previously let Ku swing
+// 3.5x between runs (2026-08-16) - period is comparatively stable and adds
+// little extra signal here.
+static bool autotuneHasConverged() {
+  double sum = 0;
+  double minV = autotuneRecentAmplitudes[0];
+  double maxV = autotuneRecentAmplitudes[0];
+  for (int i = 0; i < AUTOTUNE_CONVERGE_CYCLES; i++) {
+    double v = autotuneRecentAmplitudes[i];
+    sum += v;
+    if (v < minV) minV = v;
+    if (v > maxV) maxV = v;
+  }
+  double mean = sum / AUTOTUNE_CONVERGE_CYCLES;
+  if (mean <= 0.0) return false; // degenerate reading, not real convergence
+  return (maxV - minV) / mean <= AUTOTUNE_CONVERGE_TOLERANCE;
+}
+
+// Averages the trailing window into Ku/Pu, derives Kp/Ki/Kd via the "no
+// overshoot" Ziegler-Nichols relay formula, applies + persists them to
+// whichever profile (brew/steam) was under test, and resumes normal control.
+// `converged` distinguishes a clean finish from one forced by hitting
+// AUTOTUNE_MAX_CYCLES without ever settling within tolerance - surfaced in
+// the result message so a forced-but-noisy result isn't mistaken for a
+// fully-settled one.
+static void finishAutotune(bool converged) {
+  double amplitudeSum = 0, periodSum = 0;
+  for (int i = 0; i < AUTOTUNE_CONVERGE_CYCLES; i++) {
+    amplitudeSum += autotuneRecentAmplitudes[i];
+    periodSum += autotuneRecentPeriodsMs[i];
+  }
+  double avgAmplitude = amplitudeSum / AUTOTUNE_CONVERGE_CYCLES;
+  double avgPeriodMs = periodSum / AUTOTUNE_CONVERGE_CYCLES;
+
+  if (avgAmplitude < 0.1) {
+    abortAutotune("oscillation too small to measure - target too close to ambient?");
+    return;
+  }
+
+  double Pu = avgPeriodMs / 1000.0;                            // ultimate period, seconds
+  double d = (AUTOTUNE_RELAY_HIGH - AUTOTUNE_RELAY_LOW) / 2.0;  // relay half-amplitude
+  double Ku = (4.0 * d) / (PI * avgAmplitude);                  // ultimate gain
+
+  // "No overshoot" Ziegler-Nichols relay-tuning variant (Kp=0.2Ku, Ti=Pu/2,
+  // Td=Pu/3) - see config.h for why this replaced the classic formula.
+  // Kp/Ki/Kd here are in the same per-second units SetTunings() already
+  // expects (PID_v1 rescales internally by its own sample time) - matches
+  // how the Web UI's manual tuning fields have worked all along.
+  double newKp = 0.2 * Ku;
+  double newKi = 0.4 * Ku / Pu;
+  double newKd = Ku * Pu / 15.0; // 0.2*Ku * Pu/3
+
+  if (autotuneForMode == OpMode::BREW) {
+    brewKp = newKp;
+    brewKi = newKi;
+    brewKd = newKd;
+  } else {
+    steamKp = newKp;
+    steamKi = newKi;
+    steamKd = newKd;
+  }
+  Preferences preferences;
+  preferences.begin("gaggia", false);
+  if (autotuneForMode == OpMode::BREW) {
+    preferences.putDouble("brew_kp", brewKp);
+    preferences.putDouble("brew_ki", brewKi);
+    preferences.putDouble("brew_kd", brewKd);
+  } else {
+    preferences.putDouble("steam_kp", steamKp);
+    preferences.putDouble("steam_ki", steamKi);
+    preferences.putDouble("steam_kd", steamKd);
+  }
+  preferences.end();
+
+  autotuneState = AutotuneState::DONE_OK;
+  char msg[112];
+  snprintf(msg, sizeof(msg),
+           "Done%s: Ku=%.2f Pu=%.1fs -> Kp=%.2f Ki=%.4f Kd=%.2f",
+           converged ? "" : " (forced, didn't fully converge)", Ku, Pu, newKp,
+           newKi, newKd);
+  autotuneMessage = msg;
+  Serial.println(String("Autotune: ") + msg);
+
+  Output = 0;
+  setOpMode(currentMode); // resume normal PID control with the new gains
 }
 
 static void runAutotuneStep(unsigned long now) {
@@ -213,10 +325,37 @@ static void runAutotuneStep(unsigned long now) {
     autotuneRelayHigh = false;
     unsigned long halfPeriod = now - autotuneLastSwitchTime;
     autotuneLastSwitchTime = now;
-    autotuneCycleCount++;
-    double amplitude = (autotuneMaxTemp - autotuneMinTemp) / 2.0;
-    autotuneAmplitudeSum += amplitude;
-    autotunePeriodSumMs += halfPeriod * 2.0; // approximate full period
+
+    if (!autotuneWarmupDiscarded) {
+      // Discard this one - see autotuneWarmupDiscarded's declaration comment.
+      autotuneWarmupDiscarded = true;
+      Serial.println("Autotune: discarding warm-up cycle (initial climb to target)");
+    } else {
+      double amplitude = (autotuneMaxTemp - autotuneMinTemp) / 2.0;
+      double periodMs = halfPeriod * 2.0; // approximate full period
+
+      autotuneRecentAmplitudes[autotuneRecentIndex] = amplitude;
+      autotuneRecentPeriodsMs[autotuneRecentIndex] = periodMs;
+      autotuneRecentIndex = (autotuneRecentIndex + 1) % AUTOTUNE_CONVERGE_CYCLES;
+      autotuneCycleCount++;
+
+      Serial.printf("Autotune: cycle %d - amplitude %.2fC, period %.1fs\n",
+                    autotuneCycleCount, amplitude, periodMs / 1000.0);
+
+      bool haveFullWindow = autotuneCycleCount >= AUTOTUNE_CONVERGE_CYCLES;
+      bool converged = haveFullWindow && autotuneHasConverged();
+      bool hitMaxCycles = autotuneCycleCount >= AUTOTUNE_MAX_CYCLES;
+
+      if (converged) {
+        finishAutotune(true);
+        return;
+      }
+      if (hitMaxCycles) {
+        Serial.println("Autotune: hit AUTOTUNE_MAX_CYCLES without converging - finishing with best available window");
+        finishAutotune(false);
+        return;
+      }
+    }
     autotuneMinTemp = currentTemperature;
     autotuneMaxTemp = currentTemperature;
   } else if (!autotuneRelayHigh &&
@@ -226,66 +365,6 @@ static void runAutotuneStep(unsigned long now) {
   }
 
   Output = autotuneRelayHigh ? AUTOTUNE_RELAY_HIGH : AUTOTUNE_RELAY_LOW;
-
-  if (autotuneCycleCount >= AUTOTUNE_MIN_CYCLES) {
-    double avgPeriodMs = autotunePeriodSumMs / autotuneCycleCount;
-    double avgAmplitude = autotuneAmplitudeSum / autotuneCycleCount;
-    if (avgAmplitude < 0.1) {
-      abortAutotune("oscillation too small to measure - target too close to ambient?");
-      return;
-    }
-
-    double Pu = avgPeriodMs / 1000.0; // ultimate period, seconds
-    double d = (AUTOTUNE_RELAY_HIGH - AUTOTUNE_RELAY_LOW) / 2.0; // relay half-amplitude
-    double Ku = (4.0 * d) / (PI * avgAmplitude);                 // ultimate gain
-
-    // Ziegler-Nichols relay-tuning, "no overshoot" variant (Kp=0.2Ku,
-    // Ti=Pu/2, Td=Pu/3) rather than the classic formula (Kp=0.6Ku, Ti=Pu/2,
-    // Td=Pu/8). Classic ZN targets ~25% overshoot by design (quarter-decay
-    // damping) - confirmed on real hardware to overshoot the brew target by
-    // several degrees, once even past BREW_MAX_SAFETY (106.3C against a
-    // 105C ceiling, 2026-08-16). This variant uses the same measured Ku/Pu,
-    // just less aggressive Kp/Ki - still a genuine autotune result, not a
-    // manual guess. Kp/Ki/Kd here are in the same per-second units
-    // SetTunings() already expects (PID_v1 rescales internally by its own
-    // sample time) - matches how the Web UI's manual tuning fields have
-    // worked all along.
-    double newKp = 0.2 * Ku;
-    double newKi = 0.4 * Ku / Pu;
-    double newKd = Ku * Pu / 15.0; // 0.2*Ku * Pu/3
-
-    if (autotuneForMode == OpMode::BREW) {
-      brewKp = newKp;
-      brewKi = newKi;
-      brewKd = newKd;
-    } else {
-      steamKp = newKp;
-      steamKi = newKi;
-      steamKd = newKd;
-    }
-    Preferences preferences;
-    preferences.begin("gaggia", false);
-    if (autotuneForMode == OpMode::BREW) {
-      preferences.putDouble("brew_kp", brewKp);
-      preferences.putDouble("brew_ki", brewKi);
-      preferences.putDouble("brew_kd", brewKd);
-    } else {
-      preferences.putDouble("steam_kp", steamKp);
-      preferences.putDouble("steam_ki", steamKi);
-      preferences.putDouble("steam_kd", steamKd);
-    }
-    preferences.end();
-
-    autotuneState = AutotuneState::DONE_OK;
-    char msg[96];
-    snprintf(msg, sizeof(msg), "Done: Ku=%.2f Pu=%.1fs -> Kp=%.2f Ki=%.4f Kd=%.2f",
-             Ku, Pu, newKp, newKi, newKd);
-    autotuneMessage = msg;
-    Serial.println(String("Autotune: ") + msg);
-
-    Output = 0;
-    setOpMode(currentMode); // resume normal PID control with the new gains
-  }
 }
 
 // ============================================================================
