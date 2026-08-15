@@ -21,6 +21,7 @@ extern int tempHistoryCount;
 
 extern OpMode currentMode;
 extern double brewSetpoint, brewKp, brewKi, brewKd;
+extern double brewActiveKp, brewActiveKi, brewActiveKd;
 extern double steamSetpoint, steamKp, steamKi, steamKd;
 extern double steamMaxSafety;
 extern void setOpMode(OpMode mode);
@@ -49,16 +50,32 @@ extern void markDescaled();
 
 WebServer server(80);
 
-// ... (index_html skip) ...
-
-// ... (setupWeb start skip) ...
-
+// ============================================================================
+// Web dashboard (self-contained: no external assets, no CDN, no build step -
+// this string IS the shipped frontend, served straight from flash). Design
+// system: dark-mode-only, coffee/steel palette as CSS custom properties
+// ("tokens") at the top of <style>, so future features (pressure graph, water
+// level, scale weight - see AGENTS.md roadmap) can reuse the same --steam/
+// --green/--red/--amber semantics and .stat-tile/.chart-card components
+// instead of inventing new colors/components per feature.
+//
+// Layout: mobile-first single page, no reload. The "Now" view (default,
+// deep-linkable via #now/#tune/#history/#settings) carries only what needs to
+// be legible at a glance from across the kitchen - temperature, mode, shot
+// timer - everything else (PID tuning, network, MQTT, shot log, descale) is
+// tucked behind the bottom tab bar. All four views share one /status poll
+// and one <script> - switching tabs is just toggling `hidden`, no re-fetch.
+//
+// API contract is unchanged from the previous UI: same /update query params,
+// same /status and /shots JSON field names - this is a frontend-only
+// replacement, no firmware logic touched.
+// ============================================================================
 const char *index_html = R"rawliteral(
 <!DOCTYPE HTML><html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#161311">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0e0b09">
   <link rel="manifest" href="/manifest.json">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/icon.svg">
@@ -68,20 +85,34 @@ const char *index_html = R"rawliteral(
   <title>GaggiaBrewMasterESP</title>
   <style>
     :root {
-      --bg: #161311;
-      --bg-grad: radial-gradient(1200px 600px at 50% -10%, #2a211b 0%, #161311 55%);
-      --card: #211c18;
-      --card-2: #2a231e;
-      --line: #3a312a;
-      --text: #f2ece6;
-      --muted: #a99f95;
-      --accent: #d98c3f;
-      --accent-2: #b9702c;
-      --green: #4caf7d;
+      --bg: #0e0b09;
+      --bg-grad: radial-gradient(1400px 700px at 50% -14%, #241a13 0%, #0e0b09 55%);
+      --surface: #1a1512;
+      --surface-2: #221b16;
+      --border: #392e26;
+      --border-soft: #2a221c;
+      --text: #f6efe6;
+      --text-dim: #b3a294;
+      --text-faint: #7d7166;
+
+      --copper: #d98c3f;
+      --copper-deep: #b06a2c;
+      --copper-light: #f2b46f;
+      --steam: #4fa3d8;
+      --green: #48b583;
       --red: #e5544b;
-      --steam: #4a9fd8;
-      --shadow: 0 10px 30px rgba(0,0,0,.45);
-      --radius: 16px;
+      --amber: #e0a13a;
+
+      --radius-sm: 10px;
+      --radius-md: 16px;
+      --radius-lg: 22px;
+      --radius-full: 999px;
+
+      --shadow-sm: 0 2px 10px rgba(0,0,0,.35);
+      --shadow-md: 0 10px 28px rgba(0,0,0,.45);
+
+      --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px;
+      --ease: cubic-bezier(.22,.7,.32,1);
     }
     * { box-sizing: border-box; }
     html, body { margin: 0; }
@@ -91,233 +122,283 @@ const char *index_html = R"rawliteral(
       color: var(--text);
       min-height: 100vh;
       -webkit-font-smoothing: antialiased;
-      padding: 24px 16px 48px;
     }
-    .wrap { max-width: 720px; margin: 0 auto; }
-    header {
-      display: flex; align-items: center; justify-content: space-between;
-      gap: 12px; margin-bottom: 22px;
-    }
-    .brand { display: flex; align-items: center; gap: 12px; }
-    .logo {
-      width: 40px; height: 40px; border-radius: 12px; flex: none;
-      background: linear-gradient(135deg, var(--accent), var(--accent-2));
-      display: grid; place-items: center; font-size: 22px;
-      box-shadow: var(--shadow);
-    }
-    h1 { font-size: 20px; margin: 0; letter-spacing: .2px; }
-    .brand small { display: block; color: var(--muted); font-size: 12px; font-weight: 500; }
-    .pill {
-      display: inline-flex; align-items: center; gap: 8px;
-      padding: 8px 14px; border-radius: 999px; font-size: 13px; font-weight: 600;
-      background: var(--card); border: 1px solid var(--line);
-    }
-    .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
-    .pill.brew .dot { background: var(--green); box-shadow: 0 0 0 4px rgba(76,175,125,.18); }
-    .pill.steam .dot { background: var(--steam); box-shadow: 0 0 0 4px rgba(74,159,216,.18); }
-    .pill.off .dot { background: var(--red); box-shadow: 0 0 0 4px rgba(229,84,75,.18); }
+    .app { max-width: 720px; margin: 0 auto; padding: var(--sp-5) var(--sp-4) calc(96px + env(safe-area-inset-bottom)); }
 
-    .grid { display: grid; gap: 16px; }
-    @media (min-width: 640px) { .cols-2 { grid-template-columns: 1fr 1fr; } }
+    .topbar {
+      position: sticky; top: 0; z-index: 20;
+      display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3);
+      margin: calc(var(--sp-5) * -1) calc(var(--sp-4) * -1) var(--sp-4);
+      padding: var(--sp-5) var(--sp-4) var(--sp-4);
+      background: linear-gradient(180deg, rgba(14,11,9,.97), rgba(14,11,9,.85) 70%, rgba(14,11,9,0));
+      backdrop-filter: blur(8px);
+    }
+    .brand { display: flex; align-items: center; gap: var(--sp-3); }
+    .logo {
+      width: 42px; height: 42px; border-radius: var(--radius-md); flex: none;
+      background: linear-gradient(135deg, var(--copper-light), var(--copper-deep));
+      display: grid; place-items: center; font-size: 22px; box-shadow: var(--shadow-sm);
+    }
+    .brand-text h1 { font-size: 17px; margin: 0; letter-spacing: .2px; }
+    .brand-text small { display: block; color: var(--text-dim); font-size: 11.5px; font-weight: 500; }
+    .brand-status { text-align: right; }
+
+    .pill {
+      display: inline-flex; align-items: center; gap: var(--sp-2);
+      padding: 7px 13px; border-radius: var(--radius-full); font-size: 12.5px; font-weight: 700;
+      background: var(--surface); border: 1px solid var(--border);
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); }
+    .pill.brew .dot { background: var(--green); box-shadow: 0 0 0 4px rgba(72,181,131,.18); animation: pulse-dot 2s var(--ease) infinite; }
+    .pill.steam .dot { background: var(--steam); box-shadow: 0 0 0 4px rgba(79,163,216,.18); animation: pulse-dot 2s var(--ease) infinite; }
+    .pill.fault { border-color: rgba(229,84,75,.5); }
+    .pill.fault .dot { background: var(--red); box-shadow: 0 0 0 4px rgba(229,84,75,.2); animation: pulse-dot 1.1s var(--ease) infinite; }
+    @keyframes pulse-dot { 0%,100% { opacity: 1 } 50% { opacity: .45 } }
+    .last-updated { font-size: 10.5px; color: var(--text-dim); margin-top: 5px; }
+
+    .alerts { display: flex; flex-direction: column; gap: var(--sp-2); margin-bottom: var(--sp-4); }
+    .banner {
+      display: none; align-items: center; justify-content: space-between; gap: var(--sp-3);
+      padding: 11px 15px; border-radius: var(--radius-md); font-size: 13px; font-weight: 700;
+    }
+    .banner-error { background: rgba(229,84,75,.14); border: 1px solid rgba(229,84,75,.4); color: #f3c6c2; }
+    .banner-info { background: rgba(79,163,216,.14); border: 1px solid rgba(79,163,216,.4); color: #cfe8f7; }
+    .banner-warn { background: rgba(224,161,58,.14); border: 1px solid rgba(224,161,58,.4); color: #f3dcc2; }
+    .btn-chip {
+      border: 1px solid var(--steam); background: var(--steam); color: #071824;
+      padding: 6px 13px; border-radius: var(--radius-sm); font-size: 12px; font-weight: 700; cursor: pointer; flex: none;
+    }
 
     .card {
-      background: linear-gradient(180deg, var(--card-2), var(--card));
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
-      padding: 20px;
-    }
-    .card h2 {
-      margin: 0 0 16px; font-size: 13px; text-transform: uppercase;
-      letter-spacing: 1.4px; color: var(--muted); font-weight: 700;
+      background: linear-gradient(180deg, var(--surface-2), var(--surface));
+      border: 1px solid var(--border-soft); border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-md); padding: var(--sp-5); margin-bottom: var(--sp-4);
     }
 
-    .temp-hero { text-align: center; padding: 8px 0 4px; }
-    .temp-value { font-size: 64px; font-weight: 700; line-height: 1; letter-spacing: -1px; }
-    .temp-value .unit { font-size: 24px; color: var(--muted); font-weight: 600; margin-left: 4px; }
-    .temp-sub { color: var(--muted); margin-top: 8px; font-size: 14px; }
-    .temp-sub b { color: var(--text); }
+    .hero-card { text-align: center; }
+    .gauge-wrap { position: relative; width: clamp(210px, 62vw, 280px); height: clamp(210px, 62vw, 280px); margin: 0 auto var(--sp-3); }
+    .gauge { width: 100%; height: 100%; transform: rotate(-90deg); }
+    .gauge-track { fill: none; stroke: var(--border); stroke-width: 14; }
+    .gauge-fill { fill: none; stroke: var(--text-faint); stroke-width: 14; stroke-linecap: round; transition: stroke-dashoffset .6s var(--ease), stroke .4s ease; }
+    /* Ring color is a functional signal, not decoration: blue while still
+       climbing to target, green once at/near it (readable without parsing
+       the number - also covers a shot's temperature sag, which is just
+       "below target" again), red once over. */
+    .gauge-fill.heating { stroke: var(--steam); filter: drop-shadow(0 0 10px rgba(79,163,216,.55)); }
+    .gauge-fill.ready { stroke: var(--green); filter: drop-shadow(0 0 10px rgba(72,181,131,.55)); }
+    .gauge-fill.over { stroke: var(--red); filter: drop-shadow(0 0 10px rgba(229,84,75,.55)); }
+    /* The number is the ONLY thing centered against this box, which exactly
+       covers the ring (inset: 0 on .gauge-wrap) - so its flex centering
+       lands on the ring's true geometric midpoint regardless of viewport
+       size. The "Target XX C" caption used to live inside this same box,
+       stacked under the number - that made flex/grid center the *pair* as a
+       group instead of the number alone, which visibly dragged the number
+       upward off the ring's actual center. It now lives outside, below the
+       ring, in normal document flow (see .gauge-target). */
+    .gauge-center { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+    .gauge-value { display: flex; align-items: baseline; justify-content: center; font-size: clamp(3.4rem, 14vw, 5.2rem); font-weight: 800; line-height: 1; letter-spacing: -2px; font-variant-numeric: tabular-nums; }
+    .gauge-unit { font-size: clamp(1.1rem, 4vw, 1.4rem); color: var(--text-dim); font-weight: 600; margin-left: 3px; }
+    .gauge-target { color: var(--text-dim); margin: 0 0 var(--sp-4); font-size: 14px; }
+    .gauge-target b { color: var(--text); }
 
-    .bar { height: 10px; border-radius: 999px; background: #17130f; border: 1px solid var(--line); overflow: hidden; margin-top: 6px; }
-    .bar > span { display: block; height: 100%; width: 0%; border-radius: 999px; transition: width .5s ease; }
-    .bar.heat > span { background: linear-gradient(90deg, var(--accent-2), var(--accent)); }
-    .metric-row { display: flex; align-items: center; justify-content: space-between; margin: 18px 0 6px; font-size: 14px; color: var(--muted); }
-    .metric-row b { color: var(--text); font-size: 15px; }
-
-    .controls { display: flex; gap: 12px; margin-top: 20px; }
-    .btn {
-      flex: 1; border: 1px solid var(--line); color: var(--text); background: var(--card);
-      padding: 14px 16px; border-radius: 12px; font-size: 15px; font-weight: 700;
-      cursor: pointer; transition: transform .05s ease, background .15s ease, border-color .15s ease;
+    .mode-switch { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--sp-3); margin: var(--sp-4) 0; }
+    .mode-btn {
+      border: 1px solid var(--border); color: var(--text); background: var(--surface);
+      padding: 15px 10px; border-radius: var(--radius-md); font-size: 15px; font-weight: 700;
+      cursor: pointer; min-height: 52px;
+      transition: transform .05s ease, background .15s ease, border-color .15s ease, color .15s ease;
     }
-    .btn:active { transform: translateY(1px); }
-    .btn-on { background: rgba(76,175,125,.14); border-color: rgba(76,175,125,.4); color: #cdeede; }
-    .btn-on.active { background: var(--green); border-color: var(--green); color: #0d1a13; }
-    .btn-off { background: rgba(229,84,75,.14); border-color: rgba(229,84,75,.4); color: #f3c6c2; }
-    .btn-off.active { background: var(--red); border-color: var(--red); color: #1a0d0c; }
-    .btn-steam { background: rgba(74,159,216,.14); border-color: rgba(74,159,216,.4); color: #cfe8f7; }
-    .btn-steam.active { background: var(--steam); border-color: var(--steam); color: #071824; }
+    .mode-btn:active { transform: translateY(1px); }
+    .mode-off.active { background: var(--red); border-color: var(--red); color: #1a0d0c; }
+    .mode-brew.active { background: var(--green); border-color: var(--green); color: #0d1a13; }
+    .mode-steam.active { background: var(--steam); border-color: var(--steam); color: #071824; }
 
-    .section-label { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
-    .divider { border: none; border-top: 1px solid var(--line); margin: 22px 0; }
+    /* Generic small-metric tile - reused today for Heater Output; the same
+       component is meant for future roadmap readouts (pump pressure, water
+       level, scale weight) without any layout changes - just add another
+       .stat-tile and the auto-fit grid reflows. */
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--sp-3); margin-top: var(--sp-4); text-align: left; }
+    .stat-tile { background: var(--surface); border: 1px solid var(--border-soft); border-radius: var(--radius-md); padding: 13px 14px; }
+    .stat-label { display: block; font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .6px; font-weight: 700; margin-bottom: 6px; }
+    .stat-value { font-size: 21px; font-weight: 800; font-variant-numeric: tabular-nums; }
+    .stat-value small { font-size: 13px; color: var(--text-dim); font-weight: 600; margin-left: 2px; }
 
-    .sleep-banner {
-      display: none; align-items: center; justify-content: space-between; gap: 10px;
-      background: rgba(74,159,216,.14); border: 1px solid rgba(74,159,216,.4);
-      color: #cfe8f7; padding: 10px 14px; border-radius: 12px;
-      font-size: 13px; font-weight: 700; margin-bottom: 14px;
-    }
-    .btn-wake {
-      border: 1px solid var(--steam); background: var(--steam); color: #071824;
-      padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 700; cursor: pointer;
-    }
+    .bar { height: 9px; border-radius: var(--radius-full); background: #100d0b; border: 1px solid var(--border-soft); overflow: hidden; margin-top: 9px; }
+    .bar > span { display: block; height: 100%; width: 0%; border-radius: var(--radius-full); transition: width .5s ease; }
+    .bar.heat > span { background: linear-gradient(90deg, var(--copper-deep), var(--copper)); }
 
-    .shot-row {
-      margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line);
-      display: flex; align-items: center; justify-content: space-between; gap: 14px;
-    }
-    .shot-time { font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--muted); transition: color .2s ease; }
+    /* Generic chart card - reused today for the temp sparkline; a future
+       pressure graph (roadmap item 7) is meant to drop in as a second
+       .chart-card with its own canvas id, same label/legend pattern. */
+    .chart-card { margin-top: var(--sp-4); text-align: left; }
+    .chart-card canvas { width: 100%; height: 60px; display: block; }
+    .chart-label { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-dim); margin-bottom: 6px; }
+
+    .shot-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); }
+    .shot-time { font-size: clamp(2.6rem, 13vw, 4rem); font-weight: 800; font-variant-numeric: tabular-nums; color: var(--text-dim); line-height: 1; transition: color .2s ease; }
     .shot-time.in-window { color: var(--green); }
     .shot-time.over { color: var(--red); }
-    .shot-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .shot-sub { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
     .btn-shot {
-      border: none; cursor: pointer; padding: 13px 20px; border-radius: 12px;
-      font-size: 14px; font-weight: 700; color: #cdeede;
-      background: rgba(76,175,125,.14); border: 1px solid rgba(76,175,125,.4);
+      border: 1px solid rgba(72,181,131,.4); cursor: pointer; padding: 15px 22px; border-radius: var(--radius-md);
+      font-size: 14px; font-weight: 700; color: #cdeede; background: rgba(72,181,131,.14); flex: none;
       transition: transform .05s ease, background .15s ease;
     }
     .btn-shot:active { transform: translateY(1px); }
     .btn-shot.running { background: var(--red); border-color: var(--red); color: #1a0d0c; }
+    .shot-progress { height: 7px; border-radius: var(--radius-full); background: #100d0b; border: 1px solid var(--border-soft); overflow: hidden; margin-top: var(--sp-4); }
+    .shot-progress > span { display: block; height: 100%; width: 0%; border-radius: var(--radius-full); background: var(--text-faint); transition: width .4s linear, background .3s ease; }
+    .shot-progress > span.in-window { background: var(--green); }
+    .shot-progress > span.over { background: var(--red); }
 
-    table.history { width: 100%; border-collapse: collapse; font-size: 13px; }
-    table.history th, table.history td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
-    table.history th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
-    table.history td.num { text-align: right; font-variant-numeric: tabular-nums; }
-    .empty-hint { color: var(--muted); font-size: 13px; padding: 6px 0; }
-
-    .descale-banner {
-      display: none; align-items: center; gap: 8px;
-      background: rgba(217,140,63,.14); border: 1px solid rgba(217,140,63,.4);
-      color: #f3dcc2; padding: 10px 14px; border-radius: 12px;
-      font-size: 13px; font-weight: 700; margin-bottom: 14px;
-    }
-    .btn-descaled {
-      width: 100%; border: none; cursor: pointer; margin-top: 12px;
-      padding: 12px; border-radius: 12px; font-size: 14px; font-weight: 700; color: #1a1206;
-      background: linear-gradient(135deg, var(--accent), var(--accent-2));
-    }
-
-    .autotune-row { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line); }
     .btn-autotune {
-      width: 100%; border: none; cursor: pointer;
-      display: flex; align-items: center; justify-content: center; gap: 8px;
-      padding: 13px 16px; border-radius: 12px; font-size: 14px; font-weight: 700; color: #1a1206;
-      background: linear-gradient(135deg, var(--accent), var(--accent-2));
-      box-shadow: 0 6px 18px rgba(217,140,63,.25);
-      transition: transform .05s ease, opacity .15s ease;
+      width: 100%; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: var(--sp-2);
+      padding: 15px 16px; border-radius: var(--radius-md); font-size: 14.5px; font-weight: 700; color: #1a1206;
+      background: linear-gradient(135deg, var(--copper-light), var(--copper-deep));
+      box-shadow: 0 6px 18px rgba(217,140,63,.28); transition: transform .05s ease, opacity .15s ease;
     }
     .btn-autotune:active:not(:disabled) { transform: translateY(1px); }
-    .btn-autotune:disabled { opacity: 0.45; cursor: default; box-shadow: none; }
-    .btn-autotune.running { background: var(--red); color: #1a0d0c; box-shadow: 0 6px 18px rgba(229,84,75,.3); }
-    .autotune-status { display: block; margin-top: 10px; font-size: 12px; color: var(--muted); text-align: center; }
+    .btn-autotune:disabled { opacity: .4; cursor: default; box-shadow: none; }
+    .btn-autotune.running { background: var(--red); color: #1a0d0c; box-shadow: 0 6px 18px rgba(229,84,75,.32); }
+    .autotune-status { display: block; margin-top: var(--sp-3); font-size: 12.5px; color: var(--text-dim); text-align: center; }
 
-    label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; font-weight: 600; }
-    .field { margin-bottom: 14px; }
+    .tab-section-title { font-size: 12px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: var(--sp-3); }
+    .tab-section-title.mt { margin-top: var(--sp-5); }
+    .hint { font-size: 12px; color: var(--text-dim); margin: 0 0 var(--sp-3); line-height: 1.5; }
+    .hint-link { display: inline-block; margin-top: var(--sp-3); font-size: 13px; color: var(--copper); text-decoration: none; font-weight: 600; }
+
+    label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 6px; font-weight: 600; }
+    .field { margin-bottom: var(--sp-3); }
     input {
-      width: 100%; padding: 11px 12px; border-radius: 10px; font-size: 15px;
-      background: #17130f; border: 1px solid var(--line); color: var(--text);
+      width: 100%; padding: 12px 13px; border-radius: var(--radius-sm); font-size: 15px;
+      background: #100d0b; border: 1px solid var(--border); color: var(--text);
       outline: none; transition: border-color .15s ease, box-shadow .15s ease;
     }
-    input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(217,140,63,.18); }
-    .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .field-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+    input:focus { border-color: var(--copper); box-shadow: 0 0 0 3px rgba(217,140,63,.18); }
+    .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
+    .field-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--sp-3); }
 
-    .submit {
-      width: 100%; margin-top: 6px; border: none; cursor: pointer;
-      padding: 14px; border-radius: 12px; font-size: 15px; font-weight: 700; color: #1a1206;
-      background: linear-gradient(135deg, var(--accent), var(--accent-2));
-      box-shadow: 0 6px 18px rgba(217,140,63,.28);
-    }
+    .submit, .btn-secondary, .btn-danger { width: 100%; border: none; cursor: pointer; padding: 14px; border-radius: var(--radius-md); font-size: 14.5px; font-weight: 700; margin-top: var(--sp-1); }
+    .submit { color: #1a1206; background: linear-gradient(135deg, var(--copper-light), var(--copper-deep)); box-shadow: 0 6px 18px rgba(217,140,63,.28); }
     .submit:active { transform: translateY(1px); }
-    .hint { font-size: 12px; color: var(--muted); margin-top: 10px; text-align: center; }
+    .btn-secondary { color: var(--text); background: var(--surface); border: 1px solid var(--border); margin-top: var(--sp-4); }
+    .btn-danger { color: #1a0d0c; background: var(--red); }
 
-    footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 26px; }
-    footer a { color: var(--accent); text-decoration: none; }
+    table.history { width: 100%; border-collapse: collapse; font-size: 13px; }
+    table.history th, table.history td { text-align: left; padding: 9px 6px; border-bottom: 1px solid var(--border-soft); }
+    table.history th { color: var(--text-dim); font-weight: 600; font-size: 10.5px; text-transform: uppercase; letter-spacing: .5px; }
+    table.history td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .table-scroll { overflow-x: auto; }
+    .empty-hint { color: var(--text-dim); font-size: 13px; padding: 6px 0; }
+    .metric-row { display: flex; align-items: center; justify-content: space-between; margin: 0 0 var(--sp-3); font-size: 14px; color: var(--text-dim); }
+    .metric-row b { color: var(--text); font-size: 15px; }
 
-    .fault-banner {
-      display: none; align-items: center; gap: 8px;
-      background: rgba(229,84,75,.14); border: 1px solid rgba(229,84,75,.4);
-      color: #f3c6c2; padding: 10px 14px; border-radius: 12px;
-      font-size: 13px; font-weight: 700; margin-bottom: 14px;
+    .footer { text-align: center; color: var(--text-dim); font-size: 11.5px; margin: var(--sp-5) 0 var(--sp-3); }
+    .footer a { color: var(--copper); text-decoration: none; }
+
+    .view[hidden] { display: none; }
+
+    .tabbar {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+      display: flex; justify-content: center; gap: var(--sp-2);
+      padding: var(--sp-2) var(--sp-3) calc(var(--sp-2) + env(safe-area-inset-bottom));
+      background: linear-gradient(0deg, rgba(14,11,9,.97), rgba(14,11,9,.9) 75%, rgba(14,11,9,0));
+      backdrop-filter: blur(10px);
     }
-    .chart-wrap { margin-top: 18px; }
-    .chart-wrap canvas { width: 100%; height: 56px; display: block; }
-    .chart-label { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
-    .last-updated { font-size: 11px; color: var(--muted); margin-top: 4px; text-align: right; }
+    .tab {
+      flex: 1; max-width: 200px; display: flex; flex-direction: column; align-items: center; gap: 3px;
+      border: none; background: none; color: var(--text-faint); font-size: 10.5px; font-weight: 700;
+      padding: 8px 4px 6px; cursor: pointer; border-radius: var(--radius-md); transition: color .15s ease;
+    }
+    .tab-icon { font-size: 19px; }
+    .tab.active { color: var(--copper-light); }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <header>
+  <div class="app">
+    <header class="topbar">
       <div class="brand">
         <div class="logo">&#9749;</div>
-        <div>
-          <h1>GaggiaBrewMaster</h1>
-          <small>Smart espresso controller</small>
+        <div class="brand-text">
+          <h1>BrewMaster</h1>
+          <small>Gaggia Espresso Color</small>
         </div>
       </div>
-      <div>
+      <div class="brand-status">
         <div id="status_pill" class="pill off"><span class="dot"></span><span id="mode_status">--</span></div>
         <div id="last_updated" class="last-updated">--</div>
       </div>
     </header>
 
-    <div class="grid cols-2">
+    <div class="alerts">
+      <div id="fault_banner" class="banner banner-error">&#9888; Sensor fault &mdash; check wiring</div>
+      <div id="sleep_banner" class="banner banner-info">
+        <span>&#9866; Asleep (eco timeout) &mdash; heater off</span>
+        <button onclick="wake()" class="btn-chip">Wake Up</button>
+      </div>
+      <div id="descale_banner_top" class="banner banner-warn">&#9888; Descale recommended &mdash; see History tab</div>
+    </div>
+
+    <main class="view" data-view="now">
+      <div class="card hero-card">
+        <div class="gauge-wrap">
+          <svg class="gauge" viewBox="0 0 220 220">
+            <circle class="gauge-track" cx="110" cy="110" r="96"></circle>
+            <circle id="temp_ring_fill" class="gauge-fill" cx="110" cy="110" r="96"
+                    stroke-dasharray="603" stroke-dashoffset="603"></circle>
+          </svg>
+          <div class="gauge-center">
+            <div class="gauge-value"><span id="temp">--</span><span class="gauge-unit">&deg;C</span></div>
+          </div>
+        </div>
+        <div class="gauge-target">Target <b><span id="target">--</span>&deg;C</b></div>
+
+        <div class="mode-switch" role="group" aria-label="Mode">
+          <button onclick="setMode('off')" id="btn_off" class="mode-btn mode-off">Off</button>
+          <button onclick="setMode('brew')" id="btn_brew" class="mode-btn mode-brew">Brew</button>
+          <button onclick="setMode('steam')" id="btn_steam" class="mode-btn mode-steam">Steam</button>
+        </div>
+      </div>
+
+      <!-- Start/Stop Shot sits directly under Mode - the most-tapped control
+           during an actual pull, so it stays within reach of the top of the
+           page (temp -> mode -> shot) without scrolling past the secondary
+           output/chart telemetry below. -->
       <div class="card">
-        <h2>Boiler</h2>
-        <div id="fault_banner" class="fault-banner">&#9888; Sensor fault &mdash; check wiring</div>
-        <div id="sleep_banner" class="sleep-banner">
-          <span>&#9866; Asleep (eco timeout) &mdash; heater off</span>
-          <button onclick="wake()" class="btn-wake">Wake Up</button>
-        </div>
-        <div class="temp-hero">
-          <div class="temp-value"><span id="temp">--</span><span class="unit">&deg;C</span></div>
-          <div class="temp-sub">Target <b><span id="target">--</span> &deg;C</b></div>
-        </div>
-        <div class="bar heat"><span id="temp_bar"></span></div>
-
-        <div class="metric-row"><span>Heater output</span><b><span id="output">--</span>%</b></div>
-        <div class="bar heat"><span id="output_bar"></span></div>
-
-        <div class="chart-wrap">
-          <div class="chart-label"><span>Last 2 min</span><span>&deg;C</span></div>
-          <canvas id="temp_chart" width="300" height="56"></canvas>
-        </div>
-
-        <div class="controls">
-          <button onclick="setMode('off')" id="btn_off" class="btn btn-off">Off</button>
-          <button onclick="setMode('brew')" id="btn_brew" class="btn btn-on">Brew</button>
-          <button onclick="setMode('steam')" id="btn_steam" class="btn btn-steam">Steam</button>
-        </div>
-
-        <div class="autotune-row">
-          <button onclick="startAutotune()" id="btn_autotune" class="btn-autotune">&#9889; Start Auto-Tune</button>
-          <span id="autotune_status" class="autotune-status"></span>
-        </div>
-
-        <div class="shot-row">
+        <div class="shot-head">
           <div>
             <div id="shot_time" class="shot-time">0:00</div>
             <div class="shot-sub">Target window 25&ndash;30s</div>
           </div>
           <button onclick="toggleShot()" id="btn_shot" class="btn-shot">Start Shot</button>
         </div>
+        <div class="shot-progress"><span id="shot_progress_bar"></span></div>
       </div>
 
       <div class="card">
-        <h2>PID Tuning</h2>
+        <div class="stat-grid">
+          <div class="stat-tile">
+            <span class="stat-label">Heater Output</span>
+            <span class="stat-value"><span id="output">--</span><small>%</small></span>
+            <div class="bar heat"><span id="output_bar"></span></div>
+          </div>
+        </div>
 
-        <div class="section-label">Brew</div>
+        <div class="chart-card">
+          <div class="chart-label"><span>Temp &middot; last 2 min</span><span>&deg;C</span></div>
+          <canvas id="temp_chart" width="300" height="60"></canvas>
+        </div>
+      </div>
+
+      <div class="card">
+        <button onclick="startAutotune()" id="btn_autotune" class="btn-autotune">&#9889; Start Auto-Tune</button>
+        <span id="autotune_status" class="autotune-status"></span>
+      </div>
+    </main>
+
+    <main class="view" data-view="tune" hidden>
+      <div class="card">
+        <div class="tab-section-title">Brew</div>
         <form action="/update" method="GET">
           <div class="field">
             <label for="input_brew_target">Target temperature (&deg;C)</label>
@@ -328,12 +409,23 @@ const char *index_html = R"rawliteral(
             <div class="field"><label for="input_brew_ki">Ki</label><input type="number" step="any" name="brew_ki" id="input_brew_ki" value=""></div>
             <div class="field"><label for="input_brew_kd">Kd</label><input type="number" step="any" name="brew_kd" id="input_brew_kd" value=""></div>
           </div>
-          <input type="submit" value="Save Brew" class="submit">
+          <button type="submit" class="submit">Save Brew</button>
         </form>
 
-        <hr class="divider">
+        <div class="tab-section-title mt">Brew &mdash; active during a shot</div>
+        <p class="hint">Switches in automatically the instant a shot starts (Start Shot), reverts to the values above the instant it stops. Deliberately more aggressive &mdash; fights the temperature drop from real flow, which the gentle gains above are too slow for.</p>
+        <form action="/update" method="GET">
+          <div class="field-row-3">
+            <div class="field"><label for="input_brew_akp">Kp</label><input type="number" step="any" name="brew_akp" id="input_brew_akp" value=""></div>
+            <div class="field"><label for="input_brew_aki">Ki</label><input type="number" step="any" name="brew_aki" id="input_brew_aki" value=""></div>
+            <div class="field"><label for="input_brew_akd">Kd</label><input type="number" step="any" name="brew_akd" id="input_brew_akd" value=""></div>
+          </div>
+          <button type="submit" class="submit">Save Active-Brew Gains</button>
+        </form>
+      </div>
 
-        <div class="section-label">Steam</div>
+      <div class="card">
+        <div class="tab-section-title">Steam</div>
         <form action="/update" method="GET">
           <div class="field">
             <label for="input_steam_target">Target temperature (&deg;C)</label>
@@ -348,14 +440,60 @@ const char *index_html = R"rawliteral(
             <label for="input_steam_max_safety">Max safety ceiling (&deg;C)</label>
             <input type="number" step="1" min="100" max="150" name="steam_max_safety" id="input_steam_max_safety" value="">
           </div>
-          <input type="submit" value="Save Steam" class="submit">
+          <button type="submit" class="submit">Save Steam</button>
         </form>
       </div>
-    </div>
+    </main>
 
-    <div class="grid" style="margin-top:16px">
+    <main class="view" data-view="history" hidden>
       <div class="card">
-        <h2>MQTT / Home Assistant</h2>
+        <div class="tab-section-title">Shot History</div>
+        <div id="shot_history_empty" class="empty-hint">No shots logged yet.</div>
+        <div class="table-scroll">
+          <table class="history" id="shot_history_table" style="display:none">
+            <thead><tr><th>When</th><th>Duration</th><th>Peak &deg;C</th><th>Weight</th></tr></thead>
+            <tbody id="shot_history_body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="tab-section-title">Maintenance</div>
+        <div class="metric-row"><span>Shots since last descale</span><b><span id="descale_shots">--</span></b></div>
+        <div class="metric-row"><span>Days since last descale</span><b><span id="descale_days">--</span></b></div>
+        <form action="/update" method="GET">
+          <div class="field-row">
+            <div class="field"><label for="input_descale_shots">Shot threshold</label><input type="number" step="1" min="1" name="descale_shot_threshold" id="input_descale_shots" value=""></div>
+            <div class="field"><label for="input_descale_days">Day threshold</label><input type="number" step="1" min="1" name="descale_day_threshold" id="input_descale_days" value=""></div>
+          </div>
+          <button type="submit" class="submit">Save Thresholds</button>
+        </form>
+        <button onclick="markDescaled()" class="btn-secondary">Mark Descaled Today</button>
+      </div>
+    </main>
+
+    <main class="view" data-view="settings" hidden>
+      <div class="card">
+        <div class="tab-section-title">Power &amp; Eco</div>
+        <form action="/update" method="GET">
+          <div class="field">
+            <label for="input_eco_min">Auto-sleep after (minutes, 0 = disabled)</label>
+            <input type="number" step="1" min="0" name="eco_timeout_min" id="input_eco_min" value="">
+          </div>
+          <button type="submit" class="submit">Save</button>
+        </form>
+        <p class="hint" style="margin-top:var(--sp-3)">Heater force-OFF after this long with no Web UI activity (mode/tuning changes). Does not count passive status polling.</p>
+      </div>
+
+      <div class="card">
+        <div class="tab-section-title">Network</div>
+        <button onclick="wifiReset()" class="btn-danger">Reset WiFi Settings</button>
+        <p class="hint" style="margin-top:var(--sp-3)">Reboots into the <b>GaggiaBrewMasterESP_Setup</b> setup network so you can join a different WiFi without reflashing.</p>
+        <a href="/firmware" class="hint-link">Firmware update (OTA) &rarr;</a>
+      </div>
+
+      <div class="card">
+        <div class="tab-section-title">MQTT / Home Assistant</div>
         <form action="/update" method="GET">
           <div class="field-row">
             <div class="field"><label for="input_mqtt_server">Server</label><input type="text" name="mqtt_server" id="input_mqtt_server" placeholder="192.168.1.100"></div>
@@ -365,74 +503,52 @@ const char *index_html = R"rawliteral(
             <div class="field"><label for="input_mqtt_user">User</label><input type="text" name="mqtt_user" id="input_mqtt_user"></div>
             <div class="field"><label for="input_mqtt_pass">Password</label><input type="password" name="mqtt_pass" id="input_mqtt_pass"></div>
           </div>
-          <input type="submit" value="Save &amp; Restart" class="submit">
-          <div class="hint">Saving MQTT settings reboots the controller.</div>
+          <button type="submit" class="submit">Save &amp; Restart</button>
         </form>
+        <p class="hint" style="margin-top:var(--sp-3)">Saving MQTT settings reboots the controller.</p>
       </div>
-    </div>
+    </main>
 
-    <div class="grid cols-2" style="margin-top:16px">
-      <div class="card">
-        <h2>Power &amp; Eco</h2>
-        <form action="/update" method="GET">
-          <div class="field">
-            <label for="input_eco_min">Auto-sleep after (minutes, 0 = disabled)</label>
-            <input type="number" step="1" min="0" name="eco_timeout_min" id="input_eco_min" value="">
-          </div>
-          <input type="submit" value="Save" class="submit">
-          <div class="hint">Heater force-OFF after this long with no Web UI activity (mode/tuning changes). Does not count passive status polling.</div>
-        </form>
-      </div>
-
-      <div class="card">
-        <h2>Network</h2>
-        <button onclick="wifiReset()" class="submit" style="background:var(--red); color:#1a0d0c;">Reset WiFi Settings</button>
-        <div class="hint">Reboots into the <b>GaggiaBrewMasterESP_Setup</b> setup network so you can join a different WiFi without reflashing.</div>
-        <div class="hint"><a href="/firmware">Firmware update (OTA)</a></div>
-      </div>
-    </div>
-
-    <div class="grid cols-2" style="margin-top:16px">
-      <div class="card">
-        <h2>Shot History</h2>
-        <div id="shot_history_empty" class="empty-hint">No shots logged yet.</div>
-        <div style="overflow-x:auto">
-          <table class="history" id="shot_history_table" style="display:none">
-            <thead><tr><th>When</th><th>Duration</th><th>Peak &deg;C</th><th>Weight</th></tr></thead>
-            <tbody id="shot_history_body"></tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="card">
-        <h2>Maintenance</h2>
-        <div id="descale_banner" class="descale-banner">&#9888; Descale recommended</div>
-        <div class="metric-row"><span>Shots since last descale</span><b><span id="descale_shots">--</span></b></div>
-        <div class="metric-row"><span>Days since last descale</span><b><span id="descale_days">--</span></b></div>
-        <form action="/update" method="GET">
-          <div class="field-row">
-            <div class="field"><label for="input_descale_shots">Shot threshold</label><input type="number" step="1" min="1" name="descale_shot_threshold" id="input_descale_shots" value=""></div>
-            <div class="field"><label for="input_descale_days">Day threshold</label><input type="number" step="1" min="1" name="descale_day_threshold" id="input_descale_days" value=""></div>
-          </div>
-          <input type="submit" value="Save Thresholds" class="submit">
-        </form>
-        <button onclick="markDescaled()" class="btn-descaled">Mark Descaled Today</button>
-      </div>
-    </div>
-
-    <footer>
+    <footer class="footer">
       <a href="/firmware">Firmware update (OTA)</a> &middot; <span id="host">gaggia.local</span> &middot; build <span id="fw_build">--</span>
     </footer>
   </div>
 
+  <nav class="tabbar">
+    <button class="tab active" data-tab="now"><span class="tab-icon">&#9749;</span><span>Now</span></button>
+    <button class="tab" data-tab="tune"><span class="tab-icon">&#9881;</span><span>Tune</span></button>
+    <button class="tab" data-tab="history"><span class="tab-icon">&#8987;</span><span>History</span></button>
+    <button class="tab" data-tab="settings"><span class="tab-icon">&#9776;</span><span>Settings</span></button>
+  </nav>
+
 <script>
 function setVal(id, v) {
   var el = document.getElementById(id);
+  if (!el) return;
   if (document.activeElement.id !== id && (el.value === "" || el.dataset.synced !== "1")) {
     el.value = v; el.dataset.synced = "1";
   }
 }
 function clamp(x) { return Math.max(0, Math.min(100, x)); }
+
+// Tabs - hash-addressable (#now/#tune/#history/#settings) so a reload keeps
+// whichever view was open; all four share the single /status poll below.
+function showTab(name) {
+  var valid = ["now", "tune", "history", "settings"];
+  if (valid.indexOf(name) === -1) name = "now";
+  var views = document.querySelectorAll(".view");
+  for (var i = 0; i < views.length; i++) views[i].hidden = views[i].dataset.view !== name;
+  var tabs = document.querySelectorAll(".tab");
+  for (var j = 0; j < tabs.length; j++) tabs[j].classList.toggle("active", tabs[j].dataset.tab === name);
+  history.replaceState(null, "", "#" + name);
+}
+(function () {
+  var tabs = document.querySelectorAll(".tab");
+  for (var i = 0; i < tabs.length; i++) {
+    tabs[i].addEventListener("click", (function (t) { return function () { showTab(t.dataset.tab); }; })(tabs[i]));
+  }
+})();
+showTab(location.hash.slice(1));
 
 function drawSparkline(data) {
   var canvas = document.getElementById("temp_chart");
@@ -445,11 +561,12 @@ function drawSparkline(data) {
   ctx.beginPath();
   data.forEach(function (v, i) {
     var x = (i / (data.length - 1)) * w;
-    var y = h - ((v - min) / (max - min)) * (h - 4) - 2;
+    var y = h - ((v - min) / (max - min)) * (h - 6) - 3;
     if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   });
   ctx.strokeStyle = "#d98c3f";
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 2.5;
+  ctx.lineJoin = "round";
   ctx.stroke();
 }
 
@@ -480,8 +597,16 @@ setInterval(function () {
   }
   el.textContent = formatElapsed(ms);
   var secs = ms / 1000;
-  el.classList.toggle("in-window", shotRunning && secs >= 25 && secs <= 30);
-  el.classList.toggle("over", shotRunning && secs > 30);
+  var inWindow = shotRunning && secs >= 25 && secs <= 30;
+  var over = shotRunning && secs > 30;
+  el.classList.toggle("in-window", inWindow);
+  el.classList.toggle("over", over);
+  var pbar = document.getElementById("shot_progress_bar");
+  if (pbar) {
+    pbar.style.width = clamp((secs / 30) * 100) + "%";
+    pbar.classList.toggle("in-window", inWindow);
+    pbar.classList.toggle("over", over);
+  }
 }, 1000);
 
 function fetchShotHistory() {
@@ -520,7 +645,7 @@ setInterval(function () {
   if (lastUpdateTime === null) { el.textContent = "--"; return; }
   var secs = Math.round((Date.now() - lastUpdateTime) / 1000);
   el.textContent = secs + "s ago";
-  el.style.color = secs > 6 ? "var(--red)" : "var(--muted)";
+  el.style.color = secs > 6 ? "var(--red)" : "var(--text-dim)";
 }, 1000);
 
 setInterval(function () {
@@ -533,24 +658,43 @@ setInterval(function () {
       // Output is on a 0-1000 scale (ms within the 1000ms SSR window) -
       // divide by 10 to get an actual 0-100% duty cycle for display.
       var outputPct = output / 10;
+      // "off" means no target at all, full stop - regardless of what the
+      // backend's Setpoint variable happens to still hold. setOpMode(OFF)
+      // stops the heater but never resets Setpoint, so `target` in the JSON
+      // is stale leftover from the last active profile, not a real target -
+      // gate every target-driven display on the mode itself, not just
+      // whether that stale value happens to be nonzero.
+      var mode = json.opmode; // "off" | "brew" | "steam"
+      var hasTarget = mode !== "off" && target > 0;
 
       document.getElementById("fault_banner").style.display = json.fault ? "flex" : "none";
       document.getElementById("temp").innerHTML = json.fault ? "--" : temp.toFixed(1);
-      document.getElementById("target").innerHTML = target.toFixed(1);
+      document.getElementById("target").innerHTML = hasTarget ? target.toFixed(1) : "--";
       document.getElementById("output").innerHTML = outputPct.toFixed(0);
       drawSparkline(json.history);
 
-      // Progress bars
-      var tempPct = (temp > 0 && target > 0) ? clamp((temp / target) * 100) : 0;
-      document.getElementById("temp_bar").style.width = tempPct + "%";
+      // Temperature ring - fill amount reuses the same ratio the linear bar
+      // used before; color is the functional "heating / ready / over" signal,
+      // readable at a glance without parsing the number.
+      var tempPct = (temp > 0 && hasTarget) ? clamp((temp / target) * 100) : 0;
+      var ring = document.getElementById("temp_ring_fill");
+      var RING_CIRCUMFERENCE = 603; // 2*pi*96, matches the SVG circle's r=96
+      ring.style.strokeDashoffset = RING_CIRCUMFERENCE * (1 - tempPct / 100);
+      ring.classList.remove("heating", "ready", "over");
+      if (!json.fault && temp > 0 && hasTarget) {
+        var READY_MARGIN_C = 1.0;
+        if (temp < target - READY_MARGIN_C) ring.classList.add("heating");
+        else if (temp > target + READY_MARGIN_C) ring.classList.add("over");
+        else ring.classList.add("ready");
+      }
+
       document.getElementById("output_bar").style.width = clamp(outputPct) + "%";
 
       // Status
-      var mode = json.opmode; // "off" | "brew" | "steam"
       var pill = document.getElementById("status_pill");
-      var label = mode === "brew" ? "Brewing" : mode === "steam" ? "Steaming" : "Off";
+      var label = json.fault ? "Fault" : mode === "brew" ? "Brewing" : mode === "steam" ? "Steaming" : "Off";
       document.getElementById("mode_status").innerHTML = label;
-      pill.className = "pill " + mode;
+      pill.className = "pill " + mode + (json.fault ? " fault" : "");
       document.getElementById("btn_off").classList.toggle("active", mode === "off");
       document.getElementById("btn_brew").classList.toggle("active", mode === "brew");
       document.getElementById("btn_steam").classList.toggle("active", mode === "steam");
@@ -560,6 +704,9 @@ setInterval(function () {
       setVal("input_brew_kp", json.brew_kp);
       setVal("input_brew_ki", json.brew_ki);
       setVal("input_brew_kd", json.brew_kd);
+      setVal("input_brew_akp", json.brew_akp);
+      setVal("input_brew_aki", json.brew_aki);
+      setVal("input_brew_akd", json.brew_akd);
       setVal("input_steam_target", json.steam_target);
       setVal("input_steam_kp", json.steam_kp);
       setVal("input_steam_ki", json.steam_ki);
@@ -625,7 +772,7 @@ setInterval(function () {
       setVal("input_descale_days", json.descale_day_threshold);
       document.getElementById("descale_shots").textContent = json.shot_count;
       document.getElementById("descale_days").textContent = json.days_since_descale >= 0 ? json.days_since_descale : "--";
-      document.getElementById("descale_banner").style.display = json.descale_due ? "flex" : "none";
+      document.getElementById("descale_banner_top").style.display = json.descale_due ? "flex" : "none";
 
       document.getElementById("fw_build").textContent = json.fw_build;
     }
@@ -698,8 +845,8 @@ const char *manifest_json = R"rawliteral({
 "short_name":"BrewMaster",
 "start_url":"/",
 "display":"standalone",
-"background_color":"#161311",
-"theme_color":"#161311",
+"background_color":"#0e0b09",
+"theme_color":"#0e0b09",
 "icons":[{"src":"/icon.svg","sizes":"any","type":"image/svg+xml"}]
 })rawliteral";
 
@@ -757,6 +904,9 @@ void setupWeb() {
     json += ",\"brew_kp\":" + String(brewKp, 4);
     json += ",\"brew_ki\":" + String(brewKi, 4);
     json += ",\"brew_kd\":" + String(brewKd, 4);
+    json += ",\"brew_akp\":" + String(brewActiveKp, 4);
+    json += ",\"brew_aki\":" + String(brewActiveKi, 4);
+    json += ",\"brew_akd\":" + String(brewActiveKd, 4);
     json += ",\"steam_target\":" + String(steamSetpoint);
     json += ",\"steam_kp\":" + String(steamKp, 4);
     json += ",\"steam_ki\":" + String(steamKi, 4);
@@ -846,6 +996,18 @@ void setupWeb() {
       brewKd = server.arg("brew_kd").toDouble();
       preferences.putDouble("brew_kd", brewKd);
     }
+    if (server.hasArg("brew_akp")) {
+      brewActiveKp = server.arg("brew_akp").toDouble();
+      preferences.putDouble("brew_akp", brewActiveKp);
+    }
+    if (server.hasArg("brew_aki")) {
+      brewActiveKi = server.arg("brew_aki").toDouble();
+      preferences.putDouble("brew_aki", brewActiveKi);
+    }
+    if (server.hasArg("brew_akd")) {
+      brewActiveKd = server.arg("brew_akd").toDouble();
+      preferences.putDouble("brew_akd", brewActiveKd);
+    }
     if (server.hasArg("steam_target")) {
       steamSetpoint = server.arg("steam_target").toDouble();
       preferences.putDouble("steam_target", steamSetpoint);
@@ -874,9 +1036,10 @@ void setupWeb() {
     // always behaved here).
     if (server.hasArg("brew_target") || server.hasArg("brew_kp") ||
         server.hasArg("brew_ki") || server.hasArg("brew_kd") ||
-        server.hasArg("steam_target") || server.hasArg("steam_kp") ||
-        server.hasArg("steam_ki") || server.hasArg("steam_kd") ||
-        server.hasArg("steam_max_safety")) {
+        server.hasArg("brew_akp") || server.hasArg("brew_aki") ||
+        server.hasArg("brew_akd") || server.hasArg("steam_target") ||
+        server.hasArg("steam_kp") || server.hasArg("steam_ki") ||
+        server.hasArg("steam_kd") || server.hasArg("steam_max_safety")) {
       refreshActiveProfileIfChanged();
     }
 

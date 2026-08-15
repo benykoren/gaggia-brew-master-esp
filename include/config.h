@@ -62,6 +62,54 @@ enum class OpMode { OFF, BREW, STEAM };
 #define STEAM_KI_DEFAULT 0.0
 #define STEAM_KD_DEFAULT 0.0
 
+// ============================================================================
+// Brew "active" gains + shot-start feedforward (2026-08-16)
+// ----------------------------------------------------------------------------
+// Real-hardware testing showed the gentle Brew gains above (tuned for a
+// clean, non-overshooting idle heatup) are too weak to fight the much bigger,
+// faster disturbance of actual brewing (cold water flowing through the
+// boiler) - a shot sagged ~11-13C even with Ki added, because Ki is
+// inherently slow to build up force and the shot is often over before it
+// catches up. Researching Gaggiuino and GaggiMate's own solutions to this
+// exact problem informed the fix here:
+//   - Gaggiuino: no PID at all - explicit bang-bang thresholds, MUCH more
+//     aggressive (full power sooner) while brewing than while idle.
+//   - GaggiMate: keeps PID, but adds a physics-based feedforward term
+//     (flow rate x specific heat x temp delta) applied the INSTANT flow is
+//     detected, rather than waiting for a temperature error to develop.
+// This project has no flow sensor yet (see AGENTS.md roadmap), so the
+// feedforward here is a simple fixed boost instead of GaggiMate's flow-scaled
+// one - the same "push immediately, don't wait for feedback" principle,
+// without the sensor hardware their version depends on. Combined with a
+// separate, more aggressive Brew gain profile (Gaggiuino's principle) used
+// only while shotInProgress is true (main.cpp), reverting to the gentle
+// profile the instant the shot ends.
+// ============================================================================
+// Revised 2026-08-16 after the first real-shot test: sag dropped from
+// ~11-13C (gentle profile alone) to ~6C with the original 20/0.3/2 - a real
+// improvement, but the user wants tighter still. Pushed further because the
+// overshoot risk that constrains the GENTLE brew profile (a full climb from
+// cold) simply doesn't apply here - this profile only ever runs while
+// shotInProgress, which by construction starts already near brewSetpoint,
+// not from cold. Free to be considerably more aggressive without
+// reintroducing a heatup-overshoot problem.
+#define BREW_ACTIVE_KP_DEFAULT 30.0
+#define BREW_ACTIVE_KI_DEFAULT 0.5
+#define BREW_ACTIVE_KD_DEFAULT 2.0
+
+// Feedforward compensation (0-1000 output window, same scale as
+// Output/WindowSize) added on top of the PID's own computed output every
+// cycle while a shot is in progress and temperature sits below brewSetpoint
+// - NOT a one-shot kick, a sustained boost for as long as there's a
+// meaningful gap. Tapered smoothly to zero as currentTemperature approaches
+// brewSetpoint (BREW_SHOT_FEEDFORWARD_TAPER_C is the width of that taper
+// band) so it can't itself cause overshoot once the disturbance is already
+// handled or the shot is ending - same safety-taper idea as GaggiMate's
+// calculateSafetyScaling(), simplified since we lack their flow signal.
+// Boost and taper width both increased 2026-08-16 alongside the gains above.
+#define BREW_SHOT_FEEDFORWARD_BOOST 400.0
+#define BREW_SHOT_FEEDFORWARD_TAPER_C 1.5
+
 // Steam's safety ceiling is configurable live from the Web UI (persisted in
 // NVS) - unlike BREW_MAX_SAFETY, which stays a fixed constant. This default
 // only applies if nothing's been saved yet. Clamped server-side to
