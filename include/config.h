@@ -134,14 +134,36 @@ enum class OpMode { OFF, BREW, STEAM };
 // ----------------------------------------------------------------------------
 // Toggles the SSR between a fixed high and low output around the active
 // profile's setpoint, measures the resulting oscillation period/amplitude,
-// and derives Kp/Ki/Kd via classic Ziegler-Nichols relay-tuning formulas.
-// Respects the existing activeMaxSafety ceiling and sensor-fault handling at
-// all times - aborts immediately if either trips. Supervise the first run.
+// and derives Kp/Ki/Kd via the "no overshoot" Ziegler-Nichols relay-tuning
+// variant (Kp=0.2Ku, Ki=0.4Ku/Pu, Kd=Ku*Pu/15 - see main.cpp) rather than the
+// more aggressive classic formula. The very first half-cycle (the initial
+// climb from whatever temperature autotune was started at) is discarded
+// before averaging, since it isn't a real oscillation and its arbitrary
+// starting-temperature-dependent "amplitude" was confirmed to skew Ku wildly
+// between runs (2026-08-16). Respects the existing activeMaxSafety ceiling
+// and sensor-fault handling at all times - aborts immediately if either
+// trips. Supervise every run.
+//
+// Convergence, not a fixed cycle count (2026-08-16): a relay-feedback test
+// only produces a trustworthy Ku/Pu once the induced oscillation has settled
+// into a genuine, repeatable limit cycle - blindly averaging exactly N
+// cycles risks including ones that are still transitioning toward that limit
+// cycle, especially right after the (now-discarded) warm-up climb. Instead,
+// the last AUTOTUNE_CONVERGE_CYCLES cycle amplitudes are kept in a small
+// ring buffer; once they all agree with each other within
+// AUTOTUNE_CONVERGE_TOLERANCE (relative to their mean), the oscillation is
+// considered settled and Ku/Pu are computed from that window. If it never
+// quite converges, AUTOTUNE_MAX_CYCLES is a hard cap that finalizes anyway
+// using the best available window, rather than running indefinitely -
+// AUTOTUNE_MAX_RUNTIME_MS remains the ultimate time-based backstop under
+// all of this.
 // ============================================================================
 #define AUTOTUNE_RELAY_HIGH 500.0     // "high" Output level (0-1000 window) - not full power
 #define AUTOTUNE_RELAY_LOW 0.0        // "low" Output level
 #define AUTOTUNE_HYSTERESIS_C 0.5     // deg C band around setpoint before switching relay state
-#define AUTOTUNE_MIN_CYCLES 4         // full oscillation cycles averaged before computing gains
+#define AUTOTUNE_CONVERGE_CYCLES 3    // trailing window size, both for the convergence check and the final Ku/Pu average
+#define AUTOTUNE_CONVERGE_TOLERANCE 0.15 // max relative spread (vs. mean) allowed across the window to call it "settled"
+#define AUTOTUNE_MAX_CYCLES 10        // hard cap - finalize with the best available window even if never fully converged
 #define AUTOTUNE_MAX_RUNTIME_MS (30UL * 60UL * 1000UL) // hard abort ceiling regardless of progress
 
 enum class AutotuneState { IDLE, RUNNING, DONE_OK, DONE_FAIL };
