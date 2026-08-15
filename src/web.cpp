@@ -658,22 +658,30 @@ setInterval(function () {
       // Output is on a 0-1000 scale (ms within the 1000ms SSR window) -
       // divide by 10 to get an actual 0-100% duty cycle for display.
       var outputPct = output / 10;
+      // "off" means no target at all, full stop - regardless of what the
+      // backend's Setpoint variable happens to still hold. setOpMode(OFF)
+      // stops the heater but never resets Setpoint, so `target` in the JSON
+      // is stale leftover from the last active profile, not a real target -
+      // gate every target-driven display on the mode itself, not just
+      // whether that stale value happens to be nonzero.
+      var mode = json.opmode; // "off" | "brew" | "steam"
+      var hasTarget = mode !== "off" && target > 0;
 
       document.getElementById("fault_banner").style.display = json.fault ? "flex" : "none";
       document.getElementById("temp").innerHTML = json.fault ? "--" : temp.toFixed(1);
-      document.getElementById("target").innerHTML = target.toFixed(1);
+      document.getElementById("target").innerHTML = hasTarget ? target.toFixed(1) : "--";
       document.getElementById("output").innerHTML = outputPct.toFixed(0);
       drawSparkline(json.history);
 
       // Temperature ring - fill amount reuses the same ratio the linear bar
       // used before; color is the functional "heating / ready / over" signal,
       // readable at a glance without parsing the number.
-      var tempPct = (temp > 0 && target > 0) ? clamp((temp / target) * 100) : 0;
+      var tempPct = (temp > 0 && hasTarget) ? clamp((temp / target) * 100) : 0;
       var ring = document.getElementById("temp_ring_fill");
       var RING_CIRCUMFERENCE = 603; // 2*pi*96, matches the SVG circle's r=96
       ring.style.strokeDashoffset = RING_CIRCUMFERENCE * (1 - tempPct / 100);
       ring.classList.remove("heating", "ready", "over");
-      if (!json.fault && temp > 0 && target > 0) {
+      if (!json.fault && temp > 0 && hasTarget) {
         var READY_MARGIN_C = 1.0;
         if (temp < target - READY_MARGIN_C) ring.classList.add("heating");
         else if (temp > target + READY_MARGIN_C) ring.classList.add("over");
@@ -683,7 +691,6 @@ setInterval(function () {
       document.getElementById("output_bar").style.width = clamp(outputPct) + "%";
 
       // Status
-      var mode = json.opmode; // "off" | "brew" | "steam"
       var pill = document.getElementById("status_pill");
       var label = json.fault ? "Fault" : mode === "brew" ? "Brewing" : mode === "steam" ? "Steaming" : "Off";
       document.getElementById("mode_status").innerHTML = label;
