@@ -530,8 +530,8 @@ change/confirm the plan:
 5. **Water tank level sensor.**
    **Hardware:** one magnetic float switch (~$2-5), one free GPIO (digital
    input, internal pull-up).
-   **Why:** low-water warning now; becomes a real pump interlock once the
-   pump dimmer (item 9) exists.
+   **Why:** low-water warning now; becomes a real pump interlock once
+   item 9a (pump on/off control) exists.
 
 6. **Real-time pressure transducer + live pressure graph.**
    **Hardware:** one analog pressure transducer, **0-1.2 to 1.6MPa
@@ -556,7 +556,16 @@ change/confirm the plan:
    This closes that gap without any of the risk of tapping the switch's own
    (mains-carrying) wiring directly. Sense-only - does not let the ESP32
    control the pump, just observe it. Full active control (auto-*stop*, not
-   just auto-*detect*) needs item 9.
+   just auto-*detect*) needs item 9a - though note item 9a keeps the
+   physical Brew switch as the *start* trigger, so this item's detection
+   isn't strictly required for auto-stop to work, only for a fully
+   button-free shot.
+   **Decision (2026-08-16): not needed for the current goal** (stop at 25s
+   or at 36g). Weight-based stop needs no start-time reference at all
+   (firmware just watches the scale continuously); time-based stop gets its
+   start reference from the existing manual "Start Shot" Web UI button, no
+   new hardware required. This item would only remove that one manual tap.
+   Full reasoning in `HARDWARE_ROADMAP.md` item 7.
 
 #### Needs new hardware, wireless purchase (no wiring at all)
 
@@ -571,33 +580,69 @@ change/confirm the plan:
    (weight is the actual outcome; time is a proxy confounded by grind/dose/
    tamp). Pairs naturally with item 1's shot timing once both exist. Reading
    a weight is not the same as *acting* on it - actually cutting the pump at
-   a target weight still needs item 9's active pump control.
+   a target weight still needs item 9a's active pump control.
 
 #### Needs new hardware, a second real mains-voltage subsystem (serious)
 
-9. **AC phase-control pump dimmer — programmable pressure/flow profiling,
-   plus active auto-start/auto-stop.**
-   **Hardware:** a zero-cross detection + TRIAC module (e.g. RobotDyn AC
-   dimmer, ~$10-15), wired into the pump's AC line. **The same category of
-   seriousness as the original SSR/heater build** - bench-test on low
-   voltage first, verify zero-cross/firing logic thoroughly before ever
-   connecting the pump's real AC line, insulate every mains joint. No
-   dedicated flow sensor needed (see competitive research above - both
-   competitors estimate flow from pressure + pump behavior instead).
-   **Why:** enables a phase-based profile system (pump power/pressure/flow
-   target + time/volume/pressure stop conditions per phase, matching both
-   competitor projects' architecture) - real pre-infusion and
-   declining-pressure-at-shot-end, not a flat 9-bar target, per the
-   pressure-profiling research above. This is also the item that turns
-   "detect"/"read" into "act": once the ESP32 can actually drive the pump,
-   auto-stop by a configured **time** (a plain countdown, no other hardware
-   needed) or by a configured **weight** (paired with item 8's BLE scale)
-   both become real closed-loop features, not just displayed numbers - and
-   combined with item 7's sense-only detection, the whole shot (start
-   *and* stop) can run with zero manual buttons. If full profiling becomes
-   a must-have, evaluate migrating to
-   [GaggiMate](https://github.com/jniebuhr/gaggimate) outright rather than
-   rebuilding its years of profiling work from scratch.
+**Split 2026-08-16** (was one combined "item 9") into an easy on/off half and
+a harder profiling half, since they have very different complexity and
+dependencies. Full buy lists, wiring diagrams, and step-by-step procedures
+for both in [`HARDWARE_ROADMAP.md`](HARDWARE_ROADMAP.md) (which also covers
+items 4-8 above in the same buy-list/wiring format).
+
+9a. **Simple on/off pump control ("control the button").** **Decided:** the
+    physical Brew switch keeps starting the pump exactly as today; the
+    ESP32 sits between the switch and the pump (spliced at the pump's own
+    terminals, not the switch's terminal block, to avoid reopening the
+    unverified panel-wiring problem from Section 7) so firmware can cut it
+    early. **Hardware (revised 2026-08-16): a plain electromechanical relay
+    module, not an SSR** - the pump switches once per shot, so relay
+    contact-life/cycle-count is a non-issue, and SSR's silent/no-wear
+    advantages don't matter here the way they do for the constantly-cycling
+    heater; a relay is also cheaper and more available. No zero-cross
+    detection, no phase-angle timing either way, firmware-trivial
+    (`digitalWrite`, like `PIN_SSR`). **Uses the relay's NC (Normally
+    Closed) contact, not NO** - de-energized/pass-through is the default,
+    so the switch controls the pump with zero ESP32 involvement unless
+    firmware actively energizes the relay to interrupt it; this is the
+    mirror image of the heater's "always boot off" rule, and deliberately
+    so - the dangerous failure mode for the pump is being unable to start
+    without the ESP32's cooperation, not the reverse. Full reasoning in
+    `HARDWARE_ROADMAP.md` item 9a. **Why:** turns auto-stop by a
+    configured **time** (no other hardware) or **weight** (with item 8) into
+    real closed-loop features, without needing item 9b's much harder
+    profiling work first. Judged the easier of the two halves.
+
+9b. **Phase-control dimmer to a pressure target (e.g. 9 bar).** **Hardware:**
+    a zero-cross detection + TRIAC module (e.g. RobotDyn AC dimmer,
+    ~$10-15), swapped in at the same splice point as item 9a - **the same
+    category of seriousness as the original SSR/heater build**, bench-test
+    on low voltage first, verify zero-cross/firing logic thoroughly before
+    ever connecting the pump's real AC line, insulate every mains joint. No
+    dedicated flow sensor needed (see competitive research above - both
+    competitors estimate flow from pressure + pump behavior instead).
+    **Hard prerequisite: item 6 (pressure transducer)** - you cannot
+    regulate to a bar target without a pressure reading to control against;
+    this wasn't a strict dependency in the old combined item 9, but is once
+    "control to 9 bar" is the explicit goal rather than open-loop dimming.
+    **Why:** enables a phase-based profile system (pump power/pressure/flow
+    target + time/volume/pressure stop conditions per phase, matching both
+    competitor projects' architecture) - real pre-infusion and
+    declining-pressure-at-shot-end, not a flat 9-bar target, per the
+    pressure-profiling research above.
+
+   **Migrating to [GaggiMate](https://github.com/jniebuhr/gaggimate) instead
+   of building this: ruled out (2026-08-16).** Checked their actual source,
+   not just the README - `lib/GaggiMateController/src/ControllerConfig.h`
+   hardcodes GPIO pinouts for six specific PCB revisions, autodetected via a
+   voltage divider that only exists on their board. Temperature sensing is
+   MAX31855 thermocouple (SPI) or NTC thermistor only (`peripherals/`) - no
+   driver for this project's UART AT-command PT100 module. Pressure/dimming
+   need their Pro PCB specifically. It's also two ESP32s talking BLE (a
+   separate LilyGo T-RGB display board + their controller board), not one.
+   So this is a **hardware swap** (buy their PCB, rewire, replace the
+   sensor) and not a firmware migration onto the current board - explicitly
+   decided against. Item 9 stays a from-scratch build on this hardware.
 
 ---
 

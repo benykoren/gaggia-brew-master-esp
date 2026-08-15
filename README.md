@@ -147,7 +147,7 @@ Open `http://gaggia.local` (or the board's IP) in any browser.
 
 ## Roadmap
 
-Informed by researching two mature sibling projects — [Gaggiuino](https://github.com/Zer0-bit/gaggiuino) and [GaggiMate](https://github.com/jniebuhr/gaggimate) — and the actual coffee science behind espresso/cappuccino extraction (SCA guidelines, pressure-profiling literature). Full detail, sourcing, and reasoning for every item is in `AGENTS.md` §8; here's the shape of it, organized by what it actually costs you to add:
+Informed by researching two mature sibling projects — [Gaggiuino](https://github.com/Zer0-bit/gaggiuino) and [GaggiMate](https://github.com/jniebuhr/gaggimate) — and the actual coffee science behind espresso/cappuccino extraction (SCA guidelines, pressure-profiling literature). Full reasoning for every item is in `AGENTS.md` §8; concrete buy lists and wiring diagrams for every remaining hardware item are in [`HARDWARE_ROADMAP.md`](HARDWARE_ROADMAP.md). Here's the shape of it, organized by what it actually costs you to add:
 
 **In progress:** a Nextion touchscreen HMI for on-machine status and control without needing a phone.
 
@@ -163,10 +163,13 @@ Informed by researching two mature sibling projects — [Gaggiuino](https://gith
 - Automatic shot start/stop detection (sense-only) — a non-invasive current-transformer clamp (~$3-5) around the pump's wire, so the shot timer/history/descale count above start themselves the moment the machine's own Brew switch is used — no manual button, and no mains wiring touched
 
 **Wireless purchase, no wiring:**
-- Bluetooth smart scale with brew-by-weight auto-stop (Bookoo or Felicita — confirmed the DIY-friendliest protocols; brew-by-weight is more repeatable than brew-by-time). Note: reading the weight isn't the same as acting on it — actually cutting the pump at a target weight needs the pump dimmer below too.
+- Bluetooth smart scale with brew-by-weight auto-stop (Bookoo or Felicita — confirmed the DIY-friendliest protocols; brew-by-weight is more repeatable than brew-by-time). Note: reading the weight isn't the same as acting on it — actually cutting the pump at a target weight needs the pump on/off control below too.
 
-**A second real mains-voltage subsystem:**
-- AC phase-control pump dimmer for programmable pressure/flow profiling — pre-infusion and declining-pressure curves, not a flat 9-bar target, built with the same bench-first safety discipline as the heater circuit. This is also what turns sensing into *action*: once the ESP32 can drive the pump, auto-stop by a configured time (no extra hardware) or by a configured weight (with the BLE scale above) both become real, and paired with the current-transformer detection above, a shot can start and stop with zero manual buttons. If this becomes a must-have, migrating to GaggiMate outright (rather than rebuilding its profiling work from scratch) is a real option worth considering.
+**A second real mains-voltage subsystem — split into an easy half and a harder half:**
+- **On/off pump control ("control the button")** — the Brew switch keeps starting the pump exactly as today; the ESP32 sits between the switch and the pump (a plain relay, not an SSR — the pump only switches once per shot, so an SSR's silent/no-wear advantages don't apply, and a relay is cheaper; no phase-angle timing either way) so firmware can cut it early. Turns auto-stop by a configured time (no extra hardware) or by a configured weight (with the BLE scale above) into real closed-loop features — the easier of the two, and doesn't depend on anything else below.
+- **Phase-control dimmer to a pressure target** (e.g. 9 bar) — pre-infusion and declining-pressure curves, not a flat target, built with the same bench-first safety discipline as the heater circuit. Harder: it's genuine closed-loop control, so it needs the pressure transducer above already wired and reading correctly to regulate against.
+
+Buy lists, wiring diagrams, and procedures for both: [`HARDWARE_ROADMAP.md`](HARDWARE_ROADMAP.md). (Migrating to GaggiMate instead was considered and ruled out — it requires their own controller PCB and a different temp sensor, i.e. a hardware swap, not a firmware migration onto this board; see `AGENTS.md` §8.)
 
 ---
 
