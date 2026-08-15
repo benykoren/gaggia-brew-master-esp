@@ -85,20 +85,30 @@ enum class OpMode { OFF, BREW, STEAM };
 // only while shotInProgress is true (main.cpp), reverting to the gentle
 // profile the instant the shot ends.
 // ============================================================================
-#define BREW_ACTIVE_KP_DEFAULT 20.0
-#define BREW_ACTIVE_KI_DEFAULT 0.3
+// Revised 2026-08-16 after the first real-shot test: sag dropped from
+// ~11-13C (gentle profile alone) to ~6C with the original 20/0.3/2 - a real
+// improvement, but the user wants tighter still. Pushed further because the
+// overshoot risk that constrains the GENTLE brew profile (a full climb from
+// cold) simply doesn't apply here - this profile only ever runs while
+// shotInProgress, which by construction starts already near brewSetpoint,
+// not from cold. Free to be considerably more aggressive without
+// reintroducing a heatup-overshoot problem.
+#define BREW_ACTIVE_KP_DEFAULT 30.0
+#define BREW_ACTIVE_KI_DEFAULT 0.5
 #define BREW_ACTIVE_KD_DEFAULT 2.0
 
-// Fixed instant boost (0-1000 output window, same scale as Output/WindowSize)
-// added on top of the PID's own computed output the instant a shot starts -
-// an open-loop kick timed to the KNOWN start of the disturbance, not a
-// reaction to an error that hasn't happened yet. Tapered to zero once
-// currentTemperature is at/above brewSetpoint (BREW_SHOT_FEEDFORWARD_TAPER_C
-// window) so it can't itself cause overshoot once the disturbance is already
-// being handled or the shot is ending - same safety-taper idea as GaggiMate's
+// Feedforward compensation (0-1000 output window, same scale as
+// Output/WindowSize) added on top of the PID's own computed output every
+// cycle while a shot is in progress and temperature sits below brewSetpoint
+// - NOT a one-shot kick, a sustained boost for as long as there's a
+// meaningful gap. Tapered smoothly to zero as currentTemperature approaches
+// brewSetpoint (BREW_SHOT_FEEDFORWARD_TAPER_C is the width of that taper
+// band) so it can't itself cause overshoot once the disturbance is already
+// handled or the shot is ending - same safety-taper idea as GaggiMate's
 // calculateSafetyScaling(), simplified since we lack their flow signal.
-#define BREW_SHOT_FEEDFORWARD_BOOST 250.0
-#define BREW_SHOT_FEEDFORWARD_TAPER_C 1.0
+// Boost and taper width both increased 2026-08-16 alongside the gains above.
+#define BREW_SHOT_FEEDFORWARD_BOOST 400.0
+#define BREW_SHOT_FEEDFORWARD_TAPER_C 1.5
 
 // Steam's safety ceiling is configurable live from the Web UI (persisted in
 // NVS) - unlike BREW_MAX_SAFETY, which stays a fixed constant. This default
