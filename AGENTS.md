@@ -505,7 +505,12 @@ change/confirm the plan:
 
 #### Shipped — pure software, zero hardware
 1. **Shot timer** - elapsed time display during Brew mode (target window is
-   ~25-30s per shot, per SCA-referenced extraction guidelines).
+   ~25-30s per shot, per SCA-referenced extraction guidelines). **Extended
+   2026-08-16**: a configurable auto-stop (`shotAutoStopSec`, Web UI:
+   Settings -> Shot Timer, 0 = disabled) ends the timer/log/gain-profile
+   automatically at a set duration - no more manual "Stop Shot" tap needed.
+   Starting is still a manual "Start Shot" tap; see item 4 below for why
+   that isn't automatic yet.
 2. **Shot history log** - duration + peak temp per shot now; extends
    naturally once pressure/weight data exist later. Both competitors treat
    this as core.
@@ -524,23 +529,47 @@ consideration now lives. Numbering continues from the shipped items 1-3
 above rather than restarting, and keeps the gap left by item 7's removal
 rather than renumbering everything again.
 
-4. **Pump on/off control ("control the button").** **Decided:** the
-   physical Brew switch keeps starting the pump exactly as today; the
-   ESP32 sits between the switch and the pump (spliced at the pump's own
-   terminals, not the switch's terminal block, to avoid reopening the
-   unverified panel-wiring problem from Section 7) so firmware can cut it
-   early. **Hardware: a plain electromechanical relay module, not an SSR**
-   - the pump switches once per shot, so relay contact-life/cycle-count is
-   a non-issue, and SSR's silent/no-wear advantages don't matter here the
-   way they do for the constantly-cycling heater; a relay is also cheaper
-   and more available. No zero-cross detection, no phase-angle timing
-   either way, firmware-trivial (`digitalWrite`, like `PIN_SSR`). **Uses
-   the relay's NC (Normally Closed) contact, not NO** - de-energized/
-   pass-through is the default, so the switch controls the pump with zero
-   ESP32 involvement unless firmware actively energizes the relay to
-   interrupt it; this is the mirror image of the heater's "always boot off"
-   rule, and deliberately so - the dangerous failure mode for the pump is
-   being unable to start without the ESP32's cooperation, not the reverse.
+4. **Pump on/off control ("control the button").** **Status (revised
+   2026-08-16): the software half is built and tested; the hardware half
+   (the physical relay) is not.** Firmware already has - and real-shot-
+   tested -  a `shotInProgress`-driven Brew gain-scheduling profile
+   (`brewActiveKp/Ki/Kd`, aggressive, live-tunable) plus a shot-start
+   feedforward boost (see the "brew-active gains" entry in config.h),
+   confirmed on real hardware to cut brew-time sag from ~11-13C down to
+   ~6C - at which point output was pinned at the heater's physical wattage
+   ceiling, so further gain tuning stopped helping (a genuinely conclusive
+   result, not a dead end). A configurable shot auto-stop timer
+   (`shotAutoStopSec`, Web UI: Settings -> Shot Timer) also now ends the
+   *firmware's* shot bookkeeping (timer/history/gain-profile revert)
+   automatically - **but still does not cut the pump itself**, since that
+   relay doesn't exist yet. Today, "auto-stop" only means the Web UI's
+   Start Shot must still be tapped manually to begin one.
+   **Decided design once the relay is built:** the physical Brew switch
+   keeps starting the pump exactly as today; the ESP32 sits between the
+   switch and the pump (spliced at the pump's own terminals, not the
+   switch's terminal block, to avoid reopening the unverified panel-wiring
+   problem from Section 7) so firmware can cut it early. **Hardware: a
+   plain electromechanical relay module, not an SSR** - the pump switches
+   once per shot, so relay contact-life/cycle-count is a non-issue, and
+   SSR's silent/no-wear advantages don't matter here the way they do for
+   the constantly-cycling heater; a relay is also cheaper and more
+   available. No zero-cross detection, no phase-angle timing either way,
+   firmware-trivial (`digitalWrite`, like `PIN_SSR`). **Uses the relay's NC
+   (Normally Closed) contact, not NO** - de-energized/pass-through is the
+   default, so the switch controls the pump with zero ESP32 involvement
+   unless firmware actively energizes the relay to interrupt it; this is
+   the mirror image of the heater's "always boot off" rule, and
+   deliberately so - the dangerous failure mode for the pump is being
+   unable to start without the ESP32's cooperation, not the reverse.
+   **Optional refinement discussed 2026-08-16, not yet decided:** an
+   AC-presence/zero-cross detection module at the *same* splice point could
+   let the ESP32 detect the switch being flipped automatically, removing
+   the manual Start Shot tap entirely (and making the auto-stop timer above
+   finally control the real pump, not just firmware bookkeeping) - a
+   different technique from the current-transformer clamp already rejected
+   as item "7" (this senses voltage presence at the relay's own wiring,
+   not current elsewhere on the pump's wire), so it isn't reopening that
+   same decision, just a related one not yet made.
    Full reasoning in `HARDWARE_ROADMAP.md` item 4. **Why:** this is the
    **core item, judged the current top priority** - turns auto-stop by a
    configured **time** (no other hardware) or **weight** (with item 5) into

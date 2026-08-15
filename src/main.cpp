@@ -386,14 +386,19 @@ static void runAutotuneStep(unsigned long now) {
 // ============================================================================
 // Shot timer + history log
 // ----------------------------------------------------------------------------
-// Manually triggered from the Web UI (Start/Stop button) - the ESP32 has no
-// visibility into the machine's own Brew switch/pump yet. See AGENTS.md
-// roadmap item 7 for the sense-only hardware path that would automate this.
+// Started manually from the Web UI (Start Shot button) - the ESP32 has no
+// visibility into the machine's own Brew switch/pump yet, so it can't detect
+// a shot beginning on its own (see HARDWARE_ROADMAP.md for the sensor that
+// would). Stopping can now happen automatically via shotAutoStopSec (below),
+// timed from that manual start - see the loop() check further down and its
+// important caveat: this stops the firmware's own bookkeeping, not the pump
+// itself (no hardware yet to do that either).
 // (shotInProgress itself is declared up with the other PID globals, not
 // here - applyActiveProfile() needs it for Brew gain-scheduling.)
 // ============================================================================
 unsigned long shotStartMillis = 0;
 float shotPeakTemp = 0.0;
+unsigned long shotAutoStopSec = SHOT_AUTO_STOP_SEC_DEFAULT; // 0 = disabled, persisted
 
 // Descale / maintenance reminder - both persisted in NVS.
 unsigned long shotCount = 0;         // shots since the last descale/reset
@@ -479,6 +484,7 @@ void setup() {
   steamKd = preferences.getDouble("steam_kd", STEAM_KD_DEFAULT);
   steamMaxSafety = preferences.getDouble("steam_max_safety", STEAM_MAX_SAFETY_DEFAULT);
   ecoTimeoutMin = preferences.getULong("eco_min", ECO_TIMEOUT_MIN_DEFAULT);
+  shotAutoStopSec = preferences.getULong("shot_auto_stop", SHOT_AUTO_STOP_SEC_DEFAULT);
   shotCount = preferences.getULong("shot_count", 0);
   lastDescaleTime = (time_t)preferences.getULong("last_descale", 0);
   descaleShotThreshold =
@@ -579,6 +585,17 @@ void loop() {
       tempHistoryHead = (tempHistoryHead + 1) % TEMP_HISTORY_LEN;
       if (tempHistoryCount < TEMP_HISTORY_LEN) tempHistoryCount++;
     }
+  }
+
+  // Shot auto-stop - see config.h/SHOT_AUTO_STOP_SEC_DEFAULT for the full
+  // caveat: this ends the firmware's OWN shot bookkeeping (timer, history
+  // log, Brew gain profile revert) at the configured duration, timed from
+  // the manual Start Shot tap. It does not physically stop the pump - no
+  // hardware exists yet to do that (see HARDWARE_ROADMAP.md item 4).
+  if (shotInProgress && shotAutoStopSec > 0 &&
+      now - shotStartMillis >= shotAutoStopSec * 1000UL) {
+    Serial.printf("Shot auto-stop: %lu s reached\n", shotAutoStopSec);
+    stopShot();
   }
 
   // PID Computation - autotune (if running) owns Output directly instead

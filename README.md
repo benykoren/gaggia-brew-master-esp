@@ -154,12 +154,13 @@ Open `http://gaggia.local` (or the board's IP) in any browser.
 Informed by researching two mature sibling projects — [Gaggiuino](https://github.com/Zer0-bit/gaggiuino) and [GaggiMate](https://github.com/jniebuhr/gaggimate) — and the actual coffee science behind espresso/cappuccino extraction (SCA guidelines, pressure-profiling literature). Full reasoning for every item is in `AGENTS.md` §8; concrete buy lists and wiring diagrams are in [`HARDWARE_ROADMAP.md`](HARDWARE_ROADMAP.md). Ordered by priority below, not by cost — items 1-3 are already shipped (pure software), everything after is not yet built:
 
 **Shipped:**
-- Shot timer (espresso extraction has a real target window, ~25-30s)
+- Shot timer, with a configurable auto-stop (espresso extraction has a real target window, ~25-30s) — ends the timer/log automatically, no manual "Stop Shot" tap needed
 - Shot history log (duration + peak temp per shot)
 - Descale / maintenance reminder
+- Brew gain-scheduling + shot-start feedforward — a more aggressive PID profile plus an anticipatory power boost that kick in automatically the instant a shot starts, confirmed on real hardware to cut brew-time temperature sag from ~11-13°C to ~6°C
 
 **Next up — the core goal, auto-stopping the pump:**
-- **On/off pump control ("control the button")** — the Brew switch keeps starting the pump exactly as today; the ESP32 sits between the switch and the pump (a plain relay, not an SSR — the pump only switches once per shot, so an SSR's silent/no-wear advantages don't apply, and a relay is cheaper; no phase-angle timing either way) so firmware can cut it early, at a configured time or weight
+- **On/off pump control ("control the button")** — software side (above) is done; the physical relay itself is not yet bought or wired. Once it is: the Brew switch keeps starting the pump exactly as today; the ESP32 sits between the switch and the pump (a plain relay, not an SSR — the pump only switches once per shot, so an SSR's silent/no-wear advantages don't apply, and a relay is cheaper; no phase-angle timing either way) so firmware can cut it early, at a configured time or weight
 - **Bluetooth smart scale** (Bookoo or Felicita — confirmed the DIY-friendliest protocols) for brew-by-weight auto-stop, pairing directly with the pump control above; brew-by-weight is more repeatable than brew-by-time
 
 **Then, independent and optional, in priority order:**
