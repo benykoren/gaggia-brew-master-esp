@@ -1,6 +1,17 @@
 #pragma once
 
 // ============================================================================
+// Firmware build identifier
+// ----------------------------------------------------------------------------
+// __DATE__/__TIME__ are filled in by the compiler at build time, not by hand -
+// unlike a manually-incremented version number, this can never go stale or
+// get forgotten. Exists specifically so an OTA update's success can be
+// confirmed from the Web UI/`/status` (compare this string before/after an
+// upload) instead of guessing from HTTP response behavior alone.
+// ============================================================================
+#define FIRMWARE_BUILD_TIMESTAMP (__DATE__ " " __TIME__)
+
+// ============================================================================
 // Pin Definitions - ESP32-S3-DevKitC-1 (N16R8)
 // ----------------------------------------------------------------------------
 // Chosen to avoid reserved S3 pins:

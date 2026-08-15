@@ -239,13 +239,20 @@ static void runAutotuneStep(unsigned long now) {
     double d = (AUTOTUNE_RELAY_HIGH - AUTOTUNE_RELAY_LOW) / 2.0; // relay half-amplitude
     double Ku = (4.0 * d) / (PI * avgAmplitude);                 // ultimate gain
 
-    // Classic Ziegler-Nichols relay-tuning formulas. Kp/Ki/Kd here are in the
-    // same per-second units SetTunings() already expects (PID_v1 rescales
-    // internally by its own sample time) - matches how the Web UI's manual
-    // tuning fields have worked all along.
-    double newKp = 0.6 * Ku;
-    double newKi = 1.2 * Ku / Pu;
-    double newKd = 0.075 * Ku * Pu;
+    // Ziegler-Nichols relay-tuning, "no overshoot" variant (Kp=0.2Ku,
+    // Ti=Pu/2, Td=Pu/3) rather than the classic formula (Kp=0.6Ku, Ti=Pu/2,
+    // Td=Pu/8). Classic ZN targets ~25% overshoot by design (quarter-decay
+    // damping) - confirmed on real hardware to overshoot the brew target by
+    // several degrees, once even past BREW_MAX_SAFETY (106.3C against a
+    // 105C ceiling, 2026-08-16). This variant uses the same measured Ku/Pu,
+    // just less aggressive Kp/Ki - still a genuine autotune result, not a
+    // manual guess. Kp/Ki/Kd here are in the same per-second units
+    // SetTunings() already expects (PID_v1 rescales internally by its own
+    // sample time) - matches how the Web UI's manual tuning fields have
+    // worked all along.
+    double newKp = 0.2 * Ku;
+    double newKi = 0.4 * Ku / Pu;
+    double newKd = Ku * Pu / 15.0; // 0.2*Ku * Pu/3
 
     if (autotuneForMode == OpMode::BREW) {
       brewKp = newKp;

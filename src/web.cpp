@@ -421,7 +421,7 @@ const char *index_html = R"rawliteral(
     </div>
 
     <footer>
-      <a href="/firmware">Firmware update (OTA)</a> &middot; <span id="host">gaggia.local</span>
+      <a href="/firmware">Firmware update (OTA)</a> &middot; <span id="host">gaggia.local</span> &middot; build <span id="fw_build">--</span>
     </footer>
   </div>
 
@@ -626,6 +626,8 @@ setInterval(function () {
       document.getElementById("descale_shots").textContent = json.shot_count;
       document.getElementById("descale_days").textContent = json.days_since_descale >= 0 ? json.days_since_descale : "--";
       document.getElementById("descale_banner").style.display = json.descale_due ? "flex" : "none";
+
+      document.getElementById("fw_build").textContent = json.fw_build;
     }
   };
   xhttp.open("GET", "/status", true);
@@ -769,6 +771,8 @@ void setupWeb() {
     json += ",\"mqtt_user\":\"" + preferences.getString("mqtt_user", "") + "\"";
     json += ",\"mqtt_pass\":\"" + preferences.getString("mqtt_pass", "") + "\"";
     preferences.end();
+
+    json += ",\"fw_build\":\"" + String(FIRMWARE_BUILD_TIMESTAMP) + "\"";
 
     json += ",\"fault\":" + String(sensorFault ? "true" : "false");
 
