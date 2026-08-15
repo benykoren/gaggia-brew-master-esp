@@ -9,9 +9,29 @@
 #include <Update.h>
 
 extern float currentTemperature;
+extern bool sensorFault;
 extern double Setpoint, Input, Output;
-extern double Kp, Ki, Kd;
 extern PID myPID;
+extern float tempHistory[];
+extern int tempHistoryHead;
+extern int tempHistoryCount;
+
+extern OpMode currentMode;
+extern double brewSetpoint, brewKp, brewKi, brewKd;
+extern double steamSetpoint, steamKp, steamKi, steamKd;
+extern double steamMaxSafety;
+extern void setOpMode(OpMode mode);
+extern void refreshActiveProfileIfChanged();
+
+extern unsigned long ecoTimeoutMin;
+extern bool autoSleeping;
+extern void noteActivity();
+extern void wakeFromSleep();
+
+extern AutotuneState autotuneState;
+extern String autotuneMessage;
+extern void startAutotune(OpMode forMode);
+extern void stopAutotune();
 
 WebServer server(80);
 
@@ -20,96 +40,492 @@ WebServer server(80);
 // ... (setupWeb start skip) ...
 
 const char *index_html = R"rawliteral(
-<!DOCTYPE HTML><html>
+<!DOCTYPE HTML><html lang="en">
 <head>
+  <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Gaggia PID</title>
+  <meta name="theme-color" content="#161311">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icon.svg">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="BrewMaster">
+  <title>GaggiaBrewMasterESP</title>
   <style>
-    body { font-family: Arial; text-align: center; margin:0px auto; padding-top: 30px; }
-    .card { background-color: white; box-shadow: 2px 2px 12px 1px rgba(140,140,140,.5); padding-top:10px; padding-bottom:20px; }
-    .button { background-color: #008CBA; border: none; color: white; padding: 15px 32px; text-align: center; text-decoration: none; display: inline-block; font-size: 16px; cursor: pointer; margin: 4px 2px; }
-    .button-off { background-color: #f44336; } 
-    .button-on { background-color: #4CAF50; }
+    :root {
+      --bg: #161311;
+      --bg-grad: radial-gradient(1200px 600px at 50% -10%, #2a211b 0%, #161311 55%);
+      --card: #211c18;
+      --card-2: #2a231e;
+      --line: #3a312a;
+      --text: #f2ece6;
+      --muted: #a99f95;
+      --accent: #d98c3f;
+      --accent-2: #b9702c;
+      --green: #4caf7d;
+      --red: #e5544b;
+      --steam: #4a9fd8;
+      --shadow: 0 10px 30px rgba(0,0,0,.45);
+      --radius: 16px;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg-grad), var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+      padding: 24px 16px 48px;
+    }
+    .wrap { max-width: 720px; margin: 0 auto; }
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; margin-bottom: 22px;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .logo {
+      width: 40px; height: 40px; border-radius: 12px; flex: none;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      display: grid; place-items: center; font-size: 22px;
+      box-shadow: var(--shadow);
+    }
+    h1 { font-size: 20px; margin: 0; letter-spacing: .2px; }
+    .brand small { display: block; color: var(--muted); font-size: 12px; font-weight: 500; }
+    .pill {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 8px 14px; border-radius: 999px; font-size: 13px; font-weight: 600;
+      background: var(--card); border: 1px solid var(--line);
+    }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+    .pill.brew .dot { background: var(--green); box-shadow: 0 0 0 4px rgba(76,175,125,.18); }
+    .pill.steam .dot { background: var(--steam); box-shadow: 0 0 0 4px rgba(74,159,216,.18); }
+    .pill.off .dot { background: var(--red); box-shadow: 0 0 0 4px rgba(229,84,75,.18); }
+
+    .grid { display: grid; gap: 16px; }
+    @media (min-width: 640px) { .cols-2 { grid-template-columns: 1fr 1fr; } }
+
+    .card {
+      background: linear-gradient(180deg, var(--card-2), var(--card));
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 20px;
+    }
+    .card h2 {
+      margin: 0 0 16px; font-size: 13px; text-transform: uppercase;
+      letter-spacing: 1.4px; color: var(--muted); font-weight: 700;
+    }
+
+    .temp-hero { text-align: center; padding: 8px 0 4px; }
+    .temp-value { font-size: 64px; font-weight: 700; line-height: 1; letter-spacing: -1px; }
+    .temp-value .unit { font-size: 24px; color: var(--muted); font-weight: 600; margin-left: 4px; }
+    .temp-sub { color: var(--muted); margin-top: 8px; font-size: 14px; }
+    .temp-sub b { color: var(--text); }
+
+    .bar { height: 10px; border-radius: 999px; background: #17130f; border: 1px solid var(--line); overflow: hidden; margin-top: 6px; }
+    .bar > span { display: block; height: 100%; width: 0%; border-radius: 999px; transition: width .5s ease; }
+    .bar.heat > span { background: linear-gradient(90deg, var(--accent-2), var(--accent)); }
+    .metric-row { display: flex; align-items: center; justify-content: space-between; margin: 18px 0 6px; font-size: 14px; color: var(--muted); }
+    .metric-row b { color: var(--text); font-size: 15px; }
+
+    .controls { display: flex; gap: 12px; margin-top: 20px; }
+    .btn {
+      flex: 1; border: 1px solid var(--line); color: var(--text); background: var(--card);
+      padding: 14px 16px; border-radius: 12px; font-size: 15px; font-weight: 700;
+      cursor: pointer; transition: transform .05s ease, background .15s ease, border-color .15s ease;
+    }
+    .btn:active { transform: translateY(1px); }
+    .btn-on { background: rgba(76,175,125,.14); border-color: rgba(76,175,125,.4); color: #cdeede; }
+    .btn-on.active { background: var(--green); border-color: var(--green); color: #0d1a13; }
+    .btn-off { background: rgba(229,84,75,.14); border-color: rgba(229,84,75,.4); color: #f3c6c2; }
+    .btn-off.active { background: var(--red); border-color: var(--red); color: #1a0d0c; }
+    .btn-steam { background: rgba(74,159,216,.14); border-color: rgba(74,159,216,.4); color: #cfe8f7; }
+    .btn-steam.active { background: var(--steam); border-color: var(--steam); color: #071824; }
+
+    .section-label { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+    .divider { border: none; border-top: 1px solid var(--line); margin: 22px 0; }
+
+    .sleep-banner {
+      display: none; align-items: center; justify-content: space-between; gap: 10px;
+      background: rgba(74,159,216,.14); border: 1px solid rgba(74,159,216,.4);
+      color: #cfe8f7; padding: 10px 14px; border-radius: 12px;
+      font-size: 13px; font-weight: 700; margin-bottom: 14px;
+    }
+    .btn-wake {
+      border: 1px solid var(--steam); background: var(--steam); color: #071824;
+      padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 700; cursor: pointer;
+    }
+
+    .autotune-row { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line); }
+    .btn-autotune {
+      width: 100%; border: none; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      padding: 13px 16px; border-radius: 12px; font-size: 14px; font-weight: 700; color: #1a1206;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      box-shadow: 0 6px 18px rgba(217,140,63,.25);
+      transition: transform .05s ease, opacity .15s ease;
+    }
+    .btn-autotune:active:not(:disabled) { transform: translateY(1px); }
+    .btn-autotune:disabled { opacity: 0.45; cursor: default; box-shadow: none; }
+    .btn-autotune.running { background: var(--red); color: #1a0d0c; box-shadow: 0 6px 18px rgba(229,84,75,.3); }
+    .autotune-status { display: block; margin-top: 10px; font-size: 12px; color: var(--muted); text-align: center; }
+
+    label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; font-weight: 600; }
+    .field { margin-bottom: 14px; }
+    input {
+      width: 100%; padding: 11px 12px; border-radius: 10px; font-size: 15px;
+      background: #17130f; border: 1px solid var(--line); color: var(--text);
+      outline: none; transition: border-color .15s ease, box-shadow .15s ease;
+    }
+    input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(217,140,63,.18); }
+    .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .field-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+
+    .submit {
+      width: 100%; margin-top: 6px; border: none; cursor: pointer;
+      padding: 14px; border-radius: 12px; font-size: 15px; font-weight: 700; color: #1a1206;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      box-shadow: 0 6px 18px rgba(217,140,63,.28);
+    }
+    .submit:active { transform: translateY(1px); }
+    .hint { font-size: 12px; color: var(--muted); margin-top: 10px; text-align: center; }
+
+    footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 26px; }
+    footer a { color: var(--accent); text-decoration: none; }
+
+    .fault-banner {
+      display: none; align-items: center; gap: 8px;
+      background: rgba(229,84,75,.14); border: 1px solid rgba(229,84,75,.4);
+      color: #f3c6c2; padding: 10px 14px; border-radius: 12px;
+      font-size: 13px; font-weight: 700; margin-bottom: 14px;
+    }
+    .chart-wrap { margin-top: 18px; }
+    .chart-wrap canvas { width: 100%; height: 56px; display: block; }
+    .chart-label { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+    .last-updated { font-size: 11px; color: var(--muted); margin-top: 4px; text-align: right; }
   </style>
 </head>
 <body>
-  <h2>Gaggia PID Control</h2>
-  <div class="card">
-    <h3>Temperature: <span id="temp">--</span> &deg;C</h3>
-    <h3>Target: <span id="target">--</span> &deg;C</h3>
-    <h3>Output: <span id="output">--</span></h3>
-    <h3>Power: <span id="mode_status">--</span></h3>
-    <button onclick="setMode('heat')" class="button button-on">ON</button>
-    <button onclick="setMode('off')" class="button button-off">OFF</button>
+  <div class="wrap">
+    <header>
+      <div class="brand">
+        <div class="logo">&#9749;</div>
+        <div>
+          <h1>GaggiaBrewMaster</h1>
+          <small>Smart espresso controller</small>
+        </div>
+      </div>
+      <div>
+        <div id="status_pill" class="pill off"><span class="dot"></span><span id="mode_status">--</span></div>
+        <div id="last_updated" class="last-updated">--</div>
+      </div>
+    </header>
+
+    <div class="grid cols-2">
+      <div class="card">
+        <h2>Boiler</h2>
+        <div id="fault_banner" class="fault-banner">&#9888; Sensor fault &mdash; check wiring</div>
+        <div id="sleep_banner" class="sleep-banner">
+          <span>&#9866; Asleep (eco timeout) &mdash; heater off</span>
+          <button onclick="wake()" class="btn-wake">Wake Up</button>
+        </div>
+        <div class="temp-hero">
+          <div class="temp-value"><span id="temp">--</span><span class="unit">&deg;C</span></div>
+          <div class="temp-sub">Target <b><span id="target">--</span> &deg;C</b></div>
+        </div>
+        <div class="bar heat"><span id="temp_bar"></span></div>
+
+        <div class="metric-row"><span>Heater output</span><b><span id="output">--</span>%</b></div>
+        <div class="bar heat"><span id="output_bar"></span></div>
+
+        <div class="chart-wrap">
+          <div class="chart-label"><span>Last 2 min</span><span>&deg;C</span></div>
+          <canvas id="temp_chart" width="300" height="56"></canvas>
+        </div>
+
+        <div class="controls">
+          <button onclick="setMode('off')" id="btn_off" class="btn btn-off">Off</button>
+          <button onclick="setMode('brew')" id="btn_brew" class="btn btn-on">Brew</button>
+          <button onclick="setMode('steam')" id="btn_steam" class="btn btn-steam">Steam</button>
+        </div>
+
+        <div class="autotune-row">
+          <button onclick="startAutotune()" id="btn_autotune" class="btn-autotune">&#9889; Start Auto-Tune</button>
+          <span id="autotune_status" class="autotune-status"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>PID Tuning</h2>
+
+        <div class="section-label">Brew</div>
+        <form action="/update" method="GET">
+          <div class="field">
+            <label for="input_brew_target">Target temperature (&deg;C)</label>
+            <input type="number" step="0.1" name="brew_target" id="input_brew_target" value="">
+          </div>
+          <div class="field-row-3">
+            <div class="field"><label for="input_brew_kp">Kp</label><input type="number" step="any" name="brew_kp" id="input_brew_kp" value=""></div>
+            <div class="field"><label for="input_brew_ki">Ki</label><input type="number" step="any" name="brew_ki" id="input_brew_ki" value=""></div>
+            <div class="field"><label for="input_brew_kd">Kd</label><input type="number" step="any" name="brew_kd" id="input_brew_kd" value=""></div>
+          </div>
+          <input type="submit" value="Save Brew" class="submit">
+        </form>
+
+        <hr class="divider">
+
+        <div class="section-label">Steam</div>
+        <form action="/update" method="GET">
+          <div class="field">
+            <label for="input_steam_target">Target temperature (&deg;C)</label>
+            <input type="number" step="0.1" name="steam_target" id="input_steam_target" value="">
+          </div>
+          <div class="field-row-3">
+            <div class="field"><label for="input_steam_kp">Kp</label><input type="number" step="any" name="steam_kp" id="input_steam_kp" value=""></div>
+            <div class="field"><label for="input_steam_ki">Ki</label><input type="number" step="any" name="steam_ki" id="input_steam_ki" value=""></div>
+            <div class="field"><label for="input_steam_kd">Kd</label><input type="number" step="any" name="steam_kd" id="input_steam_kd" value=""></div>
+          </div>
+          <div class="field">
+            <label for="input_steam_max_safety">Max safety ceiling (&deg;C)</label>
+            <input type="number" step="1" min="100" max="150" name="steam_max_safety" id="input_steam_max_safety" value="">
+          </div>
+          <input type="submit" value="Save Steam" class="submit">
+        </form>
+      </div>
+    </div>
+
+    <div class="grid" style="margin-top:16px">
+      <div class="card">
+        <h2>MQTT / Home Assistant</h2>
+        <form action="/update" method="GET">
+          <div class="field-row">
+            <div class="field"><label for="input_mqtt_server">Server</label><input type="text" name="mqtt_server" id="input_mqtt_server" placeholder="192.168.1.100"></div>
+            <div class="field"><label for="input_mqtt_port">Port</label><input type="number" name="mqtt_port" id="input_mqtt_port" value="1883"></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label for="input_mqtt_user">User</label><input type="text" name="mqtt_user" id="input_mqtt_user"></div>
+            <div class="field"><label for="input_mqtt_pass">Password</label><input type="password" name="mqtt_pass" id="input_mqtt_pass"></div>
+          </div>
+          <input type="submit" value="Save &amp; Restart" class="submit">
+          <div class="hint">Saving MQTT settings reboots the controller.</div>
+        </form>
+      </div>
+    </div>
+
+    <div class="grid cols-2" style="margin-top:16px">
+      <div class="card">
+        <h2>Power &amp; Eco</h2>
+        <form action="/update" method="GET">
+          <div class="field">
+            <label for="input_eco_min">Auto-sleep after (minutes, 0 = disabled)</label>
+            <input type="number" step="1" min="0" name="eco_timeout_min" id="input_eco_min" value="">
+          </div>
+          <input type="submit" value="Save" class="submit">
+          <div class="hint">Heater force-OFF after this long with no Web UI activity (mode/tuning changes). Does not count passive status polling.</div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Network</h2>
+        <button onclick="wifiReset()" class="submit" style="background:var(--red); color:#1a0d0c;">Reset WiFi Settings</button>
+        <div class="hint">Reboots into the <b>GaggiaBrewMasterESP_Setup</b> setup network so you can join a different WiFi without reflashing.</div>
+        <div class="hint"><a href="/firmware">Firmware update (OTA)</a></div>
+      </div>
+    </div>
+
+    <footer>
+      <a href="/firmware">Firmware update (OTA)</a> &middot; <span id="host">gaggia.local</span>
+    </footer>
   </div>
-  <div class="card">
-    <form action="/update" method="GET">
-      <h3>PID Settings</h3>
-      Target: <input type="number" step="0.1" name="target" id="input_target" value=""><br>
-      Kp: <input type="number" step="0.1" name="kp" id="input_kp" value=""><br>
-      Ki: <input type="number" step="0.1" name="ki" id="input_ki" value=""><br>
-      Kd: <input type="number" step="0.1" name="kd" id="input_kd" value=""><br>
-      
-      <h3>MQTT Settings</h3>
-      Server: <input type="text" name="mqtt_server" id="input_mqtt_server" placeholder="192.168.1.100"><br>
-      Port: <input type="number" name="mqtt_port" id="input_mqtt_port" value="1883"><br>
-      User: <input type="text" name="mqtt_user" id="input_mqtt_user"><br>
-      Pass: <input type="password" name="mqtt_pass" id="input_mqtt_pass"><br>
-      
-      <br>
-      <input type="submit" value="Update & Restart" class="button">
-    </form>
-  </div>
+
 <script>
-setInterval(function ( ) {
+function setVal(id, v) {
+  var el = document.getElementById(id);
+  if (document.activeElement.id !== id && (el.value === "" || el.dataset.synced !== "1")) {
+    el.value = v; el.dataset.synced = "1";
+  }
+}
+function clamp(x) { return Math.max(0, Math.min(100, x)); }
+
+function drawSparkline(data) {
+  var canvas = document.getElementById("temp_chart");
+  if (!canvas || !data || data.length < 2) return;
+  var ctx = canvas.getContext("2d");
+  var w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  var min = Math.min.apply(null, data), max = Math.max.apply(null, data);
+  if (max - min < 1) { max += 0.5; min -= 0.5; }
+  ctx.beginPath();
+  data.forEach(function (v, i) {
+    var x = (i / (data.length - 1)) * w;
+    var y = h - ((v - min) / (max - min)) * (h - 4) - 2;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = "#d98c3f";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+}
+
+var lastUpdateTime = null;
+var lastAutotuneState = null; // tracks transitions, so the force-refresh below fires once
+setInterval(function () {
+  var el = document.getElementById("last_updated");
+  if (!el) return;
+  if (lastUpdateTime === null) { el.textContent = "--"; return; }
+  var secs = Math.round((Date.now() - lastUpdateTime) / 1000);
+  el.textContent = secs + "s ago";
+  el.style.color = secs > 6 ? "var(--red)" : "var(--muted)";
+}, 1000);
+
+setInterval(function () {
   var xhttp = new XMLHttpRequest();
   xhttp.onreadystatechange = function() {
     if (this.readyState == 4 && this.status == 200) {
+      lastUpdateTime = Date.now();
       var json = JSON.parse(this.responseText);
-      document.getElementById("temp").innerHTML = json.temp.toFixed(2);
-      document.getElementById("target").innerHTML = json.target.toFixed(2);
-      document.getElementById("output").innerHTML = json.output.toFixed(0);
-      
-      var mode = json.mode;
-      if(mode == "auto" || mode == "heat") {
-        document.getElementById("mode_status").innerHTML = "ON";
-        document.getElementById("mode_status").style.color = "green";
+      var temp = json.temp, target = json.target, output = json.output;
+      // Output is on a 0-1000 scale (ms within the 1000ms SSR window) -
+      // divide by 10 to get an actual 0-100% duty cycle for display.
+      var outputPct = output / 10;
+
+      document.getElementById("fault_banner").style.display = json.fault ? "flex" : "none";
+      document.getElementById("temp").innerHTML = json.fault ? "--" : temp.toFixed(1);
+      document.getElementById("target").innerHTML = target.toFixed(1);
+      document.getElementById("output").innerHTML = outputPct.toFixed(0);
+      drawSparkline(json.history);
+
+      // Progress bars
+      var tempPct = (temp > 0 && target > 0) ? clamp((temp / target) * 100) : 0;
+      document.getElementById("temp_bar").style.width = tempPct + "%";
+      document.getElementById("output_bar").style.width = clamp(outputPct) + "%";
+
+      // Status
+      var mode = json.opmode; // "off" | "brew" | "steam"
+      var pill = document.getElementById("status_pill");
+      var label = mode === "brew" ? "Brewing" : mode === "steam" ? "Steaming" : "Off";
+      document.getElementById("mode_status").innerHTML = label;
+      pill.className = "pill " + mode;
+      document.getElementById("btn_off").classList.toggle("active", mode === "off");
+      document.getElementById("btn_brew").classList.toggle("active", mode === "brew");
+      document.getElementById("btn_steam").classList.toggle("active", mode === "steam");
+
+      // Sync form fields (once, unless user is editing)
+      setVal("input_brew_target", json.brew_target);
+      setVal("input_brew_kp", json.brew_kp);
+      setVal("input_brew_ki", json.brew_ki);
+      setVal("input_brew_kd", json.brew_kd);
+      setVal("input_steam_target", json.steam_target);
+      setVal("input_steam_kp", json.steam_kp);
+      setVal("input_steam_ki", json.steam_ki);
+      setVal("input_steam_kd", json.steam_kd);
+      setVal("input_steam_max_safety", json.steam_max_safety);
+      setVal("input_mqtt_server", json.mqtt_server || "");
+      setVal("input_mqtt_port", json.mqtt_port);
+      setVal("input_mqtt_user", json.mqtt_user || "");
+      setVal("input_mqtt_pass", json.mqtt_pass || "");
+      setVal("input_eco_min", json.eco_timeout_min);
+
+      // Eco / auto-sleep banner
+      document.getElementById("sleep_banner").style.display = json.auto_sleeping ? "flex" : "none";
+
+      // Autotune status
+      var atBtn = document.getElementById("btn_autotune");
+      var atStatus = document.getElementById("autotune_status");
+      if (json.autotune_state === "running") {
+        atBtn.disabled = false;
+        atBtn.textContent = "⏹ Stop Auto-Tune";
+        atBtn.onclick = stopAutotune;
+        atBtn.classList.add("running");
+        atStatus.textContent = "Autotuning... " + (json.autotune_message || "");
       } else {
-        document.getElementById("mode_status").innerHTML = "OFF";
-        document.getElementById("mode_status").style.color = "red";
+        atBtn.disabled = (mode === "off");
+        atBtn.textContent = "⚡ Start Auto-Tune";
+        atBtn.onclick = startAutotune;
+        atBtn.classList.remove("running");
+        if (json.autotune_state === "done_ok") {
+          atStatus.textContent = json.autotune_message || "Autotune complete";
+        } else if (json.autotune_state === "done_fail") {
+          atStatus.textContent = json.autotune_message || "Autotune failed";
+        } else {
+          atStatus.textContent = "";
+        }
       }
-      
-      // Update inputs only if not focused
-      // PID
-      if (document.activeElement.id !== "input_target" && document.getElementById("input_target").value == "") document.getElementById("input_target").value = json.target;
-      if (document.activeElement.id !== "input_kp" && document.getElementById("input_kp").value == "") document.getElementById("input_kp").value = json.kp;
-      if (document.activeElement.id !== "input_ki" && document.getElementById("input_ki").value == "") document.getElementById("input_ki").value = json.ki;
-      if (document.activeElement.id !== "input_kd" && document.getElementById("input_kd").value == "") document.getElementById("input_kd").value = json.kd;
-      
-      // MQTT (only populate if empty to avoid jumping)
-      if (document.activeElement.id !== "input_mqtt_server" && document.getElementById("input_mqtt_server").value == "") 
-          document.getElementById("input_mqtt_server").value = json.mqtt_server || "";
-      if (document.activeElement.id !== "input_mqtt_port" && document.getElementById("input_mqtt_port").value == "1883") 
-          document.getElementById("input_mqtt_port").value = json.mqtt_port;
-      if (document.activeElement.id !== "input_mqtt_user" && document.getElementById("input_mqtt_user").value == "") 
-          document.getElementById("input_mqtt_user").value = json.mqtt_user || "";
-      // Pass is usually not sent back for security, or we can send it. In status handler we sent it, so we can populate it.
-      if (document.activeElement.id !== "input_mqtt_pass" && document.getElementById("input_mqtt_pass").value == "") 
-          document.getElementById("input_mqtt_pass").value = json.mqtt_pass || "";
+
+      // The moment autotune finishes successfully, force the tuned profile's
+      // Kp/Ki/Kd input boxes to actually show the new numbers - setVal()'s
+      // "sync once" guard (so a field being actively edited isn't clobbered)
+      // would otherwise leave them showing the stale pre-autotune values,
+      // even though the status message above already prints the new ones.
+      if (json.autotune_state === "done_ok" && lastAutotuneState !== "done_ok") {
+        var p = (mode === "steam") ? "steam" : "brew"; // autotune always runs against the currently-active mode
+        document.getElementById("input_" + p + "_kp").value = json[p + "_kp"];
+        document.getElementById("input_" + p + "_ki").value = json[p + "_ki"];
+        document.getElementById("input_" + p + "_kd").value = json[p + "_kd"];
+      }
+      lastAutotuneState = json.autotune_state;
     }
   };
   xhttp.open("GET", "/status", true);
   xhttp.send();
-}, 2000 ) ;
+}, 2000);
 
 function setMode(mode) {
   var xhttp = new XMLHttpRequest();
   xhttp.open("GET", "/update?mode=" + mode, true);
   xhttp.send();
 }
+
+function wake() {
+  var xhttp = new XMLHttpRequest();
+  xhttp.open("GET", "/update?wake=1", true);
+  xhttp.send();
+}
+
+function startAutotune() {
+  if (!confirm("Start PID auto-tune for the current mode? The heater will cycle on/off repeatedly for several minutes. Stay nearby.")) return;
+  var xhttp = new XMLHttpRequest();
+  xhttp.open("GET", "/update?autotune=start", true);
+  xhttp.send();
+}
+
+function stopAutotune() {
+  var xhttp = new XMLHttpRequest();
+  xhttp.open("GET", "/update?autotune=stop", true);
+  xhttp.send();
+}
+
+function wifiReset() {
+  if (!confirm("Reset WiFi settings and reboot? You'll need to rejoin the GaggiaBrewMasterESP_Setup network to reconfigure.")) return;
+  var xhttp = new XMLHttpRequest();
+  xhttp.open("GET", "/wifi_reset", true);
+  xhttp.send();
+}
+
+document.getElementById("host").textContent = location.host;
 </script>
 </body>
 </html>)rawliteral";
+
+// Minimal vector coffee-cup icon (no external assets/fonts) and a matching
+// PWA manifest, so the page can be added to a phone home screen.
+const char *icon_svg = R"rawliteral(<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+<rect width="100" height="100" rx="22" fill="#d98c3f"/>
+<path d="M25 45h40v20a20 20 0 0 1-20 20 20 20 0 0 1-20-20z" fill="#1a1206"/>
+<path d="M65 50h6a10 10 0 0 1 0 20h-6" fill="none" stroke="#1a1206" stroke-width="6"/>
+<path d="M35 40c-2-6 4-8 2-14M48 40c-2-6 4-8 2-14M61 40c-2-6 4-8 2-14" fill="none" stroke="#1a1206" stroke-width="4" stroke-linecap="round"/>
+</svg>)rawliteral";
+
+const char *manifest_json = R"rawliteral({
+"name":"GaggiaBrewMasterESP",
+"short_name":"BrewMaster",
+"start_url":"/",
+"display":"standalone",
+"background_color":"#161311",
+"theme_color":"#161311",
+"icons":[{"src":"/icon.svg","sizes":"any","type":"image/svg+xml"}]
+})rawliteral";
 
 void setupWeb() {
   WiFi.mode(WIFI_STA);
@@ -120,7 +536,7 @@ void setupWeb() {
   // wm.resetSettings(); // Unlock to reset if needed
 
   bool res;
-  res = wm.autoConnect("GaggiaPID_Setup");
+  res = wm.autoConnect("GaggiaBrewMasterESP_Setup");
 
   if (!res) {
     Serial.println("Failed to connect");
@@ -136,21 +552,40 @@ void setupWeb() {
   // Main Page Handler
   server.on("/", HTTP_GET, []() { server.send(200, "text/html", index_html); });
 
+  // PWA manifest + icon (add-to-home-screen support)
+  server.on("/manifest.json", HTTP_GET, []() {
+    server.send(200, "application/manifest+json", manifest_json);
+  });
+  server.on("/icon.svg", HTTP_GET,
+            []() { server.send(200, "image/svg+xml", icon_svg); });
+
   // Status Handler
   server.on("/status", HTTP_GET, []() {
     String json = "{";
     json += "\"temp\":" + String(currentTemperature);
     json += ",\"target\":" + String(Setpoint);
     json += ",\"output\":" + String(Output);
-    json += ",\"kp\":" + String(Kp);
-    json += ",\"ki\":" + String(Ki);
-    json += ",\"kd\":" + String(Kd);
 
-    if (myPID.GetMode() == AUTOMATIC) {
-      json += ",\"mode\":\"heat\"";
-    } else {
-      json += ",\"mode\":\"off\"";
-    }
+    json += ",\"opmode\":\"";
+    json += (currentMode == OpMode::BREW)    ? "brew"
+             : (currentMode == OpMode::STEAM) ? "steam"
+                                               : "off";
+    json += "\"";
+
+    // Kp/Ki/Kd get 4 decimal places, not String()'s default 2 - a value like
+    // autotune's Ki=1.1782 would otherwise silently truncate to "1.18" here,
+    // and re-saving without noticing would overwrite the real value with
+    // the rounded one. Target/safety fields stay at the default (2 decimals
+    // is already more precision than a human ever types for a temperature).
+    json += ",\"brew_target\":" + String(brewSetpoint);
+    json += ",\"brew_kp\":" + String(brewKp, 4);
+    json += ",\"brew_ki\":" + String(brewKi, 4);
+    json += ",\"brew_kd\":" + String(brewKd, 4);
+    json += ",\"steam_target\":" + String(steamSetpoint);
+    json += ",\"steam_kp\":" + String(steamKp, 4);
+    json += ",\"steam_ki\":" + String(steamKi, 4);
+    json += ",\"steam_kd\":" + String(steamKd, 4);
+    json += ",\"steam_max_safety\":" + String(steamMaxSafety);
 
     Preferences preferences;
     preferences.begin("gaggia", true);
@@ -161,39 +596,123 @@ void setupWeb() {
     json += ",\"mqtt_pass\":\"" + preferences.getString("mqtt_pass", "") + "\"";
     preferences.end();
 
+    json += ",\"fault\":" + String(sensorFault ? "true" : "false");
+
+    json += ",\"eco_timeout_min\":" + String(ecoTimeoutMin);
+    json += ",\"auto_sleeping\":" + String(autoSleeping ? "true" : "false");
+
+    json += ",\"autotune_state\":\"";
+    switch (autotuneState) {
+      case AutotuneState::RUNNING: json += "running"; break;
+      case AutotuneState::DONE_OK: json += "done_ok"; break;
+      case AutotuneState::DONE_FAIL: json += "done_fail"; break;
+      default: json += "idle"; break;
+    }
+    json += "\"";
+    json += ",\"autotune_message\":\"" + autotuneMessage + "\"";
+
+    json += ",\"history\":[";
+    for (int i = 0; i < tempHistoryCount; i++) {
+      int idx = (tempHistoryHead - tempHistoryCount + i + TEMP_HISTORY_LEN * 2) %
+                TEMP_HISTORY_LEN;
+      if (i > 0) json += ",";
+      json += String(tempHistory[idx], 1);
+    }
+    json += "]";
+
     json += "}";
     server.send(200, "application/json", json);
   });
 
   // Settings Update Handler
   server.on("/update", HTTP_GET, []() {
+    noteActivity(); // any /update call is explicit user action - resets eco-sleep timer
+
     Preferences preferences;
     preferences.begin("gaggia", false); // false = read/write
 
-    if (server.hasArg("target")) {
-      Setpoint = server.arg("target").toDouble();
-      preferences.putDouble("target", Setpoint);
+    if (server.hasArg("brew_target")) {
+      brewSetpoint = server.arg("brew_target").toDouble();
+      preferences.putDouble("brew_target", brewSetpoint);
     }
-    if (server.hasArg("kp")) {
-      Kp = server.arg("kp").toDouble();
-      preferences.putDouble("kp", Kp);
+    if (server.hasArg("brew_kp")) {
+      brewKp = server.arg("brew_kp").toDouble();
+      preferences.putDouble("brew_kp", brewKp);
     }
-    if (server.hasArg("ki")) {
-      Ki = server.arg("ki").toDouble();
-      preferences.putDouble("ki", Ki);
+    if (server.hasArg("brew_ki")) {
+      brewKi = server.arg("brew_ki").toDouble();
+      preferences.putDouble("brew_ki", brewKi);
     }
-    if (server.hasArg("kd")) {
-      Kd = server.arg("kd").toDouble();
-      preferences.putDouble("kd", Kd);
+    if (server.hasArg("brew_kd")) {
+      brewKd = server.arg("brew_kd").toDouble();
+      preferences.putDouble("brew_kd", brewKd);
+    }
+    if (server.hasArg("steam_target")) {
+      steamSetpoint = server.arg("steam_target").toDouble();
+      preferences.putDouble("steam_target", steamSetpoint);
+    }
+    if (server.hasArg("steam_kp")) {
+      steamKp = server.arg("steam_kp").toDouble();
+      preferences.putDouble("steam_kp", steamKp);
+    }
+    if (server.hasArg("steam_ki")) {
+      steamKi = server.arg("steam_ki").toDouble();
+      preferences.putDouble("steam_ki", steamKi);
+    }
+    if (server.hasArg("steam_kd")) {
+      steamKd = server.arg("steam_kd").toDouble();
+      preferences.putDouble("steam_kd", steamKd);
+    }
+    if (server.hasArg("steam_max_safety")) {
+      // Clamped server-side - a typo in this field shouldn't be able to set
+      // a dangerously high (or uselessly low) steam safety ceiling.
+      double v = server.arg("steam_max_safety").toDouble();
+      steamMaxSafety = constrain(v, STEAM_MAX_SAFETY_MIN, STEAM_MAX_SAFETY_MAX);
+      preferences.putDouble("steam_max_safety", steamMaxSafety);
+    }
+    // If the currently-active profile's own values just changed, apply them
+    // live (no mode change, so no PID reset - matches how tuning edits have
+    // always behaved here).
+    if (server.hasArg("brew_target") || server.hasArg("brew_kp") ||
+        server.hasArg("brew_ki") || server.hasArg("brew_kd") ||
+        server.hasArg("steam_target") || server.hasArg("steam_kp") ||
+        server.hasArg("steam_ki") || server.hasArg("steam_kd") ||
+        server.hasArg("steam_max_safety")) {
+      refreshActiveProfileIfChanged();
     }
 
     if (server.hasArg("mode")) {
+      // A mode-button click always safely interrupts an in-progress
+      // autotune first - autotune's relay-driven Output must never keep
+      // running once the user has asked for a different mode.
+      stopAutotune();
       String mode = server.arg("mode");
       if (mode == "off") {
-        myPID.SetMode(MANUAL);
-        Output = 0;
-      } else if (mode == "heat" || mode == "auto") {
-        myPID.SetMode(AUTOMATIC);
+        setOpMode(OpMode::OFF);
+      } else if (mode == "brew") {
+        setOpMode(OpMode::BREW);
+      } else if (mode == "steam") {
+        setOpMode(OpMode::STEAM);
+      }
+    }
+
+    // Eco / auto-sleep
+    if (server.hasArg("eco_timeout_min")) {
+      ecoTimeoutMin = server.arg("eco_timeout_min").toInt();
+      preferences.putULong("eco_min", ecoTimeoutMin);
+    }
+    if (server.hasArg("wake") && server.arg("wake") == "1") {
+      wakeFromSleep();
+    }
+
+    // PID Autotune - runs the currently-active profile (must be Brew or
+    // Steam already, not Off) through a relay-feedback tuning cycle.
+    if (server.hasArg("autotune")) {
+      String at = server.arg("autotune");
+      if (at == "start") {
+        startAutotune(currentMode == OpMode::STEAM ? OpMode::STEAM : OpMode::BREW);
+      } else if (at == "stop") {
+        stopAutotune();
       }
     }
 
@@ -213,7 +732,6 @@ void setupWeb() {
 
     preferences.end();
 
-    myPID.SetTunings(Kp, Ki, Kd);
     server.sendHeader("Location", "/");
     server.send(303);
 
@@ -222,6 +740,25 @@ void setupWeb() {
       delay(500);
       ESP.restart();
     }
+  });
+
+  // WiFi reconfiguration - clears stored credentials and reboots. On next
+  // boot, WiFiManager's autoConnect() (in this same setupWeb()) will fail to
+  // join and fall back to the "GaggiaBrewMasterESP_Setup" captive portal
+  // automatically - the same well-tested path used on first boot, reused
+  // here instead of building a second, custom WiFi-config UI from scratch.
+  server.on("/wifi_reset", HTTP_GET, []() {
+    server.send(200, "text/html",
+                "<html><body><h2>Resetting WiFi...</h2>"
+                "<p>Rejoin the <b>GaggiaBrewMasterESP_Setup</b> WiFi network "
+                "from your phone/laptop in a few seconds to enter new "
+                "credentials.</p>"
+                "</body></html>");
+    delay(500);
+    WiFiManager wm;
+    wm.resetSettings();
+    delay(200);
+    ESP.restart();
   });
 
   // OTA Update Form
