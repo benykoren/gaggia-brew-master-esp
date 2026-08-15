@@ -21,6 +21,7 @@ extern int tempHistoryCount;
 
 extern OpMode currentMode;
 extern double brewSetpoint, brewKp, brewKi, brewKd;
+extern double brewActiveKp, brewActiveKi, brewActiveKd;
 extern double steamSetpoint, steamKp, steamKi, steamKd;
 extern double steamMaxSafety;
 extern void setOpMode(OpMode mode);
@@ -132,9 +133,27 @@ const char *index_html = R"rawliteral(
       letter-spacing: 1.4px; color: var(--muted); font-weight: 700;
     }
 
-    .temp-hero { text-align: center; padding: 8px 0 4px; }
-    .temp-value { font-size: 64px; font-weight: 700; line-height: 1; letter-spacing: -1px; }
-    .temp-value .unit { font-size: 24px; color: var(--muted); font-weight: 600; margin-left: 4px; }
+    .temp-hero {
+      display: grid; place-items: center; padding: 12px 0 8px;
+      grid-template-areas: "stack";
+    }
+    .temp-ring { grid-area: stack; transform: rotate(-90deg); width: 200px; height: 200px; }
+    .temp-ring-track { fill: none; stroke: var(--line); stroke-width: 14; }
+    .temp-ring-fill {
+      fill: none; stroke: var(--muted); stroke-width: 14; stroke-linecap: round;
+      transition: stroke-dashoffset .6s ease, stroke .5s ease;
+    }
+    /* Ring color is a functional signal, not decoration: blue-grey while
+       still climbing to target, green once at/near it (the "ready" cue,
+       readable without parsing the number), amber/red once over - the same
+       state also covers a shot's temperature sag, since that's just
+       "below target" again. */
+    .temp-ring-fill.heating { stroke: var(--steam); }
+    .temp-ring-fill.ready { stroke: var(--green); }
+    .temp-ring-fill.over { stroke: var(--red); }
+    .temp-ring-center { grid-area: stack; text-align: center; }
+    .temp-value { font-size: 56px; font-weight: 700; line-height: 1; letter-spacing: -1px; }
+    .temp-value .unit { font-size: 22px; color: var(--muted); font-weight: 600; margin-left: 4px; }
     .temp-sub { color: var(--muted); margin-top: 8px; font-size: 14px; }
     .temp-sub b { color: var(--text); }
 
@@ -281,10 +300,16 @@ const char *index_html = R"rawliteral(
           <button onclick="wake()" class="btn-wake">Wake Up</button>
         </div>
         <div class="temp-hero">
-          <div class="temp-value"><span id="temp">--</span><span class="unit">&deg;C</span></div>
-          <div class="temp-sub">Target <b><span id="target">--</span> &deg;C</b></div>
+          <svg class="temp-ring" viewBox="0 0 200 200">
+            <circle class="temp-ring-track" cx="100" cy="100" r="85"></circle>
+            <circle id="temp_ring_fill" class="temp-ring-fill" cx="100" cy="100" r="85"
+                    stroke-dasharray="534" stroke-dashoffset="534"></circle>
+          </svg>
+          <div class="temp-ring-center">
+            <div class="temp-value"><span id="temp">--</span><span class="unit">&deg;C</span></div>
+            <div class="temp-sub">Target <b><span id="target">--</span> &deg;C</b></div>
+          </div>
         </div>
-        <div class="bar heat"><span id="temp_bar"></span></div>
 
         <div class="metric-row"><span>Heater output</span><b><span id="output">--</span>%</b></div>
         <div class="bar heat"><span id="output_bar"></span></div>
@@ -329,6 +354,17 @@ const char *index_html = R"rawliteral(
             <div class="field"><label for="input_brew_kd">Kd</label><input type="number" step="any" name="brew_kd" id="input_brew_kd" value=""></div>
           </div>
           <input type="submit" value="Save Brew" class="submit">
+        </form>
+
+        <div class="section-label" style="margin-top:16px">Brew - active during a shot</div>
+        <div class="hint">Switches in automatically the instant a shot starts (Start Shot), reverts to the values above the instant it stops. Deliberately more aggressive - fights the temperature drop from real flow, which the gentle gains above are too slow for.</div>
+        <form action="/update" method="GET">
+          <div class="field-row-3">
+            <div class="field"><label for="input_brew_akp">Kp</label><input type="number" step="any" name="brew_akp" id="input_brew_akp" value=""></div>
+            <div class="field"><label for="input_brew_aki">Ki</label><input type="number" step="any" name="brew_aki" id="input_brew_aki" value=""></div>
+            <div class="field"><label for="input_brew_akd">Kd</label><input type="number" step="any" name="brew_akd" id="input_brew_akd" value=""></div>
+          </div>
+          <input type="submit" value="Save Active-Brew Gains" class="submit">
         </form>
 
         <hr class="divider">
@@ -540,9 +576,22 @@ setInterval(function () {
       document.getElementById("output").innerHTML = outputPct.toFixed(0);
       drawSparkline(json.history);
 
-      // Progress bars
+      // Temperature ring - fill amount reuses the same ratio the old linear
+      // bar used; color is the functional "heating / ready / over" signal,
+      // readable at a glance without parsing the number (also naturally
+      // covers a shot's temperature sag, which is just "below target" again).
       var tempPct = (temp > 0 && target > 0) ? clamp((temp / target) * 100) : 0;
-      document.getElementById("temp_bar").style.width = tempPct + "%";
+      var ring = document.getElementById("temp_ring_fill");
+      var RING_CIRCUMFERENCE = 534; // 2*pi*85, matches the SVG circle's r=85
+      ring.style.strokeDashoffset = RING_CIRCUMFERENCE * (1 - tempPct / 100);
+      ring.classList.remove("heating", "ready", "over");
+      if (!json.fault && temp > 0 && target > 0) {
+        var READY_MARGIN_C = 1.0;
+        if (temp < target - READY_MARGIN_C) ring.classList.add("heating");
+        else if (temp > target + READY_MARGIN_C) ring.classList.add("over");
+        else ring.classList.add("ready");
+      }
+
       document.getElementById("output_bar").style.width = clamp(outputPct) + "%";
 
       // Status
@@ -560,6 +609,9 @@ setInterval(function () {
       setVal("input_brew_kp", json.brew_kp);
       setVal("input_brew_ki", json.brew_ki);
       setVal("input_brew_kd", json.brew_kd);
+      setVal("input_brew_akp", json.brew_akp);
+      setVal("input_brew_aki", json.brew_aki);
+      setVal("input_brew_akd", json.brew_akd);
       setVal("input_steam_target", json.steam_target);
       setVal("input_steam_kp", json.steam_kp);
       setVal("input_steam_ki", json.steam_ki);
@@ -757,6 +809,9 @@ void setupWeb() {
     json += ",\"brew_kp\":" + String(brewKp, 4);
     json += ",\"brew_ki\":" + String(brewKi, 4);
     json += ",\"brew_kd\":" + String(brewKd, 4);
+    json += ",\"brew_akp\":" + String(brewActiveKp, 4);
+    json += ",\"brew_aki\":" + String(brewActiveKi, 4);
+    json += ",\"brew_akd\":" + String(brewActiveKd, 4);
     json += ",\"steam_target\":" + String(steamSetpoint);
     json += ",\"steam_kp\":" + String(steamKp, 4);
     json += ",\"steam_ki\":" + String(steamKi, 4);
@@ -846,6 +901,18 @@ void setupWeb() {
       brewKd = server.arg("brew_kd").toDouble();
       preferences.putDouble("brew_kd", brewKd);
     }
+    if (server.hasArg("brew_akp")) {
+      brewActiveKp = server.arg("brew_akp").toDouble();
+      preferences.putDouble("brew_akp", brewActiveKp);
+    }
+    if (server.hasArg("brew_aki")) {
+      brewActiveKi = server.arg("brew_aki").toDouble();
+      preferences.putDouble("brew_aki", brewActiveKi);
+    }
+    if (server.hasArg("brew_akd")) {
+      brewActiveKd = server.arg("brew_akd").toDouble();
+      preferences.putDouble("brew_akd", brewActiveKd);
+    }
     if (server.hasArg("steam_target")) {
       steamSetpoint = server.arg("steam_target").toDouble();
       preferences.putDouble("steam_target", steamSetpoint);
@@ -874,9 +941,10 @@ void setupWeb() {
     // always behaved here).
     if (server.hasArg("brew_target") || server.hasArg("brew_kp") ||
         server.hasArg("brew_ki") || server.hasArg("brew_kd") ||
-        server.hasArg("steam_target") || server.hasArg("steam_kp") ||
-        server.hasArg("steam_ki") || server.hasArg("steam_kd") ||
-        server.hasArg("steam_max_safety")) {
+        server.hasArg("brew_akp") || server.hasArg("brew_aki") ||
+        server.hasArg("brew_akd") || server.hasArg("steam_target") ||
+        server.hasArg("steam_kp") || server.hasArg("steam_ki") ||
+        server.hasArg("steam_kd") || server.hasArg("steam_max_safety")) {
       refreshActiveProfileIfChanged();
     }
 

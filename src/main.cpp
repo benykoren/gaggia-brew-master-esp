@@ -37,6 +37,13 @@ unsigned long windowStartTime;
 OpMode currentMode = OpMode::OFF;
 double brewSetpoint = BREW_SETPOINT_DEFAULT, brewKp = BREW_KP_DEFAULT,
        brewKi = BREW_KI_DEFAULT, brewKd = BREW_KD_DEFAULT;
+// Separate, more aggressive Brew gains used only while a shot is actively in
+// progress - see config.h for the full reasoning (Gaggiuino/GaggiMate
+// research, 2026-08-16). Declared here (not down with the rest of the shot-
+// timer state) so applyActiveProfile() below can read shotInProgress.
+bool shotInProgress = false;
+double brewActiveKp = BREW_ACTIVE_KP_DEFAULT, brewActiveKi = BREW_ACTIVE_KI_DEFAULT,
+       brewActiveKd = BREW_ACTIVE_KD_DEFAULT;
 double steamSetpoint = STEAM_SETPOINT_DEFAULT, steamKp = STEAM_KP_DEFAULT,
        steamKi = STEAM_KI_DEFAULT, steamKd = STEAM_KD_DEFAULT;
 double steamMaxSafety = STEAM_MAX_SAFETY_DEFAULT; // configurable, unlike BREW_MAX_SAFETY
@@ -45,12 +52,21 @@ double activeMaxSafety = BREW_MAX_SAFETY;
 // Applies the active profile's setpoint/gains to the live PID. Used both by
 // setOpMode() (mode switch) and by the Web UI when the currently-active
 // profile's own values are edited live (no mode change, so no PID reset).
+// Also called the instant a shot starts/stops (see startShot()/stopShot())
+// so the Brew gain switch takes effect immediately, not on the next
+// unrelated Web UI action.
 static void applyActiveProfile() {
   if (currentMode == OpMode::BREW) {
     Setpoint = brewSetpoint;
-    Kp = brewKp;
-    Ki = brewKi;
-    Kd = brewKd;
+    if (shotInProgress) {
+      Kp = brewActiveKp;
+      Ki = brewActiveKi;
+      Kd = brewActiveKd;
+    } else {
+      Kp = brewKp;
+      Ki = brewKi;
+      Kd = brewKd;
+    }
     activeMaxSafety = BREW_MAX_SAFETY;
   } else if (currentMode == OpMode::STEAM) {
     Setpoint = steamSetpoint;
@@ -294,8 +310,9 @@ static void runAutotuneStep(unsigned long now) {
 // Manually triggered from the Web UI (Start/Stop button) - the ESP32 has no
 // visibility into the machine's own Brew switch/pump yet. See AGENTS.md
 // roadmap item 7 for the sense-only hardware path that would automate this.
+// (shotInProgress itself is declared up with the other PID globals, not
+// here - applyActiveProfile() needs it for Brew gain-scheduling.)
 // ============================================================================
-bool shotInProgress = false;
 unsigned long shotStartMillis = 0;
 float shotPeakTemp = 0.0;
 
@@ -310,6 +327,11 @@ void startShot() {
   shotInProgress = true;
   shotStartMillis = millis();
   shotPeakTemp = currentTemperature;
+  // Switch Brew to the more aggressive active-brewing gains immediately -
+  // see config.h. Deliberately NOT a bumpless MANUAL/AUTOMATIC reset here:
+  // we want the stronger Kp's instant response to apply right away, and the
+  // gentle profile's small accumulated integral is harmless to inherit.
+  refreshActiveProfileIfChanged();
 }
 
 void stopShot() {
@@ -317,6 +339,20 @@ void stopShot() {
   shotInProgress = false;
   unsigned long durationMs = millis() - shotStartMillis;
   shotLogAppend(time(nullptr), durationMs, shotPeakTemp, 0.0);
+
+  // Bumpless reset back to the gentle profile: the aggressive active-brewing
+  // Ki can accumulate a real amount of integral over a 25-30s shot, and
+  // carrying that into the much smaller gentle-profile Ki would linger and
+  // risk exactly the kind of post-disturbance overshoot this project has
+  // already seen from windup elsewhere. Cycling MANUAL->AUTOMATIC re-seeds
+  // PID_v1's internal accumulator fresh, same trick setOpMode() already uses
+  // for mode switches.
+  if (currentMode == OpMode::BREW) {
+    myPID.SetMode(MANUAL);
+    Output = 0;
+    refreshActiveProfileIfChanged();
+    myPID.SetMode(AUTOMATIC);
+  }
 
   shotCount++;
   Preferences preferences;
@@ -355,6 +391,9 @@ void setup() {
   brewKp = preferences.getDouble("brew_kp", BREW_KP_DEFAULT);
   brewKi = preferences.getDouble("brew_ki", BREW_KI_DEFAULT);
   brewKd = preferences.getDouble("brew_kd", BREW_KD_DEFAULT);
+  brewActiveKp = preferences.getDouble("brew_akp", BREW_ACTIVE_KP_DEFAULT);
+  brewActiveKi = preferences.getDouble("brew_aki", BREW_ACTIVE_KI_DEFAULT);
+  brewActiveKd = preferences.getDouble("brew_akd", BREW_ACTIVE_KD_DEFAULT);
   steamSetpoint = preferences.getDouble("steam_target", STEAM_SETPOINT_DEFAULT);
   steamKp = preferences.getDouble("steam_kp", STEAM_KP_DEFAULT);
   steamKi = preferences.getDouble("steam_ki", STEAM_KI_DEFAULT);
@@ -469,6 +508,19 @@ void loop() {
   } else if (currentTemperature > 0 && currentTemperature < activeMaxSafety) {
     Input = currentTemperature;
     myPID.Compute();
+
+    // Shot-start feedforward (see config.h) - an open-loop boost added on
+    // top of the PID's own output, timed to the KNOWN start of the
+    // disturbance rather than waiting for an error to develop. Tapered to
+    // zero as currentTemperature approaches/exceeds brewSetpoint so it can't
+    // itself drive an overshoot once the disturbance is already handled.
+    if (currentMode == OpMode::BREW && shotInProgress &&
+        autotuneState != AutotuneState::RUNNING) {
+      double margin = brewSetpoint - currentTemperature; // >0 while still below target
+      double taper = constrain(margin / BREW_SHOT_FEEDFORWARD_TAPER_C, 0.0, 1.0);
+      Output = constrain(Output + BREW_SHOT_FEEDFORWARD_BOOST * taper, 0.0,
+                          (double)WindowSize);
+    }
   } else {
     Output = 0; // Forced OFF if error or over temp
   }
