@@ -6,6 +6,10 @@ No physical machine modifications beyond what's needed to sense and switch the b
 
 > **This README covers the essentials.** For the full technical history — every wiring decision, every reverse-engineered protocol detail, every "why," and a running change log — see [`AGENTS.md`](AGENTS.md), the project's single source of truth.
 
+<p align="center">
+  <img src="docs/assets/dashboard-now.png" alt="Web dashboard — Now tab, showing live temperature, mode controls, and shot timer" width="360">
+</p>
+
 ---
 
 ## Table of contents
