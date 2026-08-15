@@ -96,3 +96,26 @@ enum class OpMode { OFF, BREW, STEAM };
 #define AUTOTUNE_MAX_RUNTIME_MS (30UL * 60UL * 1000UL) // hard abort ceiling regardless of progress
 
 enum class AutotuneState { IDLE, RUNNING, DONE_OK, DONE_FAIL };
+
+// ============================================================================
+// Shot timer + history log
+// ----------------------------------------------------------------------------
+// No hardware yet detects the physical brew button/pump (see AGENTS.md
+// roadmap - a current-sensor or a pump-control relay would enable automatic
+// detection later). Until then, shots are started/stopped manually from the
+// Web UI. Each record includes a `weight` field, populated 0 (unmeasured)
+// until a BLE scale exists - avoids a schema change when that's added.
+// Stored as an append-only CSV on LittleFS (the same "spiffs" partition
+// already defined in platformio.ini's min_spiffs.csv), not NVS - NVS is a
+// flat key-value store, poorly suited to a growing log.
+// ============================================================================
+#define SHOT_LOG_PATH "/shots.csv"
+#define SHOT_LOG_MAX_ENTRIES 200 // oldest trimmed once exceeded
+
+// ============================================================================
+// Descale / maintenance reminder
+// ----------------------------------------------------------------------------
+// Both thresholds configurable live from the Web UI, persisted in NVS.
+// ============================================================================
+#define DESCALE_SHOT_THRESHOLD_DEFAULT 100
+#define DESCALE_DAY_THRESHOLD_DEFAULT 60

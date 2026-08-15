@@ -7,6 +7,9 @@
 #include <ESPmDNS.h>
 #include <Preferences.h>
 #include <Update.h>
+#include <time.h>
+
+#include "shot_log.h"
 
 extern float currentTemperature;
 extern bool sensorFault;
@@ -32,6 +35,17 @@ extern AutotuneState autotuneState;
 extern String autotuneMessage;
 extern void startAutotune(OpMode forMode);
 extern void stopAutotune();
+
+extern bool shotInProgress;
+extern unsigned long shotStartMillis;
+extern void startShot();
+extern void stopShot();
+
+extern unsigned long shotCount;
+extern time_t lastDescaleTime;
+extern unsigned long descaleShotThreshold;
+extern unsigned long descaleDayThreshold;
+extern void markDescaled();
 
 WebServer server(80);
 
@@ -158,6 +172,41 @@ const char *index_html = R"rawliteral(
       padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 700; cursor: pointer;
     }
 
+    .shot-row {
+      margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line);
+      display: flex; align-items: center; justify-content: space-between; gap: 14px;
+    }
+    .shot-time { font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--muted); transition: color .2s ease; }
+    .shot-time.in-window { color: var(--green); }
+    .shot-time.over { color: var(--red); }
+    .shot-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .btn-shot {
+      border: none; cursor: pointer; padding: 13px 20px; border-radius: 12px;
+      font-size: 14px; font-weight: 700; color: #cdeede;
+      background: rgba(76,175,125,.14); border: 1px solid rgba(76,175,125,.4);
+      transition: transform .05s ease, background .15s ease;
+    }
+    .btn-shot:active { transform: translateY(1px); }
+    .btn-shot.running { background: var(--red); border-color: var(--red); color: #1a0d0c; }
+
+    table.history { width: 100%; border-collapse: collapse; font-size: 13px; }
+    table.history th, table.history td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
+    table.history th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+    table.history td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .empty-hint { color: var(--muted); font-size: 13px; padding: 6px 0; }
+
+    .descale-banner {
+      display: none; align-items: center; gap: 8px;
+      background: rgba(217,140,63,.14); border: 1px solid rgba(217,140,63,.4);
+      color: #f3dcc2; padding: 10px 14px; border-radius: 12px;
+      font-size: 13px; font-weight: 700; margin-bottom: 14px;
+    }
+    .btn-descaled {
+      width: 100%; border: none; cursor: pointer; margin-top: 12px;
+      padding: 12px; border-radius: 12px; font-size: 14px; font-weight: 700; color: #1a1206;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    }
+
     .autotune-row { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line); }
     .btn-autotune {
       width: 100%; border: none; cursor: pointer;
@@ -255,6 +304,14 @@ const char *index_html = R"rawliteral(
           <button onclick="startAutotune()" id="btn_autotune" class="btn-autotune">&#9889; Start Auto-Tune</button>
           <span id="autotune_status" class="autotune-status"></span>
         </div>
+
+        <div class="shot-row">
+          <div>
+            <div id="shot_time" class="shot-time">0:00</div>
+            <div class="shot-sub">Target window 25&ndash;30s</div>
+          </div>
+          <button onclick="toggleShot()" id="btn_shot" class="btn-shot">Start Shot</button>
+        </div>
       </div>
 
       <div class="card">
@@ -335,6 +392,34 @@ const char *index_html = R"rawliteral(
       </div>
     </div>
 
+    <div class="grid cols-2" style="margin-top:16px">
+      <div class="card">
+        <h2>Shot History</h2>
+        <div id="shot_history_empty" class="empty-hint">No shots logged yet.</div>
+        <div style="overflow-x:auto">
+          <table class="history" id="shot_history_table" style="display:none">
+            <thead><tr><th>When</th><th>Duration</th><th>Peak &deg;C</th><th>Weight</th></tr></thead>
+            <tbody id="shot_history_body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Maintenance</h2>
+        <div id="descale_banner" class="descale-banner">&#9888; Descale recommended</div>
+        <div class="metric-row"><span>Shots since last descale</span><b><span id="descale_shots">--</span></b></div>
+        <div class="metric-row"><span>Days since last descale</span><b><span id="descale_days">--</span></b></div>
+        <form action="/update" method="GET">
+          <div class="field-row">
+            <div class="field"><label for="input_descale_shots">Shot threshold</label><input type="number" step="1" min="1" name="descale_shot_threshold" id="input_descale_shots" value=""></div>
+            <div class="field"><label for="input_descale_days">Day threshold</label><input type="number" step="1" min="1" name="descale_day_threshold" id="input_descale_days" value=""></div>
+          </div>
+          <input type="submit" value="Save Thresholds" class="submit">
+        </form>
+        <button onclick="markDescaled()" class="btn-descaled">Mark Descaled Today</button>
+      </div>
+    </div>
+
     <footer>
       <a href="/firmware">Firmware update (OTA)</a> &middot; <span id="host">gaggia.local</span>
     </footer>
@@ -368,8 +453,67 @@ function drawSparkline(data) {
   ctx.stroke();
 }
 
+function formatElapsed(ms) {
+  var s = Math.floor(ms / 1000);
+  var m = Math.floor(s / 60);
+  s = s % 60;
+  return m + ":" + (s < 10 ? "0" : "") + s;
+}
+
 var lastUpdateTime = null;
 var lastAutotuneState = null; // tracks transitions, so the force-refresh below fires once
+
+// Shot timer: shotRunning/shotElapsedBaseMs are refreshed from each /status
+// poll; the 1s ticker below interpolates smoothly between polls rather than
+// only updating every 2s.
+var shotRunning = false;
+var shotElapsedBaseMs = 0;
+var shotElapsedCapturedAt = null;
+var prevShotRunning = false; // detects the stop transition, to refresh history once
+
+setInterval(function () {
+  var el = document.getElementById("shot_time");
+  if (!el) return;
+  var ms = shotElapsedBaseMs;
+  if (shotRunning && shotElapsedCapturedAt !== null) {
+    ms += Date.now() - shotElapsedCapturedAt;
+  }
+  el.textContent = formatElapsed(ms);
+  var secs = ms / 1000;
+  el.classList.toggle("in-window", shotRunning && secs >= 25 && secs <= 30);
+  el.classList.toggle("over", shotRunning && secs > 30);
+}, 1000);
+
+function fetchShotHistory() {
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function () {
+    if (this.readyState == 4 && this.status == 200) {
+      var shots = JSON.parse(this.responseText);
+      var body = document.getElementById("shot_history_body");
+      var table = document.getElementById("shot_history_table");
+      var empty = document.getElementById("shot_history_empty");
+      if (!shots.length) {
+        table.style.display = "none";
+        empty.style.display = "block";
+        return;
+      }
+      empty.style.display = "none";
+      table.style.display = "table";
+      body.innerHTML = "";
+      shots.slice().reverse().slice(0, 15).forEach(function (s) {
+        var tr = document.createElement("tr");
+        var when = new Date(s.ts * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+        var dur = formatElapsed(s.duration_ms);
+        var weight = s.weight > 0 ? s.weight.toFixed(1) + "g" : "&mdash;";
+        tr.innerHTML = "<td>" + when + "</td><td class='num'>" + dur + "</td><td class='num'>" + s.peak_temp.toFixed(1) + "</td><td class='num'>" + weight + "</td>";
+        body.appendChild(tr);
+      });
+    }
+  };
+  xhttp.open("GET", "/shots", true);
+  xhttp.send();
+}
+fetchShotHistory();
 setInterval(function () {
   var el = document.getElementById("last_updated");
   if (!el) return;
@@ -465,6 +609,23 @@ setInterval(function () {
         document.getElementById("input_" + p + "_kd").value = json[p + "_kd"];
       }
       lastAutotuneState = json.autotune_state;
+
+      // Shot timer
+      shotRunning = json.shot_in_progress;
+      shotElapsedBaseMs = json.shot_elapsed_ms;
+      shotElapsedCapturedAt = Date.now();
+      var btnShot = document.getElementById("btn_shot");
+      btnShot.textContent = shotRunning ? "Stop Shot" : "Start Shot";
+      btnShot.classList.toggle("running", shotRunning);
+      if (prevShotRunning && !shotRunning) fetchShotHistory(); // shot just ended
+      prevShotRunning = shotRunning;
+
+      // Maintenance / descale
+      setVal("input_descale_shots", json.descale_shot_threshold);
+      setVal("input_descale_days", json.descale_day_threshold);
+      document.getElementById("descale_shots").textContent = json.shot_count;
+      document.getElementById("descale_days").textContent = json.days_since_descale >= 0 ? json.days_since_descale : "--";
+      document.getElementById("descale_banner").style.display = json.descale_due ? "flex" : "none";
     }
   };
   xhttp.open("GET", "/status", true);
@@ -493,6 +654,19 @@ function startAutotune() {
 function stopAutotune() {
   var xhttp = new XMLHttpRequest();
   xhttp.open("GET", "/update?autotune=stop", true);
+  xhttp.send();
+}
+
+function toggleShot() {
+  var xhttp = new XMLHttpRequest();
+  xhttp.open("GET", "/update?shot=" + (shotRunning ? "stop" : "start"), true);
+  xhttp.send();
+}
+
+function markDescaled() {
+  if (!confirm("Reset the descale counters? Confirm you've just descaled the machine.")) return;
+  var xhttp = new XMLHttpRequest();
+  xhttp.open("GET", "/update?mark_descaled=1", true);
   xhttp.send();
 }
 
@@ -611,6 +785,23 @@ void setupWeb() {
     json += "\"";
     json += ",\"autotune_message\":\"" + autotuneMessage + "\"";
 
+    json += ",\"shot_in_progress\":" + String(shotInProgress ? "true" : "false");
+    json += ",\"shot_elapsed_ms\":" +
+            String(shotInProgress ? (millis() - shotStartMillis) : 0);
+
+    json += ",\"shot_count\":" + String(shotCount);
+    json += ",\"descale_shot_threshold\":" + String(descaleShotThreshold);
+    json += ",\"descale_day_threshold\":" + String(descaleDayThreshold);
+    // -1 means "unknown" (never descaled/reset since this feature was added) -
+    // avoids flashing a false "descale overdue" banner from an epoch-0 default.
+    long daysSinceDescale =
+        (lastDescaleTime > 0) ? (long)((time(nullptr) - lastDescaleTime) / 86400L) : -1;
+    json += ",\"days_since_descale\":" + String(daysSinceDescale);
+    bool descaleDue =
+        (shotCount >= descaleShotThreshold) ||
+        (daysSinceDescale >= 0 && (unsigned long)daysSinceDescale >= descaleDayThreshold);
+    json += ",\"descale_due\":" + String(descaleDue ? "true" : "false");
+
     json += ",\"history\":[";
     for (int i = 0; i < tempHistoryCount; i++) {
       int idx = (tempHistoryHead - tempHistoryCount + i + TEMP_HISTORY_LEN * 2) %
@@ -623,6 +814,10 @@ void setupWeb() {
     json += "}";
     server.send(200, "application/json", json);
   });
+
+  // Shot history log
+  server.on("/shots", HTTP_GET,
+            []() { server.send(200, "application/json", shotLogReadJson()); });
 
   // Settings Update Handler
   server.on("/update", HTTP_GET, []() {
@@ -714,6 +909,30 @@ void setupWeb() {
       } else if (at == "stop") {
         stopAutotune();
       }
+    }
+
+    // Shot timer (manual Start/Stop trigger - see config.h / AGENTS.md
+    // roadmap item 7 for why this isn't automatic yet).
+    if (server.hasArg("shot")) {
+      String s = server.arg("shot");
+      if (s == "start") {
+        startShot();
+      } else if (s == "stop") {
+        stopShot();
+      }
+    }
+
+    // Descale / maintenance reminder
+    if (server.hasArg("mark_descaled") && server.arg("mark_descaled") == "1") {
+      markDescaled();
+    }
+    if (server.hasArg("descale_shot_threshold")) {
+      descaleShotThreshold = server.arg("descale_shot_threshold").toInt();
+      preferences.putULong("descale_shots", descaleShotThreshold);
+    }
+    if (server.hasArg("descale_day_threshold")) {
+      descaleDayThreshold = server.arg("descale_day_threshold").toInt();
+      preferences.putULong("descale_days", descaleDayThreshold);
     }
 
     // MQTT Settings

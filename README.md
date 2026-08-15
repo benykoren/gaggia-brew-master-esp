@@ -147,14 +147,26 @@ Open `http://gaggia.local` (or the board's IP) in any browser.
 
 ## Roadmap
 
-Sequenced by risk and dependency — sensor-only additions first, then the next mains-voltage subsystem, then the most software-heavy piece last:
+Informed by researching two mature sibling projects — [Gaggiuino](https://github.com/Zer0-bit/gaggiuino) and [GaggiMate](https://github.com/jniebuhr/gaggimate) — and the actual coffee science behind espresso/cappuccino extraction (SCA guidelines, pressure-profiling literature). Full detail, sourcing, and reasoning for every item is in `AGENTS.md` §8; here's the shape of it, organized by what it actually costs you to add:
 
-- **In progress:** a Nextion touchscreen HMI, for on-machine status and control without needing a phone.
-- **Phase 1 — Sensing expansion:** a water tank level sensor (float switch, low-water pump interlock) and a real-time pressure transducer with a live pressure graph.
-- **Phase 2 — Advanced actuation:** AC phase-control pump dimmer for programmable pre-infusion and flow/pressure profiling — a second real mains-voltage subsystem, built with the same safety discipline as the heater circuit.
-- **Phase 3 — IoT integration:** Bluetooth smart scale support with shot auto-stop by weight.
+**In progress:** a Nextion touchscreen HMI for on-machine status and control without needing a phone.
 
-Full technical detail (hardware, firmware approach, and UI considerations for each) is in `AGENTS.md` §8.
+**Software only, no new hardware:**
+- Shot timer (espresso extraction has a real target window, ~25-30s)
+- Shot history log (duration + peak temp per shot)
+- Descale / maintenance reminder
+
+**Cheap, low-voltage sensors (no mains wiring):**
+- Milk temperature probe for cappuccino/steaming (~$2-3 DS18B20 probe) — a real gap neither Gaggiuino nor GaggiMate address; dairy science puts the ideal steaming range at ~55-65°C with a hard ~70°C scald ceiling
+- Water tank level sensor (~$2-5 magnetic float switch) — low-water warning now, a real pump interlock later
+- Real-time pressure transducer + live pressure graph (0-1.2 to 1.6MPa, mounted at the pump outlet — same spec both competitor projects use)
+- Automatic shot start/stop detection (sense-only) — a non-invasive current-transformer clamp (~$3-5) around the pump's wire, so the shot timer/history/descale count above start themselves the moment the machine's own Brew switch is used — no manual button, and no mains wiring touched
+
+**Wireless purchase, no wiring:**
+- Bluetooth smart scale with brew-by-weight auto-stop (Bookoo or Felicita — confirmed the DIY-friendliest protocols; brew-by-weight is more repeatable than brew-by-time). Note: reading the weight isn't the same as acting on it — actually cutting the pump at a target weight needs the pump dimmer below too.
+
+**A second real mains-voltage subsystem:**
+- AC phase-control pump dimmer for programmable pressure/flow profiling — pre-infusion and declining-pressure curves, not a flat 9-bar target, built with the same bench-first safety discipline as the heater circuit. This is also what turns sensing into *action*: once the ESP32 can drive the pump, auto-stop by a configured time (no extra hardware) or by a configured weight (with the BLE scale above) both become real, and paired with the current-transformer detection above, a shot can start and stop with zero manual buttons. If this becomes a must-have, migrating to GaggiMate outright (rather than rebuilding its profiling work from scratch) is a real option worth considering.
 
 ---
 
