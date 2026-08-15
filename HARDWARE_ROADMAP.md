@@ -7,21 +7,24 @@ out for.** `AGENTS.md` remains the single source of truth for the *why*
 change log (§10). This file is the *what/how*, and is kept current as each
 item is planned in more detail or actually built.
 
-Items 1-3 (shot timer, shot history, descale reminder) are already shipped —
-pure software, no hardware. See `AGENTS.md` §8 and the README roadmap.
-Everything below is **not yet built**.
+Items 1-3 (shot timer, shot history, descale reminder) are already
+shipped — pure software, no hardware. See `AGENTS.md` §8 and the README
+roadmap. Numbering below continues from there, and is **ordered by
+priority** (highest-value/most-wanted first), not by cost tier or the
+order items were originally proposed in. Everything below is **not yet
+built**.
 
 ## Contents
 
 - [Summary](#summary)
 - [Tools worth having first](#tools-worth-having-first)
-- [Item 4 — Milk temperature probe](#item-4--milk-temperature-probe)
-- [Item 5 — Water tank level sensor](#item-5--water-tank-level-sensor)
-- [Item 6 — Pressure transducer + live pressure graph](#item-6--real-time-pressure-transducer--live-pressure-graph)
-- [Item 7 — Automatic shot start/stop detection](#item-7--automatic-shot-startstop-detection-sense-only)
-- [Item 8 — Bluetooth smart scale](#item-8--bluetooth-smart-scale--brew-by-weight-auto-stop)
-- [Item 9a — Pump on/off control](#item-9a--pump-onoff-control-control-the-button)
-- [Item 9b — Phase-control dimmer](#item-9b--phase-control-dimmer-to-a-pressure-target-eg-9-bar)
+- [Item 4 — Pump on/off control](#item-4--pump-onoff-control-control-the-button)
+- [Item 5 — Bluetooth smart scale](#item-5--bluetooth-smart-scale--brew-by-weight-auto-stop)
+- [Item 6 — Water tank level sensor](#item-6--water-tank-level-sensor)
+- [Item 7 — Pressure transducer + live pressure graph](#item-7--real-time-pressure-transducer--live-pressure-graph)
+- [Item 8 — Phase-control dimmer](#item-8--phase-control-dimmer-to-a-pressure-target-eg-9-bar)
+- [Item 9 — Nextion touchscreen HMI](#item-9--nextion-touchscreen-hmi)
+- [Item 10 — Milk temperature probe](#item-10--milk-temperature-probe)
 
 ---
 
@@ -29,17 +32,27 @@ Everything below is **not yet built**.
 
 | Item | Adds | Depends on | Needed for your current goal? | Est. cost |
 |---|---|---|---|---|
-| 4 | Milk temperature probe | — | No | $2-3 |
-| 5 | Water tank level sensor | — | No | $2-5 |
-| 6 | Live pressure reading | — | Only if pursuing item 9b later | $15-30 |
-| 7 | Automatic shot detection | — | **No — see decision below** | $3-5 |
-| 8 | BLE smart scale (36g auto-stop) | — | Yes | scale cost |
-| 9a | Pump on/off relay (25s / weight auto-stop) | — | **Yes — this is the core item** | $9-13 |
-| 9b | Phase-control pressure profiling | Item 6 | No | $12-20+ |
+| **4** | Pump on/off relay (25s / weight auto-stop) | — | **Yes — this is the core item** | $9-13 |
+| **5** | BLE smart scale (36g auto-stop) | — | Yes | scale cost |
+| 6 | Water tank level sensor | — | No | $2-5 |
+| 7 | Live pressure reading | — | Only if pursuing item 8 later | $15-30 |
+| 8 | Phase-control pressure profiling | Item 7 | No | $12-20+ |
+| 9 | Nextion touchscreen HMI | — | No | $15-40 |
+| 10 | Milk temperature probe | — | No | $2-3 |
+
+**Numbering history:** this list was reordered by priority on 2026-08-16,
+continuing from the already-shipped items 1-3 rather than restarting at 1
+(avoids colliding with those numbers elsewhere in `AGENTS.md`). Earlier
+conversation/commit history refers to these by their original labels — item
+4 was "9a," item 5 was "8," item 6 was "5," item 7 was "6," item 8 was "9b,"
+item 9 was "Display," item 10 was "4." A prior item ("7," sense-only shot
+detection via a current-transformer clamp) was **removed entirely** —
+explicitly rejected in favor of real control instead of passive sensing;
+see item 4's firmware notes for where that consideration now lives.
 
 Current stated goal — stop the pump at **25 seconds**, or later at **36
-grams** once a BLE scale is in hand — needs only **items 9a and 8**. Items
-4, 5, 6, 7, and 9b are independent, optional, and can be picked up in any
+grams** once a BLE scale is in hand — needs only **items 4 and 5**. Items
+6, 7, 8, 9, and 10 are independent, optional, and can be picked up in any
 order later.
 
 ---
@@ -53,172 +66,22 @@ alternative where one exists.
 
 | Tool | Cost | Unblocks |
 |---|---|---|
-| Basic resistor assortment kit | ~$8 | Item 4's pull-up; simplifies items 6 and 7 (otherwise each needs a pre-conditioned sensor module instead of the bare part) |
-| Non-contact AC voltage tester (pen-style proximity tester, **not** a multimeter — no probes touch conductors) | ~$5-10 | Item 9a/9b's one open wiring question: identifying the switched-Line wire at the pump's terminals |
+| Basic resistor assortment kit | ~$8 | Item 10's pull-up; simplifies item 7 (otherwise it needs a pre-conditioned sensor module instead of the bare part) |
+| Non-contact AC voltage tester (pen-style proximity tester, **not** a multimeter — no probes touch conductors) | ~$5-10 | Item 4/8's one open wiring question: identifying the switched-Line wire at the pump's terminals |
 
 This project has so far deliberately avoided buying resistors or a
 multimeter (see `AGENTS.md` §7) — that's a fine choice for a one-off
-workaround, but several items below independently want the same two tools.
+workaround, but more than one item below independently wants the same tools.
 
 ---
 
-## Item 4 — Milk temperature probe
-
-**Status:** not started. **Depends on:** nothing.
-
-**What it's for:** real-time milk temperature during steaming. Dairy
-science puts the sweet spot at ~55-65°C, with ~70°C as a hard
-scald/foam-collapse ceiling. Neither Gaggiuino nor GaggiMate address this at
-all — see `AGENTS.md` §7 competitive research.
-
-**Buy:**
-
-| Part | Spec | Cost |
-|---|---|---|
-| Waterproof DS18B20 probe | Digital, OneWire, stainless sheath | ~$2-3 |
-| Pull-up resistor | 4.7kΩ | from the resistor kit above |
-
-**Wire:** one free GPIO → DS18B20 data pin, with the 4.7kΩ resistor between
-data and 3V3 (standard OneWire pull-up). DS18B20 power/GND → 3V3/GND.
-
-**No-resistor alternative:** some DS18B20 breakout boards ship with the
-pull-up already on board — check before assuming a loose resistor is needed.
-
-**Firmware:** OneWire + DallasTemperature libraries (both common,
-well-trodden on ESP32). Simple polled read, no interrupt/timing sensitivity.
-
----
-
-## Item 5 — Water tank level sensor
-
-**Status:** not started. **Depends on:** nothing.
-
-**What it's for:** low-water warning now; becomes a real pump interlock
-once item 9a (pump on/off control) exists.
-
-**Buy:**
-
-| Part | Spec | Cost |
-|---|---|---|
-| Magnetic float switch | Normally-open or normally-closed (either works, just flip the logic in firmware) | ~$2-5 |
-
-**Wire:** one free GPIO (digital input, internal pull-up enabled in
-firmware — `INPUT_PULLUP`), other switch leg → GND. No external resistor
-needed.
-
-**Firmware:** debounce the same way the temperature sensor's fault handling
-already does (see `AGENTS.md` §9 change log) — float switches chatter
-mechanically, don't trust a single read.
-
----
-
-## Item 6 — Real-time pressure transducer + live pressure graph
-
-**Status:** not started. **Depends on:** nothing (item 9b later depends on
-this).
-
-**What it's for:** a standalone monitoring/graph feature on its own, and
-the hard prerequisite for pressure profiling in item 9b. **0-1.2 to
-1.6MPa (12-16 bar)** confirmed as the right range from both Gaggiuino and
-GaggiMate (`AGENTS.md` §7 competitive research).
-
-**Buy:**
-
-| Part | Spec | Cost |
-|---|---|---|
-| Analog pressure transducer | 0-1.2 to 1.6MPa (12-16 bar) range, food-safe wetted parts | ~$15-30 |
-| T-fitting | Sized to match the pump-outlet plumbing | varies |
-
-**Watch out for:** most cheap automotive-style pressure transducers are
-**5V-supply, 0.5-4.5V output** — that range doesn't fit inside the ESP32
-ADC's 0-3.3V window without a divider. Two ways to handle it:
-- Buy a variant explicitly specified for 3.3V supply/output if available,
-  avoiding the divider entirely, **or**
-- Use a 2-resistor voltage divider to scale 0-4.5V down to 0-3.3V (from the
-  resistor kit above).
-
-**Wire:** analog output → an **ADC1 pin specifically** (ESP32-S3: ADC2 pins
-share hardware with WiFi and become unavailable/contaminated when WiFi is
-active — same lesson as elsewhere in this project). Plumbed at the **pump
-outlet** via the T-fitting — a real plumbing job, not just wiring; budget
-time for it separately from the electrical work.
-
----
-
-## Item 7 — Automatic shot start/stop detection (sense-only)
-
-**Status:** not started. **Depends on:** nothing.
-
-**Decision (2026-08-16): not needed for the current goal.** Stopping the
-pump at 25 seconds or at 36 grams doesn't require this item — see below.
-
-**What it's for:** auto-triggering the existing shot timer/history/descale
-count (currently a manual Web UI button) the moment the machine's own Brew
-switch is used, without touching any mains wiring. **Sense-only** — this
-does not let the ESP32 control the pump; that's item 9a.
-
-**Why it isn't required right now:**
-- **Weight-based stop (36g, item 8):** needs no "shot started" reference at
-  all — firmware just watches the scale continuously and cuts the relay the
-  instant weight crosses the target. Item 7 has nothing to add here.
-- **Time-based stop (25s, item 9a):** does need a start-time reference to
-  count from, but the existing manual "Start Shot" Web UI button already
-  provides that the moment it's tapped — no new hardware required. Item 7
-  would only remove that one manual tap, making the detection fully
-  automatic (matching the physical switch alone, zero Web UI interaction).
-  A convenience upgrade, not a requirement.
-
-Revisit this item if/when fully hands-off operation (no manual Start Shot
-tap at all) becomes worth the extra hardware.
-
-**Buy (when revisited):**
-
-| Part | Spec | Cost |
-|---|---|---|
-| Non-invasive AC current-transformer clamp | e.g. SCT-013 family, clamps around the pump's existing wire | ~$3-5 (bare) |
-
-**Strongly prefer a pre-conditioned module over the bare clamp.** A bare
-SCT-013-000 needs an external burden resistor plus a DC-bias network to
-produce a 0-3.3V unipolar signal the ADC can read — two more resistor-kit
-items and a bit of analog design. Many sellers instead offer the same clamp
-pre-wired to a small PCB with the burden resistor and bias network already
-built in (often sold as a complete "AC current sensor module" with a 3.5mm
-jack). That version needs no extra parts — just power, GND, and signal into
-an ADC1 pin (same ADC1-not-ADC2 rule as item 6).
-
-**Wire:** clamp around one of the pump's existing conductors (non-invasive —
-the conductor itself is never cut or touched), module output → ADC1 pin.
-
----
-
-## Item 8 — Bluetooth smart scale + brew-by-weight auto-stop
-
-**Status:** not started. **Depends on:** nothing (pairs with item 9a for
-auto-stop-by-weight).
-
-**What it's for:** brew-by-weight is more repeatable than brew-by-time
-(weight is the actual outcome; time is a proxy confounded by grind/dose/
-tamp). Reading the weight isn't the same as *acting* on it — auto-stop at a
-target weight also needs item 9a's pump control.
-
-**Buy:** the scale itself — **Bookoo Themis or Felicita Arc**, confirmed as
-the DIY-friendliest choice (open BLE protocols, both on GaggiMate's own
-supported-scale list; Acaia/Decent use different, often
-community-reverse-engineered protocols). No new ESP32-side hardware — BLE is
-already built into the S3.
-
-**Firmware:** BLE central role, connecting to the scale's own peripheral
-service. No GPIO/wiring at all.
-
----
-
-## Item 9a — Pump on/off control ("control the button")
+## Item 4 — Pump on/off control ("control the button")
 
 **Status:** decided, not yet built. **Depends on:** nothing. This is the
-core item for the current goal (stop at 25s or 36g).
+core item for the current goal (stop at 25s or 36g). (Originally "item 9a.")
 
-**Split from the original combined "item 9" (2026-08-16)** into this easy
-on/off half and the harder profiling half (item 9b) — they have very
+**Split from an original combined "pump dimmer" item (2026-08-16)** into
+this easy on/off half and a harder profiling half (item 8) — they have very
 different complexity and dependencies. Just an on/off switch in series with
 the pump's existing switched wire, no phase-angle timing at all.
 
@@ -228,8 +91,8 @@ The machine's own Brew switch still starts the pump exactly as always,
 with **zero ESP32 involvement in starting a shot** — see the wiring
 decision below for why. Firmware can cut it early: auto-stop by a
 configured time (no other hardware needed) or by a configured weight (once
-item 8's BLE scale exists). **No pressure regulation, no profiling** — full
-power or nothing, same as the pump already runs today. That's item 9b, a
+item 5's BLE scale exists). **No pressure regulation, no profiling** — full
+power or nothing, same as the pump already runs today. That's item 8, a
 separate, harder project.
 
 ### Buy
@@ -255,7 +118,7 @@ daily espresso to wear out, and "silent" buys nothing on a machine whose
 pump is itself called a *vibration* pump. The one real tradeoff — a relay
 switches in a few milliseconds, not instantly — doesn't matter for stopping
 at a time or weight threshold measured in seconds/grams. (This is exactly
-why item 9b *can't* use a plain relay: phase-angle dimming needs firing
+why item 8 *can't* use a plain relay: phase-angle dimming needs firing
 within a fraction of a millisecond of the AC zero-crossing. Plain on/off
 has no such requirement.) An SSR would also work fine if reusing the same
 part type as the heater is preferred — it just costs more for no benefit in
@@ -330,10 +193,12 @@ the switch itself.
 - **Auto-stop by time (25s):** needs a start-time reference. Today, that's
   the existing manual "Start Shot" Web UI button — tap it when flipping the
   switch, and firmware counts down from there before energizing the relay
-  to cut power. (Item 7 would automate this reference instead of it being
-  manual — see item 7's decision note above.)
+  to cut power. (A passive sense-only detector was considered to automate
+  this tap away entirely and rejected — user wants real control, not
+  passive sensing. If fully hands-off detection is wanted later, it belongs
+  here as a control extension, not a separate passive sensor.)
 - **Auto-stop by weight (36g):** no start reference needed — continuously
-  poll the BLE scale (item 8) and energize the relay the instant the target
+  poll the BLE scale (item 5) and energize the relay the instant the target
   is crossed.
 - **Default state on boot: de-energized** (relay passes power through,
   switch behaves normally) — this is the fail-safe default for *this*
@@ -364,27 +229,115 @@ the switch itself.
    immediately if anything looks, sounds, or smells wrong.
 10. Only after a clean supervised run of plain pass-through, test
     firmware-triggered auto-stop (relay energizes mid-shot to cut it), then
-    (once item 8 exists) auto-stop by weight.
+    (once item 5 exists) auto-stop by weight.
 
 ---
 
-## Item 9b — Phase-control dimmer to a pressure target (e.g. 9 bar)
+## Item 5 — Bluetooth smart scale + brew-by-weight auto-stop
 
-**Status:** deferred. **Depends on:** item 6 (pressure transducer) — hard
-prerequisite, see below.
+**Status:** not started. **Depends on:** nothing (pairs with item 4 for
+auto-stop-by-weight). (Originally "item 8.")
 
-**Split from the original combined "item 9" (2026-08-16)** as the harder
-half. This is a real closed-loop control problem, not just a bigger relay —
-regulating to "9 bar" requires a pressure reading to control against, so
-**item 6 is a hard prerequisite here**, which wasn't as strict a dependency
-under the old combined item 9.
+**What it's for:** brew-by-weight is more repeatable than brew-by-time
+(weight is the actual outcome; time is a proxy confounded by grind/dose/
+tamp). Reading the weight isn't the same as *acting* on it — auto-stop at a
+target weight also needs item 4's pump control.
 
-### What this gets you beyond item 9a
+**Buy:** the scale itself — **Bookoo Themis or Felicita Arc**, confirmed as
+the DIY-friendliest choice (open BLE protocols, both on GaggiMate's own
+supported-scale list; Acaia/Decent use different, often
+community-reverse-engineered protocols). No new ESP32-side hardware — BLE is
+already built into the S3.
+
+**Firmware:** BLE central role, connecting to the scale's own peripheral
+service. No GPIO/wiring at all.
+
+---
+
+## Item 6 — Water tank level sensor
+
+**Status:** not started. **Depends on:** nothing. (Originally "item 5.")
+
+**What it's for:** low-water warning now; becomes a real pump interlock
+once item 4 (pump on/off control) exists.
+
+**Buy:**
+
+| Part | Spec | Cost |
+|---|---|---|
+| Magnetic float switch | Normally-open or normally-closed (either works, just flip the logic in firmware) | ~$2-5 |
+
+**The tank is removable, not fixed — this affects the wiring.** The Gaggia
+Espresso Color's water tank lifts out to refill, so a float switch mounted
+inside it needs a connection that survives being pulled out and reseated
+repeatedly. A bare wire soldered to the switch would mean disconnecting/
+reconnecting by hand every refill — the same nuisance as item 10's milk
+probe. The standard fix: **spring-loaded contacts (pogo pins) at the bottom
+of the tank bay**, mating with a corresponding contact on the tank's
+underside when it's seated. The wire then stays fixed to the machine
+chassis permanently; only the contact tips touch/separate as the tank goes
+in and out, no manual plugging involved. Choose contacts rated for
+corrosion resistance given the proximity to water.
+
+**Wire:** one free GPIO (digital input, internal pull-up enabled in
+firmware — `INPUT_PULLUP`), other switch leg → GND, routed through the
+pogo-pin contacts above. No external resistor needed.
+
+**Firmware:** debounce the same way the temperature sensor's fault handling
+already does (see `AGENTS.md` §9 change log) — float switches chatter
+mechanically, don't trust a single read.
+
+---
+
+## Item 7 — Real-time pressure transducer + live pressure graph
+
+**Status:** not started. **Depends on:** nothing (item 8 later depends on
+this). (Originally "item 6.")
+
+**What it's for:** a standalone monitoring/graph feature on its own, and
+the hard prerequisite for pressure profiling in item 8. **0-1.2 to
+1.6MPa (12-16 bar)** confirmed as the right range from both Gaggiuino and
+GaggiMate (`AGENTS.md` §7 competitive research).
+
+**Buy:**
+
+| Part | Spec | Cost |
+|---|---|---|
+| Analog pressure transducer | 0-1.2 to 1.6MPa (12-16 bar) range, food-safe wetted parts | ~$15-30 |
+| T-fitting | Sized to match the pump-outlet plumbing | varies |
+
+**Watch out for:** most cheap automotive-style pressure transducers are
+**5V-supply, 0.5-4.5V output** — that range doesn't fit inside the ESP32
+ADC's 0-3.3V window without a divider. Two ways to handle it:
+- Buy a variant explicitly specified for 3.3V supply/output if available,
+  avoiding the divider entirely, **or**
+- Use a 2-resistor voltage divider to scale 0-4.5V down to 0-3.3V (from the
+  resistor kit above).
+
+**Wire:** analog output → an **ADC1 pin specifically** (ESP32-S3: ADC2 pins
+share hardware with WiFi and become unavailable/contaminated when WiFi is
+active — same lesson as elsewhere in this project). Plumbed at the **pump
+outlet** via the T-fitting — a real plumbing job, not just wiring; budget
+time for it separately from the electrical work.
+
+---
+
+## Item 8 — Phase-control dimmer to a pressure target (e.g. 9 bar)
+
+**Status:** deferred. **Depends on:** item 7 (pressure transducer) — hard
+prerequisite, see below. (Originally "item 9b.")
+
+**Split from an original combined "pump dimmer" item (2026-08-16)** as the
+harder half. This is a real closed-loop control problem, not just a bigger
+relay — regulating to "9 bar" requires a pressure reading to control
+against, so **item 7 is a hard prerequisite here**.
+
+### What this gets you beyond item 4
 
 Programmable pressure/flow profiles — a gentle low-pressure pre-infusion
 soak before ramping to a target (e.g. 9 bar), and/or a declining-pressure
 curve near the end of a shot — matching both Gaggiuino's and GaggiMate's
-profiling architecture (`AGENTS.md` §7). This replaces item 9a's relay with
+profiling architecture (`AGENTS.md` §7). This replaces item 4's relay with
 a TRIAC dimmer capable of partial power, and adds a PID-style control loop
 using the pressure transducer as feedback (the same "measure → PID → drive
 output" shape already built for temperature).
@@ -393,22 +346,22 @@ output" shape already built for temperature).
 
 | Part | Spec | Why | Cost |
 |---|---|---|---|
-| AC dimmer module | Zero-cross detection + TRIAC, opto-isolated, **3.3V-logic compatible** (e.g. RobotDyn AC Light Dimmer Module or equivalent) | Same mains position as item 9a's relay, but capable of partial power via phase-angle firing | $10-15 |
-| *(Everything else — fuse, wire, connectors)* | Same as item 9a | Reused, not duplicated | — |
+| AC dimmer module | Zero-cross detection + TRIAC, opto-isolated, **3.3V-logic compatible** (e.g. RobotDyn AC Light Dimmer Module or equivalent) | Same mains position as item 4's relay, but capable of partial power via phase-angle firing | $10-15 |
+| *(Everything else — fuse, wire, connectors)* | Same as item 4 | Reused, not duplicated | — |
 
-If item 9a is already built, this is a **swap**: same splice point at the
+If item 4 is already built, this is a **swap**: same splice point at the
 pump's terminals, relay out, dimmer module in. The wiring decision and
-splice-at-the-pump reasoning from item 9a apply unchanged — only the
+splice-at-the-pump reasoning from item 4 apply unchanged — only the
 NC-contact detail is moot here, since the dimmer module replaces the relay
 entirely.
 
-**GPIO:** two free digital pins instead of item 9a's one — zero-cross
-output (interrupt input) and TRIAC gate control (output), replacing the
-single `PIN_PUMP` output.
+**GPIO:** two free digital pins instead of item 4's one — zero-cross output
+(interrupt input) and TRIAC gate control (output), replacing the single
+`PIN_PUMP` output.
 
 ### Firmware considerations
 
-- **Requires item 6 (pressure transducer) already wired and reading
+- **Requires item 7 (pressure transducer) already wired and reading
   correctly** — this is the feedback signal the control loop closes on.
   Without it, "control to 9 bar" has nothing to measure against.
 - **Phase-angle firing timing must not use `delayMicroseconds()` in a
@@ -426,11 +379,127 @@ single `PIN_PUMP` output.
 
 ### Procedure
 
-Same bench-first sequence as item 9a (steps 1-8), substituting the dimmer
+Same bench-first sequence as item 4 (steps 1-8), substituting the dimmer
 module for the relay. After first live power-up confirms plain full-power
-pass-through works exactly like item 9a, only then start closed-loop tuning
+pass-through works exactly like item 4, only then start closed-loop tuning
 against the pressure transducer — expect this to take real iteration, the
 same way brew-temperature PID tuning did (`AGENTS.md` §10 change log).
+
+---
+
+## Item 9 — Nextion touchscreen HMI
+
+**Status:** decided, not yet started. (Corrected 2026-08-16 — `AGENTS.md`
+and `README.md` previously mislabeled this "in progress"; no hardware has
+been bought and no driver written yet.) **Depends on:** nothing.
+(Originally tracked as "Display.")
+
+This is a different kind of item from 4-8 and 10: those are new sensing/
+actuation capabilities; this is an alternative *interface* to capabilities
+that already exist via the Web UI, not a new capability itself.
+
+### What this gets you
+
+On-machine status and basic control without needing a phone — live
+temperature, current mode, shot timer, start/stop. **Deep configuration
+(PID tuning, thresholds, profile editing) stays on the Web UI** — an
+explicit design call, independently validated by the Gaggiuino/GaggiMate
+research in `AGENTS.md` §7: both competitor projects keep profile editing
+on a phone/web UI too, using their on-device screens only for live status
+and basic control.
+
+### Why Nextion over a raw OLED/color-TFT
+
+A Nextion panel has its own onboard display controller — the GUI (buttons,
+text fields, gauges) is designed in Nextion's own free editor and uploaded
+to the panel directly; the ESP32 then just sends/receives simple serial
+commands. This is a much smaller firmware lift than driving a raw display
+buffer/graphics library from the ESP32 itself, and matches this project's
+already-proven "external component over UART" pattern (the same shape as
+the UART PT100 temperature module). It's also architecturally simpler than
+GaggiMate's approach, which runs a full LVGL graphics stack on a *second*,
+separate ESP32 board talking BLE back to its controller board — this
+project keeps everything on the single existing ESP32-S3.
+
+### Buy
+
+| Part | Spec | Cost |
+|---|---|---|
+| Nextion display module | Basic or Enhanced series; size is an open decision — depends on available panel space on the machine | ~$15-40 depending on size |
+
+**Screen size isn't decided** — pick based on how much physical panel space
+is available and where it'll be mounted, not something this document can
+specify without an enclosure plan.
+
+### Wire
+
+Nextion modules use a simple 4-wire UART interface: `5V`, `GND`, `TX`, `RX`.
+This needs a **second, separate hardware UART** from the temp sensor's
+(currently on `GPIO17`/`GPIO18`) — the ESP32-S3 has three hardware UART
+controllers, so this is just a matter of picking two more free GPIOs,
+avoiding the reserved ranges already noted in `config.h` (native USB, SPI
+flash, PSRAM, strapping pins, onboard LED) and the pins already in use
+(`GPIO4`, `GPIO17`, `GPIO18`).
+
+**Check the specific module's logic-level tolerance before wiring.** Nextion
+Basic-series panels are commonly documented as 5V-powered but
+3.3V-logic-tolerant on TX/RX, which would allow a direct connection to the
+ESP32's 3.3V GPIOs — but confirm against the specific model's datasheet
+rather than assuming, the same caution as elsewhere in this project (relay
+trigger polarity, pressure sensor voltage range).
+
+### Firmware
+
+- New `nextion.cpp` driver (already named as the plan in `AGENTS.md` §8),
+  following the same "external component over UART" shape as
+  `temp_sensor.cpp`.
+- Either a lightweight custom parser matching this project's existing
+  DIY-protocol style, or the common `ITEADLIB_Arduino_Nextion` library —
+  either is reasonable; not yet decided.
+- Scope stays deliberately narrow per the design call above: push live
+  values (temp, mode, shot timer) to the display and read back simple touch
+  events (start/stop, maybe mode switch) — no profile editing, no PID
+  tuning on-device.
+
+### Physical mounting
+
+Cutting a panel opening for the screen is a real fabrication task, separate
+from the electrical work — similar in kind to item 7's plumbing job. Budget
+for it as its own step, and settle on screen size/mounting location before
+ordering the part.
+
+---
+
+## Item 10 — Milk temperature probe
+
+**Status:** not started. **Depends on:** nothing. (Originally "item 4.")
+
+**What it's for:** real-time milk temperature during steaming. Dairy
+science puts the sweet spot at ~55-65°C, with ~70°C as a hard
+scald/foam-collapse ceiling. Neither Gaggiuino nor GaggiMate address this at
+all — see `AGENTS.md` §7 competitive research.
+
+**The wire has to leave the machine, and that's a real drawback.** Unlike
+every other item on this list, this probe is only useful dipped into a
+separate milk pitcher — there's no way to avoid a wire (and a probe tip)
+being handled and routed externally every time it's used, which is why this
+item is ranked last despite being the cheapest thing on the whole roadmap.
+
+**Buy:**
+
+| Part | Spec | Cost |
+|---|---|---|
+| Waterproof DS18B20 probe | Digital, OneWire, stainless sheath | ~$2-3 |
+| Pull-up resistor | 4.7kΩ | from the resistor kit above |
+
+**Wire:** one free GPIO → DS18B20 data pin, with the 4.7kΩ resistor between
+data and 3V3 (standard OneWire pull-up). DS18B20 power/GND → 3V3/GND.
+
+**No-resistor alternative:** some DS18B20 breakout boards ship with the
+pull-up already on board — check before assuming a loose resistor is needed.
+
+**Firmware:** OneWire + DallasTemperature libraries (both common,
+well-trodden on ESP32). Simple polled read, no interrupt/timing sensitivity.
 
 ---
 

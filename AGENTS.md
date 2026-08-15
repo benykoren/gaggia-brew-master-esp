@@ -19,8 +19,9 @@ Color** espresso machine, running on an **ESP32-S3**. Started as a closed-loop
 thermostat, and has grown well beyond "just PID": Brew/Steam gain-scheduled
 modes, eco/auto-sleep, PID autotune, OTA updates, WiFi reconfiguration - with
 a local Wi-Fi Web UI (plus optional MQTT / Home Assistant), a Nextion
-touchscreen HMI in progress, and a phased roadmap toward pressure profiling,
-water-level safety, pump flow control, and Bluetooth scale integration (see
+touchscreen HMI decided but not yet started, and a phased roadmap toward
+pressure profiling, water-level safety, pump flow control, and Bluetooth
+scale integration (see
 [Roadmap](#8-roadmap--future-work)).
 
 **Project name note (2026-08-15):** renamed from the working name "Gaggia
@@ -453,11 +454,6 @@ Steam LED's function, or to make Thermostat 2 do real work again).
 
 - **Tune PID gains** for the Gaggia aluminum boiler — brew is largely dialed
   in (see Section 10 change log), steam still needs real testing.
-- **Physical local display (in progress, separate from the phased roadmap
-  below):** Nextion touchscreen HMI chosen over OLED/color-TFT — see
-  Section 10 for the decision and procedure. Will need its own `nextion.cpp`
-  driver once hardware is in hand, following the same "external component
-  over UART" pattern as `temp_sensor.cpp`.
 
 ### Competitive research (2026-08-16)
 
@@ -471,9 +467,9 @@ cappuccino extraction (SCA guidelines, Barista Hustle, etc.). Findings that
 change/confirm the plan:
 
 - **Both use a pressure transducer at the pump outlet, 0-1.2 to 1.6MPa
-  range** (12-16 bar) — concrete spec confirmation for Phase 1 below.
+  range** (12-16 bar) — concrete spec confirmation for item 7 below.
 - **Neither uses a dedicated flow sensor** — flow is estimated from pressure
-  + pump behavior, not physically metered. Simplifies Phase 2 - no separate
+  + pump behavior, not physically metered. Simplifies item 8 - no separate
   flow meter to source.
 - **Both structure pressure/flow profiles as ordered phases** (pump power/
   pressure/flow target + time/volume/pressure stop conditions per phase),
@@ -486,7 +482,7 @@ change/confirm the plan:
   2026-08-15) - a genuine point of confidence in this project's approach.
 - **GaggiMate's confirmed BLE scale list** includes Bookoo, Felicita, Acaia,
   Decent, and others - reconfirms Bookoo/Felicita as the DIY-friendliest
-  choices already favored in Phase 3 below.
+  choices already favored in item 5 below.
 - **Both use a K-type thermocouple, not PT100** - this project intentionally
   stays on PT100 (already working, more stable at espresso temps); not a
   reason to switch, just noting the divergence.
@@ -494,20 +490,20 @@ change/confirm the plan:
   optimum - real "pressure profiling" is about **pre-infusion** (a gentle
   low-pressure soak before ramping up, reduces channeling) and sometimes a
   **declining pressure curve** near the end of a shot, not "hold flat at 9
-  bar." This is exactly why Phase 2 below is phase-based, not a single fixed
+  bar." This is exactly why item 8 below is phase-based, not a single fixed
   target. Brew-by-weight is also confirmed as more repeatable than
   brew-by-time (weight is the actual outcome; time is a proxy confounded by
-  grind/dose/tamp) - reinforces Phase 3's priority.
+  grind/dose/tamp) - reinforces item 5's priority.
 - **A genuine gap in both competitors**: neither addresses **milk
   temperature for steaming/cappuccino** at all - they focus entirely on
   brew pressure/flow. Real dairy science says ideal steaming range is
-  ~55-65°C with ~70°C as a hard scald/foam-collapse ceiling. Added as a new
-  near-term item below since it's cheap, low-complexity, and a real
-  differentiator.
+  ~55-65°C with ~70°C as a hard scald/foam-collapse ceiling. Added as item
+  10 below - cheap and low-complexity, but ranked last since the wire has
+  to leave the machine (see item 10's own note).
 
-### Phased future roadmap, sequenced by risk/dependency
+### Phased future roadmap
 
-#### Can be done now — pure software, zero new hardware
+#### Shipped — pure software, zero hardware
 1. **Shot timer** - elapsed time display during Brew mode (target window is
    ~25-30s per shot, per SCA-referenced extraction guidelines).
 2. **Shot history log** - duration + peak temp per shot now; extends
@@ -516,60 +512,42 @@ change/confirm the plan:
 3. **Descale / maintenance reminder** - shot count or days-since-reset,
    surfaced in the Web UI (matches Gaggiuino's "Service Log").
 
-#### Needs new hardware, but cheap + low-voltage (no mains wiring)
+#### Not yet built — numbered by priority (2026-08-16), not by cost tier
 
-4. **Milk temperature probe for cappuccino/steaming.**
-   **Hardware:** one waterproof **DS18B20** digital temp probe (~$2-3),
-   one free GPIO (OneWire protocol, needs a 4.7kΩ pull-up resistor). Dipped
-   into the milk pitcher during steaming.
-   **Why:** neither competitor addresses milk temperature at all - real
-   dairy science says the sweet spot is ~55-65°C with ~70°C as a hard
-   scald/foam-collapse ceiling. Cheapest, simplest hardware item on this
-   whole list, and a genuine differentiator.
+Full buy lists, wiring diagrams, and step-by-step procedures for every item
+below are in [`HARDWARE_ROADMAP.md`](HARDWARE_ROADMAP.md) - this section is
+the *why* and the high-level shape; that file is the *what/how*. A prior
+item ("7," a sense-only current-transformer clamp for automatic shot
+detection) was **removed entirely (2026-08-16)** - user explicitly rejected
+passive sensing in favor of real control; see item 4 below for where that
+consideration now lives. Numbering continues from the shipped items 1-3
+above rather than restarting, and keeps the gap left by item 7's removal
+rather than renumbering everything again.
 
-5. **Water tank level sensor.**
-   **Hardware:** one magnetic float switch (~$2-5), one free GPIO (digital
-   input, internal pull-up).
-   **Why:** low-water warning now; becomes a real pump interlock once
-   item 9a (pump on/off control) exists.
+4. **Pump on/off control ("control the button").** **Decided:** the
+   physical Brew switch keeps starting the pump exactly as today; the
+   ESP32 sits between the switch and the pump (spliced at the pump's own
+   terminals, not the switch's terminal block, to avoid reopening the
+   unverified panel-wiring problem from Section 7) so firmware can cut it
+   early. **Hardware: a plain electromechanical relay module, not an SSR**
+   - the pump switches once per shot, so relay contact-life/cycle-count is
+   a non-issue, and SSR's silent/no-wear advantages don't matter here the
+   way they do for the constantly-cycling heater; a relay is also cheaper
+   and more available. No zero-cross detection, no phase-angle timing
+   either way, firmware-trivial (`digitalWrite`, like `PIN_SSR`). **Uses
+   the relay's NC (Normally Closed) contact, not NO** - de-energized/
+   pass-through is the default, so the switch controls the pump with zero
+   ESP32 involvement unless firmware actively energizes the relay to
+   interrupt it; this is the mirror image of the heater's "always boot off"
+   rule, and deliberately so - the dangerous failure mode for the pump is
+   being unable to start without the ESP32's cooperation, not the reverse.
+   Full reasoning in `HARDWARE_ROADMAP.md` item 4. **Why:** this is the
+   **core item, judged the current top priority** - turns auto-stop by a
+   configured **time** (no other hardware) or **weight** (with item 5) into
+   real closed-loop features, without needing item 8's much harder
+   profiling work first.
 
-6. **Real-time pressure transducer + live pressure graph.**
-   **Hardware:** one analog pressure transducer, **0-1.2 to 1.6MPa
-   (12-16 bar) range** (confirmed spec - matches both competitor projects),
-   plumbed at the **pump outlet** via a T-fitting (a real plumbing job, not
-   just wiring) - roughly $15-30 for the sensor itself. Wired to an **ADC1**
-   pin specifically (ADC2 is WiFi-contaminated, same lesson as elsewhere in
-   this project).
-   **Why:** the prerequisite for any real pressure profiling in item 9, and
-   useful as a pure monitoring/graph feature even before that exists.
-
-7. **Automatic shot start/stop detection (sense-only).**
-   **Hardware:** a non-invasive AC current-transformer clamp (e.g. SCT-013,
-   ~$3-5) around the pump's own wire, read via one ADC1 pin - no mains
-   wiring touched at all, since it only senses the magnetic field around an
-   existing conductor. Detects "pump is drawing current" i.e. the physical
-   Brew switch is on.
-   **Why:** today items 1-3 (shot timer/history/descale count) start and
-   stop from a manual Web UI button, because the ESP32 has no visibility
-   into the machine's own Brew switch (left untouched by design - the panel
-   wiring couldn't be fully verified without a multimeter, see Section 7).
-   This closes that gap without any of the risk of tapping the switch's own
-   (mains-carrying) wiring directly. Sense-only - does not let the ESP32
-   control the pump, just observe it. Full active control (auto-*stop*, not
-   just auto-*detect*) needs item 9a - though note item 9a keeps the
-   physical Brew switch as the *start* trigger, so this item's detection
-   isn't strictly required for auto-stop to work, only for a fully
-   button-free shot.
-   **Decision (2026-08-16): not needed for the current goal** (stop at 25s
-   or at 36g). Weight-based stop needs no start-time reference at all
-   (firmware just watches the scale continuously); time-based stop gets its
-   start reference from the existing manual "Start Shot" Web UI button, no
-   new hardware required. This item would only remove that one manual tap.
-   Full reasoning in `HARDWARE_ROADMAP.md` item 7.
-
-#### Needs new hardware, wireless purchase (no wiring at all)
-
-8. **Bluetooth smart scale + brew-by-weight auto-stop.**
+5. **Bluetooth smart scale + brew-by-weight auto-stop.**
    **Hardware:** buy the scale itself - **Bookoo Themis or Felicita Arc**
    confirmed as the DIY-friendliest choice (open protocols, both appear in
    GaggiMate's supported-scale list; Acaia/Decent use different, often
@@ -578,58 +556,51 @@ change/confirm the plan:
    built into the S3.
    **Why:** brew-by-weight is confirmed more repeatable than brew-by-time
    (weight is the actual outcome; time is a proxy confounded by grind/dose/
-   tamp). Pairs naturally with item 1's shot timing once both exist. Reading
-   a weight is not the same as *acting* on it - actually cutting the pump at
-   a target weight still needs item 9a's active pump control.
+   tamp). Pairs directly with item 4 - **second priority**, needed for this
+   project's weight-based auto-stop goal. Reading a weight is not the same
+   as *acting* on it - actually cutting the pump at a target weight still
+   needs item 4's active pump control.
 
-#### Needs new hardware, a second real mains-voltage subsystem (serious)
+6. **Water tank level sensor.**
+   **Hardware:** one magnetic float switch (~$2-5), one free GPIO (digital
+   input, internal pull-up). **The tank is removable, not fixed** - the
+   Gaggia Espresso Color's water tank lifts out to refill, so a float
+   switch mounted inside it needs a connection that survives repeated
+   removal, not a bare soldered wire. Standard fix: spring-loaded contacts
+   (pogo pins) at the tank bay, mating with the tank's underside when
+   seated - the wire stays fixed to the chassis, only the contact tips
+   separate. Full reasoning in `HARDWARE_ROADMAP.md` item 6.
+   **Why:** low-water warning now; becomes a real pump interlock once
+   item 4 (pump on/off control) exists.
 
-**Split 2026-08-16** (was one combined "item 9") into an easy on/off half and
-a harder profiling half, since they have very different complexity and
-dependencies. Full buy lists, wiring diagrams, and step-by-step procedures
-for both in [`HARDWARE_ROADMAP.md`](HARDWARE_ROADMAP.md) (which also covers
-items 4-8 above in the same buy-list/wiring format).
+7. **Real-time pressure transducer + live pressure graph.**
+   **Hardware:** one analog pressure transducer, **0-1.2 to 1.6MPa
+   (12-16 bar) range** (confirmed spec - matches both competitor projects),
+   plumbed at the **pump outlet** via a T-fitting (a real plumbing job, not
+   just wiring) - roughly $15-30 for the sensor itself. Wired to an **ADC1**
+   pin specifically (ADC2 is WiFi-contaminated, same lesson as elsewhere in
+   this project).
+   **Why:** the prerequisite for any real pressure profiling in item 8, and
+   useful as a pure monitoring/graph feature even before that exists.
 
-9a. **Simple on/off pump control ("control the button").** **Decided:** the
-    physical Brew switch keeps starting the pump exactly as today; the
-    ESP32 sits between the switch and the pump (spliced at the pump's own
-    terminals, not the switch's terminal block, to avoid reopening the
-    unverified panel-wiring problem from Section 7) so firmware can cut it
-    early. **Hardware (revised 2026-08-16): a plain electromechanical relay
-    module, not an SSR** - the pump switches once per shot, so relay
-    contact-life/cycle-count is a non-issue, and SSR's silent/no-wear
-    advantages don't matter here the way they do for the constantly-cycling
-    heater; a relay is also cheaper and more available. No zero-cross
-    detection, no phase-angle timing either way, firmware-trivial
-    (`digitalWrite`, like `PIN_SSR`). **Uses the relay's NC (Normally
-    Closed) contact, not NO** - de-energized/pass-through is the default,
-    so the switch controls the pump with zero ESP32 involvement unless
-    firmware actively energizes the relay to interrupt it; this is the
-    mirror image of the heater's "always boot off" rule, and deliberately
-    so - the dangerous failure mode for the pump is being unable to start
-    without the ESP32's cooperation, not the reverse. Full reasoning in
-    `HARDWARE_ROADMAP.md` item 9a. **Why:** turns auto-stop by a
-    configured **time** (no other hardware) or **weight** (with item 8) into
-    real closed-loop features, without needing item 9b's much harder
-    profiling work first. Judged the easier of the two halves.
-
-9b. **Phase-control dimmer to a pressure target (e.g. 9 bar).** **Hardware:**
-    a zero-cross detection + TRIAC module (e.g. RobotDyn AC dimmer,
-    ~$10-15), swapped in at the same splice point as item 9a - **the same
-    category of seriousness as the original SSR/heater build**, bench-test
-    on low voltage first, verify zero-cross/firing logic thoroughly before
-    ever connecting the pump's real AC line, insulate every mains joint. No
-    dedicated flow sensor needed (see competitive research above - both
-    competitors estimate flow from pressure + pump behavior instead).
-    **Hard prerequisite: item 6 (pressure transducer)** - you cannot
-    regulate to a bar target without a pressure reading to control against;
-    this wasn't a strict dependency in the old combined item 9, but is once
-    "control to 9 bar" is the explicit goal rather than open-loop dimming.
-    **Why:** enables a phase-based profile system (pump power/pressure/flow
-    target + time/volume/pressure stop conditions per phase, matching both
-    competitor projects' architecture) - real pre-infusion and
-    declining-pressure-at-shot-end, not a flat 9-bar target, per the
-    pressure-profiling research above.
+8. **Phase-control dimmer to a pressure target (e.g. 9 bar).**
+   **Hardware:** a zero-cross detection + TRIAC module (e.g. RobotDyn AC
+   dimmer, ~$10-15), swapped in at the same splice point as item 4 - **the
+   same category of seriousness as the original SSR/heater build**,
+   bench-test on low voltage first, verify zero-cross/firing logic
+   thoroughly before ever connecting the pump's real AC line, insulate
+   every mains joint. No dedicated flow sensor needed (see competitive
+   research above - both competitors estimate flow from pressure + pump
+   behavior instead).
+   **Hard prerequisite: item 7 (pressure transducer)** - you cannot
+   regulate to a bar target without a pressure reading to control against.
+   **Why:** enables a phase-based profile system (pump power/pressure/flow
+   target + time/volume/pressure stop conditions per phase, matching both
+   competitor projects' architecture) - real pre-infusion and
+   declining-pressure-at-shot-end, not a flat 9-bar target, per the
+   pressure-profiling research above. **Deferred** - the harder half of
+   what was originally one combined "pump dimmer" item, split from item 4
+   on 2026-08-16.
 
    **Migrating to [GaggiMate](https://github.com/jniebuhr/gaggimate) instead
    of building this: ruled out (2026-08-16).** Checked their actual source,
@@ -642,7 +613,35 @@ items 4-8 above in the same buy-list/wiring format).
    separate LilyGo T-RGB display board + their controller board), not one.
    So this is a **hardware swap** (buy their PCB, rewire, replace the
    sensor) and not a firmware migration onto the current board - explicitly
-   decided against. Item 9 stays a from-scratch build on this hardware.
+   decided against. Item 8 stays a from-scratch build on this hardware.
+
+9. **Nextion touchscreen HMI. Status: decided, not yet started** (corrected
+   2026-08-16 - previously mislabeled "in progress" here and in `README.md`;
+   no hardware bought, no driver written). A different kind of item from
+   4-8 and 10: an alternative *interface* to capabilities that already
+   exist via the Web UI, not a new sensing/actuation capability. Chosen
+   over a raw OLED/color-TFT because a Nextion panel has its own onboard
+   display controller - the ESP32 just sends/receives simple serial
+   commands, following the same "external component over UART" pattern as
+   `temp_sensor.cpp`, and will need its own `nextion.cpp` driver. **Deep
+   configuration (PID tuning, profile editing) stays on the Web UI** -
+   independently validated by the Gaggiuino/GaggiMate research above (both
+   keep profile editing on a phone/web UI, using their on-device screens
+   only for live status + basic control). Full buy guidance, wiring, and
+   firmware notes in `HARDWARE_ROADMAP.md` item 9.
+
+10. **Milk temperature probe for cappuccino/steaming.**
+    **Hardware:** one waterproof **DS18B20** digital temp probe (~$2-3),
+    one free GPIO (OneWire protocol, needs a 4.7kΩ pull-up resistor).
+    Dipped into the milk pitcher during steaming.
+    **Why:** neither competitor addresses milk temperature at all - real
+    dairy science says the sweet spot is ~55-65°C with ~70°C as a hard
+    scald/foam-collapse ceiling - a genuine differentiator, and the
+    cheapest single item on this whole list. **Ranked last despite that**:
+    unlike every other item here, it only works dipped into a separate
+    milk pitcher, so a wire (and probe tip) has to leave the machine and be
+    handled externally every use - a real drawback flagged during
+    prioritization.
 
 ---
 
