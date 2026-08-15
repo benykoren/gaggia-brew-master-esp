@@ -193,6 +193,24 @@ enum class AutotuneState { IDLE, RUNNING, DONE_OK, DONE_FAIL };
 #define SHOT_LOG_PATH "/shots.csv"
 #define SHOT_LOG_MAX_ENTRIES 200 // oldest trimmed once exceeded
 
+// Auto-stop: once a shot has been running this many seconds, main.cpp's
+// loop() calls stopShot() on its own - no manual "Stop Shot" tap required.
+// 0 = disabled (manual stop only), configurable live from the Web UI,
+// persisted in NVS. Default sits in the middle of the 25-30s SCA-referenced
+// extraction window already shown in the Web UI.
+//
+// IMPORTANT - this is a software-only auto-stop right now: it ends the
+// firmware's own shot bookkeeping (timer, history log entry, reverting the
+// Brew gain profile from active back to gentle - see the brew-active gains
+// above) - it does NOT physically stop the pump. There's no hardware yet
+// that can cut the pump's own power (see AGENTS.md/HARDWARE_ROADMAP.md item
+// 4, not yet built) - water keeps flowing until the machine's own Brew
+// switch is released by hand, same as always. Don't confuse "the shot timer
+// stopped" with "the machine stopped brewing" until item 4 exists.
+#define SHOT_AUTO_STOP_SEC_DEFAULT 27
+#define SHOT_AUTO_STOP_SEC_MIN 5
+#define SHOT_AUTO_STOP_SEC_MAX 90
+
 // ============================================================================
 // Descale / maintenance reminder
 // ----------------------------------------------------------------------------

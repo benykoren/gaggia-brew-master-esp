@@ -39,6 +39,7 @@ extern void stopAutotune();
 
 extern bool shotInProgress;
 extern unsigned long shotStartMillis;
+extern unsigned long shotAutoStopSec;
 extern void startShot();
 extern void stopShot();
 
@@ -368,7 +369,7 @@ const char *index_html = R"rawliteral(
         <div class="shot-head">
           <div>
             <div id="shot_time" class="shot-time">0:00</div>
-            <div class="shot-sub">Target window 25&ndash;30s</div>
+            <div id="shot_auto_stop_label" class="shot-sub">--</div>
           </div>
           <button onclick="toggleShot()" id="btn_shot" class="btn-shot">Start Shot</button>
         </div>
@@ -473,6 +474,18 @@ const char *index_html = R"rawliteral(
     </main>
 
     <main class="view" data-view="settings" hidden>
+      <div class="card">
+        <div class="tab-section-title">Shot Timer</div>
+        <form action="/update" method="GET">
+          <div class="field">
+            <label for="input_shot_auto_stop">Auto-stop after (seconds, 0 = disabled)</label>
+            <input type="number" step="1" min="0" name="shot_auto_stop_sec" id="input_shot_auto_stop" value="">
+          </div>
+          <button type="submit" class="submit">Save</button>
+        </form>
+        <p class="hint" style="margin-top:var(--sp-3)">Ends the shot timer/log automatically once reached - no need to tap Stop Shot. Does not physically stop the pump yet (no hardware for that - see the roadmap); release the machine's own Brew switch as usual.</p>
+      </div>
+
       <div class="card">
         <div class="tab-section-title">Power &amp; Eco</div>
         <form action="/update" method="GET">
@@ -587,6 +600,13 @@ var shotRunning = false;
 var shotElapsedBaseMs = 0;
 var shotElapsedCapturedAt = null;
 var prevShotRunning = false; // detects the stop transition, to refresh history once
+// Populated from /status (shot_auto_stop_sec) - the progress bar and
+// in-window/over coloring track THIS configured value, not a hardcoded
+// number, so they stay correct whenever the auto-stop duration changes.
+// 0 means auto-stop is disabled (manual-only); fall back to the original
+// fixed 25-30s SCA-referenced reference window in that case, since there's
+// no other meaningful target to size the bar against.
+var shotAutoStopSec = 0;
 
 setInterval(function () {
   var el = document.getElementById("shot_time");
@@ -597,13 +617,15 @@ setInterval(function () {
   }
   el.textContent = formatElapsed(ms);
   var secs = ms / 1000;
-  var inWindow = shotRunning && secs >= 25 && secs <= 30;
-  var over = shotRunning && secs > 30;
+  var hasAutoStop = shotAutoStopSec > 0;
+  var target = hasAutoStop ? shotAutoStopSec : 30;
+  var inWindow = shotRunning && (hasAutoStop ? secs >= target - 5 && secs <= target : secs >= 25 && secs <= 30);
+  var over = shotRunning && secs > target;
   el.classList.toggle("in-window", inWindow);
   el.classList.toggle("over", over);
   var pbar = document.getElementById("shot_progress_bar");
   if (pbar) {
-    pbar.style.width = clamp((secs / 30) * 100) + "%";
+    pbar.style.width = clamp((secs / target) * 100) + "%";
     pbar.classList.toggle("in-window", inWindow);
     pbar.classList.toggle("over", over);
   }
@@ -717,6 +739,12 @@ setInterval(function () {
       setVal("input_mqtt_user", json.mqtt_user || "");
       setVal("input_mqtt_pass", json.mqtt_pass || "");
       setVal("input_eco_min", json.eco_timeout_min);
+      setVal("input_shot_auto_stop", json.shot_auto_stop_sec);
+
+      // Shot sub-label reflects the actual configured auto-stop, not a
+      // hardcoded window - "disabled" reads plainly when set to 0.
+      document.getElementById("shot_auto_stop_label").innerHTML =
+        json.shot_auto_stop_sec > 0 ? "Auto-stops at " + json.shot_auto_stop_sec + "s" : "Auto-stop disabled";
 
       // Eco / auto-sleep banner
       document.getElementById("sleep_banner").style.display = json.auto_sleeping ? "flex" : "none";
@@ -760,6 +788,7 @@ setInterval(function () {
       // Shot timer
       shotRunning = json.shot_in_progress;
       shotElapsedBaseMs = json.shot_elapsed_ms;
+      shotAutoStopSec = json.shot_auto_stop_sec;
       shotElapsedCapturedAt = Date.now();
       var btnShot = document.getElementById("btn_shot");
       btnShot.textContent = shotRunning ? "Stop Shot" : "Start Shot";
@@ -928,6 +957,7 @@ void setupWeb() {
 
     json += ",\"eco_timeout_min\":" + String(ecoTimeoutMin);
     json += ",\"auto_sleeping\":" + String(autoSleeping ? "true" : "false");
+    json += ",\"shot_auto_stop_sec\":" + String(shotAutoStopSec);
 
     json += ",\"autotune_state\":\"";
     switch (autotuneState) {
@@ -1056,6 +1086,15 @@ void setupWeb() {
       } else if (mode == "steam") {
         setOpMode(OpMode::STEAM);
       }
+    }
+
+    // Shot auto-stop - 0 (disabled) passes through untouched; any nonzero
+    // value gets clamped so a typo can't set an unreasonably short/long
+    // duration (same pattern as steam_max_safety's clamp above).
+    if (server.hasArg("shot_auto_stop_sec")) {
+      long v = server.arg("shot_auto_stop_sec").toInt();
+      shotAutoStopSec = (v <= 0) ? 0 : constrain(v, SHOT_AUTO_STOP_SEC_MIN, SHOT_AUTO_STOP_SEC_MAX);
+      preferences.putULong("shot_auto_stop", shotAutoStopSec);
     }
 
     // Eco / auto-sleep

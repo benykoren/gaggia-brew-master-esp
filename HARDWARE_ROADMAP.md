@@ -77,8 +77,21 @@ workaround, but more than one item below independently wants the same tools.
 
 ## Item 4 — Pump on/off control ("control the button")
 
-**Status:** decided, not yet built. **Depends on:** nothing. This is the
-core item for the current goal (stop at 25s or 36g). (Originally "item 9a.")
+**Status (revised 2026-08-16): software half built and real-shot-tested;
+hardware half (the relay itself) not yet bought or wired.** **Depends on:**
+nothing. This is the core item for the current goal (stop at 25s or 36g).
+(Originally "item 9a.")
+
+The Brew gain-scheduling profile (`brewActiveKp/Ki/Kd`) and shot-start
+feedforward described below are already live-tunable in the Web UI and
+confirmed on the real machine to cut brew-time sag from ~11-13°C to ~6°C
+(further gain tuning stopped helping once output pinned at the heater's
+physical wattage ceiling - a conclusive result, not a dead end). A
+configurable auto-stop timer (`shotAutoStopSec`, Settings → Shot Timer, 0 =
+disabled) also now ends the *firmware's* shot bookkeeping automatically.
+**None of this touches the pump yet** - "auto-stop" today means the
+firmware stops tracking the shot and reverts its own tuning, not that the
+pump stops flowing. That gap is exactly what the hardware below closes.
 
 **Split from an original combined "pump dimmer" item (2026-08-16)** into
 this easy on/off half and a harder profiling half (item 8) — they have very
@@ -100,9 +113,20 @@ separate, harder project.
 | Part | Spec | Why | Cost |
 |---|---|---|---|
 | Electromechanical relay module | 1-channel, opto-isolated 3.3V/5V logic input, mechanical relay rated ≥10A/250VAC (the common cheap Arduino-style relay module) | See "Relay vs. SSR" below — cheaper and more available than an SSR, with no downside for this specific job | $2-3 |
-| Inline fuse + holder | Fast-blow, sized just above the pump's rated current | The relay can also fail shorted "on"; a fuse limits the blast radius. Matches this project's safety-first pattern elsewhere (T2 reuse, physical thermal cutoff) | $2-5 |
+| Inline fuse + holder | **Mains-rated** (250V AC, e.g. a 5×20mm holder) with a 1-2A fast-blow fuse — **not** an automotive/car blade-fuse holder, which is only rated ~32V DC and unsafe on a mains circuit | The relay can also fail shorted "on"; a fuse limits the blast radius. Matches this project's safety-first pattern elsewhere (T2 reuse, physical thermal cutoff) | $2-5 |
 | Wire | 18AWG silicone (mains side), 22AWG (control side) | Matches existing heater-build stock | — |
 | Wago 221 + heat-shrink | Same as heater build | Mains joint insulation | Already on hand |
+
+**Optional addition, not yet decided:** an AC-presence/zero-cross detection
+module (opto-isolated, outputs a signal only when AC is present at its
+input — same category of part as half of an AC dimmer module, sold
+standalone) wired at this *same* splice point would let the ESP32 detect
+the Brew switch being flipped automatically, closing the gap noted above —
+the auto-stop timer would then control the real pump, and Start Shot would
+no longer need a manual tap either. This is a different technique from the
+current-transformer clamp already rejected as item "7" (senses voltage
+presence on this wire, not current elsewhere on the pump's own wire) — not
+a reopening of that decision, a separate one not yet made. ~$3-5.
 
 No dimmer module, no zero-cross detection, no TRIAC — just a relay. This is
 firmware-trivial: `digitalWrite(PIN_PUMP, ...)`, identical in spirit to
