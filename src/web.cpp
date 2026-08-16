@@ -9,6 +9,7 @@
 #include <Update.h>
 #include <time.h>
 
+#include "profiles.h"
 #include "shot_log.h"
 
 extern float currentTemperature;
@@ -40,10 +41,9 @@ extern void stopAutotune();
 extern bool shotInProgress;
 extern unsigned long shotStartMillis;
 extern unsigned long shotAutoStopSec;
-extern unsigned long shotAutoStopTargetSec;
-extern unsigned long effectiveShotAutoStopSec();
 extern void startShot();
 extern void stopShot();
+extern ShotPhase currentShotPhase;
 
 extern unsigned long shotCount;
 extern time_t lastDescaleTime;
@@ -51,10 +51,10 @@ extern unsigned long descaleShotThreshold;
 extern unsigned long descaleDayThreshold;
 extern void markDescaled();
 
-extern int activePreset; // -1=Ristretto, 0=Espresso(default), 1=Lungo
-extern double ristrettoTempOffset, lungoTempOffset;
-extern long ristrettoSecOffset, lungoSecOffset;
-extern void applyPreset(int idx);
+extern int activeProfileIndex;
+extern bool activePreinfusionEnabled;
+extern int activePreinfusionPulses, activePreinfusionOnMs, activePreinfusionOffMs;
+extern void applyProfile(int idx);
 
 extern bool schedEnabled[SCHED_MAX_COUNT];
 extern int schedHour[SCHED_MAX_COUNT], schedMin[SCHED_MAX_COUNT];
@@ -265,14 +265,16 @@ const char *index_html = R"rawliteral(
     .shot-progress > span.in-window { background: var(--green); }
     .shot-progress > span.over { background: var(--red); }
 
-    .preset-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--sp-2); margin-top: var(--sp-4); }
+    /* Flex-wrap, not a fixed grid - profile count is dynamic (1-PROFILE_MAX_COUNT),
+       unlike the old fixed 3-button preset row this replaced. */
+    .preset-row { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-4); }
     .btn-preset {
-      border: 1px solid var(--border); cursor: pointer; padding: 10px 6px; border-radius: var(--radius-md);
+      border: 1px solid var(--border); cursor: pointer; padding: 10px 14px; border-radius: var(--radius-full);
       font-size: 12.5px; font-weight: 700; color: var(--text-dim); background: var(--surface);
       transition: transform .05s ease, border-color .15s ease, color .15s ease;
     }
     .btn-preset:active { transform: translateY(1px); }
-    .btn-preset.active { color: var(--copper-light); border-color: var(--copper); }
+    .btn-preset.active { color: var(--copper-light); border-color: var(--copper); background: rgba(217,140,63,.12); }
 
     .btn-autotune {
       width: 100%; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: var(--sp-2);
@@ -321,6 +323,22 @@ const char *index_html = R"rawliteral(
     .empty-hint { color: var(--text-dim); font-size: 13px; padding: 6px 0; }
     .metric-row { display: flex; align-items: center; justify-content: space-between; margin: 0 0 var(--sp-3); font-size: 14px; color: var(--text-dim); }
     .metric-row b { color: var(--text); font-size: 15px; }
+
+    .profile-row {
+      display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3);
+      padding: var(--sp-3) 0; border-bottom: 1px solid var(--border-soft);
+    }
+    .profile-row:last-child { border-bottom: none; }
+    .profile-row.active { border-left: 2px solid var(--copper); padding-left: var(--sp-2); margin-left: calc(var(--sp-2) * -1); }
+    .profile-row-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .profile-row-main b { font-size: 14.5px; }
+    .profile-row-main span { font-size: 12px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .profile-row-actions { display: flex; gap: var(--sp-2); flex: none; }
+    .btn-chip-sm {
+      border: 1px solid var(--border); background: var(--surface); color: var(--text-dim);
+      padding: 6px 11px; border-radius: var(--radius-sm); font-size: 11.5px; font-weight: 700; cursor: pointer;
+    }
+    .btn-chip-sm.danger { border-color: rgba(229,84,75,.4); color: #f3c6c2; }
 
     .footer { text-align: center; color: var(--text-dim); font-size: 11.5px; margin: var(--sp-5) 0 var(--sp-3); }
     .footer a { color: var(--copper); text-decoration: none; }
@@ -402,11 +420,7 @@ const char *index_html = R"rawliteral(
           <button onclick="toggleShot()" id="btn_shot" class="btn-shot">Start Shot</button>
         </div>
         <div class="shot-progress"><span id="shot_progress_bar"></span></div>
-        <div class="preset-row">
-          <button onclick="applyPreset(-1)" class="btn-preset" data-preset="-1">Ristretto</button>
-          <button onclick="applyPreset(0)" class="btn-preset" data-preset="0">Espresso</button>
-          <button onclick="applyPreset(1)" class="btn-preset" data-preset="1">Lungo</button>
-        </div>
+        <div class="preset-row" id="profile_chip_row"><!-- populated from GET /profiles --></div>
       </div>
 
       <div class="card">
@@ -479,25 +493,36 @@ const char *index_html = R"rawliteral(
       </div>
 
       <div class="card">
-        <div class="tab-section-title">Brew Presets</div>
-        <p class="hint">Espresso is just the Brew target/auto-stop above - tapping it on the Now tab returns to that plain default. Ristretto and Lungo are offsets from it, applied only while selected; tapping Espresso again always "unpresses" back to default.</p>
-        <div class="field-row-3">
-          <div class="field"><label>Ristretto</label><span class="hint" style="margin:0">Shorter &amp; cooler</span></div>
-          <div class="field"><label>Espresso</label><span class="hint" style="margin:0">= Brew target above</span></div>
-          <div class="field"><label>Lungo</label><span class="hint" style="margin:0">Longer &amp; hotter</span></div>
-        </div>
-        <form action="/update" method="GET">
-          <div class="field-row-3">
-            <div class="field"><label for="input_rist_dtemp">Ristretto &Delta;&deg;C</label><input type="number" step="0.1" name="rist_dtemp" id="input_rist_dtemp" value=""></div>
-            <div class="field"></div>
-            <div class="field"><label for="input_lungo_dtemp">Lungo &Delta;&deg;C</label><input type="number" step="0.1" name="lungo_dtemp" id="input_lungo_dtemp" value=""></div>
+        <div class="tab-section-title">Shot Profiles</div>
+        <p class="hint">Each profile is a saved (temperature, auto-stop time, pre-infusion pattern) bundle - quick-select chips on the Now tab load one into the live Brew settings above. Loading a profile doesn't lock you to it; editing Brew target/auto-stop directly still works as always.</p>
+        <div id="profile_list_body"><!-- populated from GET /profiles --></div>
+        <button onclick="newProfileForm()" class="btn-secondary">+ New Profile</button>
+      </div>
+
+      <div class="card" id="profile_editor_card">
+        <div class="tab-section-title" id="profile_form_title">New Profile</div>
+        <form onsubmit="submitProfileForm(event)">
+          <input type="hidden" id="input_profile_index" value="-1">
+          <div class="field">
+            <label for="input_profile_name">Name</label>
+            <input type="text" id="input_profile_name" maxlength="20" placeholder="e.g. Light Roast">
           </div>
-          <div class="field-row-3">
-            <div class="field"><label for="input_rist_dsec">Ristretto &Delta;sec</label><input type="number" step="1" name="rist_dsec" id="input_rist_dsec" value=""></div>
-            <div class="field"></div>
-            <div class="field"><label for="input_lungo_dsec">Lungo &Delta;sec</label><input type="number" step="1" name="lungo_dsec" id="input_lungo_dsec" value=""></div>
+          <div class="field-row">
+            <div class="field"><label for="input_profile_temp">Temperature (&deg;C)</label><input type="number" step="0.1" id="input_profile_temp" value="93"></div>
+            <div class="field"><label for="input_profile_autostop">Auto-stop (sec)</label><input type="number" step="1" min="5" max="90" id="input_profile_autostop" value="27" oninput="drawProfilePreview()"></div>
           </div>
-          <button type="submit" class="submit">Save Preset Offsets</button>
+          <label class="check-row"><input type="checkbox" id="input_profile_pi_enabled" onchange="drawProfilePreview()"> Pulsed pre-infusion</label>
+          <p class="hint" style="margin-top:var(--sp-2)">Cycles the pump on/off a few times before switching to continuous power - approximates the puck-saturation benefit of true low-pressure pre-infusion using just an on/off relay. Needs the pump relay wired (HARDWARE_ROADMAP.md item 4) to have any physical effect - software-only until then.</p>
+          <div class="field-row-3" style="margin-top:var(--sp-3)">
+            <div class="field"><label for="input_profile_pi_pulses">Pulses</label><input type="number" step="1" min="0" max="10" id="input_profile_pi_pulses" value="3" oninput="drawProfilePreview()"></div>
+            <div class="field"><label for="input_profile_pi_on">On (sec)</label><input type="number" step="0.1" min="0.2" max="5" id="input_profile_pi_on" value="1" oninput="drawProfilePreview()"></div>
+            <div class="field"><label for="input_profile_pi_off">Off (sec)</label><input type="number" step="0.1" min="0.2" max="5" id="input_profile_pi_off" value="2" oninput="drawProfilePreview()"></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-label"><span>Pump pattern preview</span><span id="profile_preview_label">&nbsp;</span></div>
+            <canvas id="profile_preview_chart" width="300" height="40"></canvas>
+          </div>
+          <button type="submit" id="profile_form_submit" class="submit">Add Profile</button>
         </form>
       </div>
     </main>
@@ -709,15 +734,14 @@ var shotRunning = false;
 var shotElapsedBaseMs = 0;
 var shotElapsedCapturedAt = null;
 var prevShotRunning = false; // detects the stop transition, to refresh history once
-// Populated from /status (shot_auto_stop_effective_sec - the base auto-stop
-// time with whichever preset offset is currently active already folded in,
-// snapshotted server-side once a shot is running) - the progress bar and
-// in-window/over coloring track THIS value, not a hardcoded number, so they
-// stay correct whenever the auto-stop duration or active preset changes.
+// Populated from /status (shot_auto_stop_sec) - the progress bar and
+// in-window/over coloring track THIS configured value, not a hardcoded
+// number, so they stay correct whenever the auto-stop duration changes
+// (directly, or via loading a profile with a different auto-stop time).
 // 0 means auto-stop is disabled (manual-only); fall back to the original
 // fixed 25-30s SCA-referenced reference window in that case, since there's
 // no other meaningful target to size the bar against.
-var shotAutoStopEffectiveSec = 0;
+var shotAutoStopSec = 0;
 
 setInterval(function () {
   var el = document.getElementById("shot_time");
@@ -728,8 +752,8 @@ setInterval(function () {
   }
   el.textContent = formatElapsed(ms);
   var secs = ms / 1000;
-  var hasAutoStop = shotAutoStopEffectiveSec > 0;
-  var target = hasAutoStop ? shotAutoStopEffectiveSec : 30;
+  var hasAutoStop = shotAutoStopSec > 0;
+  var target = hasAutoStop ? shotAutoStopSec : 30;
   var inWindow = shotRunning && (hasAutoStop ? secs >= target - 5 && secs <= target : secs >= 25 && secs <= 30);
   var over = shotRunning && secs > target;
   el.classList.toggle("in-window", inWindow);
@@ -965,28 +989,22 @@ setInterval(function () {
       setVal("input_shot_auto_stop", json.shot_auto_stop_sec);
 
       // Shot sub-label reflects the actual configured auto-stop, not a
-      // hardcoded window - "disabled" reads plainly when set to 0.
-      document.getElementById("shot_auto_stop_label").innerHTML =
-        json.shot_auto_stop_effective_sec > 0 ? "Auto-stops at " + json.shot_auto_stop_effective_sec + "s" : "Auto-stop disabled";
+      // hardcoded window - "disabled" reads plainly when set to 0. While a
+      // shot is running, show the current phase instead (pre-infusion vs.
+      // extraction) - more useful in the moment than a static duration.
+      var shotLabel = document.getElementById("shot_auto_stop_label");
+      if (shotRunning && json.shot_phase === "preinfusion") {
+        shotLabel.innerHTML = "Pre-infusing&hellip;";
+      } else if (shotRunning && json.shot_phase === "extraction") {
+        shotLabel.innerHTML = "Extracting&hellip;";
+      } else {
+        shotLabel.innerHTML = json.shot_auto_stop_sec > 0 ? "Auto-stops at " + json.shot_auto_stop_sec + "s" : "Auto-stop disabled";
+      }
 
-      // Brew presets - Espresso (0) IS the plain brew target/auto-stop above,
-      // no separate fields; Ristretto/Lungo offsets are synced below. Active-
-      // preset highlighting is an exact match against activePreset (-1/0/1),
-      // not a value comparison - always well-defined, so Espresso always
-      // shows as active whenever no offset is selected (the "unpress" state).
-      setVal("input_rist_dtemp", json.rist_dtemp);
-      setVal("input_rist_dsec", json.rist_dsec);
-      setVal("input_lungo_dtemp", json.lungo_dtemp);
-      setVal("input_lungo_dsec", json.lungo_dsec);
-      [-1, 0, 1].forEach(function (i) {
-        var btn = document.querySelector('.btn-preset[data-preset="' + i + '"]');
-        if (btn) btn.classList.toggle("active", json.active_preset === i);
-      });
-
-      // Shot label/progress bar target reflects the EFFECTIVE auto-stop
-      // (base +/- whichever preset offset is active, snapshotted for an
-      // in-progress shot - see shot_auto_stop_effective_sec in web.cpp).
-      shotAutoStopEffectiveSec = json.shot_auto_stop_effective_sec;
+      shotAutoStopSec = json.shot_auto_stop_sec;
+      activeProfileIndex = json.active_profile;
+      renderProfileChips();
+      renderProfileList();
 
       // Scheduled warm-up - checkbox/select use .checked/.value directly
       // (setVal() targets plain text/number inputs' .value + its "synced
@@ -1048,8 +1066,7 @@ setInterval(function () {
       }
       lastAutotuneState = json.autotune_state;
 
-      // Shot timer (shotAutoStopEffectiveSec is set earlier, alongside the
-      // rest of the preset sync, since it's derived from the active preset)
+      // Shot timer (shotAutoStopSec is set earlier, alongside the profile sync)
       shotRunning = json.shot_in_progress;
       shotElapsedBaseMs = json.shot_elapsed_ms;
       shotElapsedCapturedAt = Date.now();
@@ -1104,9 +1121,166 @@ function toggleShot() {
   xhttp.send();
 }
 
-function applyPreset(idx) {
+// ============================================================================
+// Named shot profiles (Now-tab quick-select chips + Tune-tab management list)
+// ============================================================================
+var profilesCache = [];
+var activeProfileIndex = 0;
+
+function piSummary(p) {
+  return p.preinfusion ? p.pulses + "&times; " + (p.on_ms / 1000) + "s/" + (p.off_ms / 1000) + "s" : "None";
+}
+
+function renderProfileChips() {
+  var row = document.getElementById("profile_chip_row");
+  if (!row || !profilesCache.length) return;
+  row.innerHTML = "";
+  profilesCache.forEach(function (p, i) {
+    var btn = document.createElement("button");
+    btn.className = "btn-preset" + (i === activeProfileIndex ? " active" : "");
+    btn.textContent = p.name;
+    btn.onclick = function () { applyProfile(i); };
+    row.appendChild(btn);
+  });
+}
+
+function renderProfileList() {
+  var body = document.getElementById("profile_list_body");
+  if (!body) return;
+  body.innerHTML = "";
+  profilesCache.forEach(function (p, i) {
+    var row = document.createElement("div");
+    row.className = "profile-row" + (i === activeProfileIndex ? " active" : "");
+    row.innerHTML =
+      "<div class='profile-row-main'><b>" + p.name + "</b>" +
+      "<span>" + p.temp.toFixed(1) + "&deg;C &middot; " + p.auto_stop_sec + "s &middot; pre-infusion: " + piSummary(p) + "</span></div>" +
+      "<div class='profile-row-actions'>" +
+      "<button onclick='editProfile(" + i + ")' class='btn-chip-sm'>Edit</button>" +
+      "<button onclick='deleteProfileRow(" + i + ")' class='btn-chip-sm danger'>Delete</button>" +
+      "</div>";
+    body.appendChild(row);
+  });
+}
+
+function fetchProfiles() {
   var xhttp = new XMLHttpRequest();
-  xhttp.open("GET", "/update?preset_apply=" + idx, true);
+  xhttp.onreadystatechange = function () {
+    if (this.readyState == 4 && this.status == 200) {
+      profilesCache = JSON.parse(this.responseText);
+      renderProfileChips();
+      renderProfileList();
+    }
+  };
+  xhttp.open("GET", "/profiles", true);
+  xhttp.send();
+}
+fetchProfiles();
+drawProfilePreview();
+
+function applyProfile(idx) {
+  var xhttp = new XMLHttpRequest();
+  xhttp.open("GET", "/update?profile_apply=" + idx, true);
+  xhttp.onreadystatechange = function () { if (this.readyState == 4) fetchProfiles(); };
+  xhttp.send();
+}
+
+// Pump pattern preview - a step chart of pulses (from the form fields, live
+// as you type) followed by a solid "extraction" block for the remainder of
+// the shot. This is the same kind of curve-preview Gaggiuino/GaggiMate/
+// Meticulous show for their (pressure/flow) profiles, scaled to what this
+// project can actually show: on/off pump state, not a measured curve, since
+// there's no pressure transducer or flow sensor here.
+function drawProfilePreview() {
+  var canvas = document.getElementById("profile_preview_chart");
+  if (!canvas) return;
+  var ctx = canvas.getContext("2d");
+  var w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  var enabled = document.getElementById("input_profile_pi_enabled").checked;
+  var pulses = parseInt(document.getElementById("input_profile_pi_pulses").value, 10) || 0;
+  var onSec = parseFloat(document.getElementById("input_profile_pi_on").value) || 0;
+  var offSec = parseFloat(document.getElementById("input_profile_pi_off").value) || 0;
+  var autoStop = parseFloat(document.getElementById("input_profile_autostop").value) || 27;
+
+  var piTotal = (enabled && pulses > 0) ? pulses * onSec + Math.max(0, pulses - 1) * offSec : 0;
+  var extractionSec = Math.max(3, autoStop - piTotal); // always show a visible extraction block
+  var totalSec = piTotal + extractionSec;
+
+  var label = document.getElementById("profile_preview_label");
+  if (label) label.textContent = (enabled && pulses > 0) ? piTotal.toFixed(1) + "s pre-infusion" : "No pre-infusion";
+
+  var x = 0;
+  var barY = 6, barH = h - 12;
+  function seg(durSec, on) {
+    var segW = (durSec / totalSec) * w;
+    ctx.fillStyle = on ? "#d98c3f" : "#2a221c";
+    ctx.fillRect(x, barY, Math.max(0, segW - 1), barH);
+    x += segW;
+  }
+  if (enabled && pulses > 0) {
+    for (var i = 0; i < pulses; i++) {
+      seg(onSec, true);
+      if (i < pulses - 1) seg(offSec, false);
+    }
+  }
+  seg(extractionSec, true); // continuous extraction for the rest of the shot
+}
+
+function editProfile(idx) {
+  var p = profilesCache[idx];
+  if (!p) return;
+  document.getElementById("input_profile_index").value = idx;
+  document.getElementById("input_profile_name").value = p.name;
+  document.getElementById("input_profile_temp").value = p.temp;
+  document.getElementById("input_profile_autostop").value = p.auto_stop_sec;
+  document.getElementById("input_profile_pi_enabled").checked = p.preinfusion;
+  document.getElementById("input_profile_pi_pulses").value = p.pulses;
+  document.getElementById("input_profile_pi_on").value = p.on_ms / 1000;
+  document.getElementById("input_profile_pi_off").value = p.off_ms / 1000;
+  document.getElementById("profile_form_title").textContent = "Edit \"" + p.name + "\"";
+  document.getElementById("profile_form_submit").textContent = "Save Changes";
+  document.getElementById("profile_editor_card").scrollIntoView({ behavior: "smooth", block: "center" });
+  drawProfilePreview();
+}
+
+function newProfileForm() {
+  document.getElementById("input_profile_index").value = -1;
+  document.getElementById("input_profile_name").value = "";
+  document.getElementById("input_profile_temp").value = 93;
+  document.getElementById("input_profile_autostop").value = 27;
+  document.getElementById("input_profile_pi_enabled").checked = false;
+  document.getElementById("input_profile_pi_pulses").value = 3;
+  document.getElementById("input_profile_pi_on").value = 1;
+  document.getElementById("input_profile_pi_off").value = 2;
+  document.getElementById("profile_form_title").textContent = "New Profile";
+  document.getElementById("profile_form_submit").textContent = "Add Profile";
+  drawProfilePreview();
+}
+
+function deleteProfileRow(idx) {
+  if (profilesCache.length <= 1) { alert("Can't delete the last remaining profile."); return; }
+  if (!confirm('Delete profile "' + profilesCache[idx].name + '"?')) return;
+  var xhttp = new XMLHttpRequest();
+  xhttp.open("GET", "/update?profile_delete=" + idx, true);
+  xhttp.onreadystatechange = function () { if (this.readyState == 4) fetchProfiles(); };
+  xhttp.send();
+}
+
+function submitProfileForm(ev) {
+  ev.preventDefault();
+  var q = "profile_save=1";
+  q += "&profile_index=" + document.getElementById("input_profile_index").value;
+  q += "&profile_name=" + encodeURIComponent(document.getElementById("input_profile_name").value);
+  q += "&profile_temp=" + document.getElementById("input_profile_temp").value;
+  q += "&profile_autostop=" + document.getElementById("input_profile_autostop").value;
+  q += "&profile_pi_enabled=" + (document.getElementById("input_profile_pi_enabled").checked ? "1" : "0");
+  q += "&profile_pi_pulses=" + document.getElementById("input_profile_pi_pulses").value;
+  q += "&profile_pi_on_ms=" + Math.round(document.getElementById("input_profile_pi_on").value * 1000);
+  q += "&profile_pi_off_ms=" + Math.round(document.getElementById("input_profile_pi_off").value * 1000);
+  var xhttp = new XMLHttpRequest();
+  xhttp.open("GET", "/update?" + q, true);
+  xhttp.onreadystatechange = function () { if (this.readyState == 4) fetchProfiles(); };
   xhttp.send();
 }
 
@@ -1283,18 +1457,19 @@ void setupWeb() {
         (daysSinceDescale >= 0 && (unsigned long)daysSinceDescale >= descaleDayThreshold);
     json += ",\"descale_due\":" + String(descaleDue ? "true" : "false");
 
-    json += ",\"active_preset\":" + String(activePreset);
-    json += ",\"rist_dtemp\":" + String(ristrettoTempOffset, 1);
-    json += ",\"rist_dsec\":" + String(ristrettoSecOffset);
-    json += ",\"lungo_dtemp\":" + String(lungoTempOffset, 1);
-    json += ",\"lungo_dsec\":" + String(lungoSecOffset);
-    // While a shot is running, use the value already locked in for THIS shot
-    // (shotAutoStopTargetSec) rather than recomputing live - a mid-shot
-    // preset tap must not retime the progress bar out from under a shot
-    // that's already using the original target.
-    unsigned long effectiveAutoStop =
-        shotInProgress ? shotAutoStopTargetSec : effectiveShotAutoStopSec();
-    json += ",\"shot_auto_stop_effective_sec\":" + String(effectiveAutoStop);
+    json += ",\"active_profile\":" + String(activeProfileIndex);
+    json += ",\"pi_enabled\":" + String(activePreinfusionEnabled ? "true" : "false");
+    json += ",\"pi_pulses\":" + String(activePreinfusionPulses);
+    json += ",\"pi_on_ms\":" + String(activePreinfusionOnMs);
+    json += ",\"pi_off_ms\":" + String(activePreinfusionOffMs);
+    json += ",\"shot_phase\":\"";
+    switch (currentShotPhase) {
+      case ShotPhase::PREINFUSION_ON:
+      case ShotPhase::PREINFUSION_OFF: json += "preinfusion"; break;
+      case ShotPhase::EXTRACTION: json += "extraction"; break;
+      default: json += "none"; break;
+    }
+    json += "\"";
 
     json += ",\"sched\":[";
     for (int i = 0; i < SCHED_MAX_COUNT; i++) {
@@ -1322,6 +1497,13 @@ void setupWeb() {
   // Shot history log
   server.on("/shots", HTTP_GET,
             []() { server.send(200, "application/json", shotLogReadJson()); });
+
+  // Named shot profiles (temp + auto-stop + pre-infusion pattern) - see
+  // profiles.cpp. List only; add/edit/delete/apply all go through /update
+  // like every other setting, for the same reason /settings_export reuses
+  // it for restore - one code path, not two.
+  server.on("/profiles", HTTP_GET,
+            []() { server.send(200, "application/json", profilesReadJson()); });
 
   // Settings backup/restore (2026-08-16). Export builds a query-string in
   // EXACTLY the same field names /update already accepts and applies; the
@@ -1364,10 +1546,8 @@ void setupWeb() {
     q += "&eco_timeout_min=" + String(ecoTimeoutMin);
     q += "&descale_shot_threshold=" + String(descaleShotThreshold);
     q += "&descale_day_threshold=" + String(descaleDayThreshold);
-    q += "&rist_dtemp=" + String(ristrettoTempOffset, 1);
-    q += "&rist_dsec=" + String(ristrettoSecOffset);
-    q += "&lungo_dtemp=" + String(lungoTempOffset, 1);
-    q += "&lungo_dsec=" + String(lungoSecOffset);
+    // Note: named shot profiles live in their own LittleFS file (profiles.cpp,
+    // GET /profiles), not NVS - not included in this key=value backup format.
     for (int i = 0; i < SCHED_MAX_COUNT; i++) {
       char timeBuf[6];
       snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d", schedHour[i], schedMin[i]);
@@ -1525,28 +1705,39 @@ void setupWeb() {
       preferences.putULong("descale_days", descaleDayThreshold);
     }
 
-    // Brew preset offsets (Espresso itself is just brew_target/
-    // shot_auto_stop_sec above, no separate storage - see config.h/main.cpp).
-    if (server.hasArg("rist_dtemp")) {
-      ristrettoTempOffset = server.arg("rist_dtemp").toDouble();
-      preferences.putDouble("rist_dtemp", ristrettoTempOffset);
+    // Named shot profiles (profiles.cpp) - three independent actions, same
+    // split as everywhere else in this handler (editing vs. an explicit
+    // apply action):
+    //   profile_apply=<idx>       - load a saved profile into the live
+    //                               settings (temp/auto-stop/pre-infusion)
+    //   profile_save=1 (+ fields) - add (profile_index=-1) or overwrite an
+    //                               existing saved profile
+    //   profile_delete=<idx>      - remove a saved profile
+    if (server.hasArg("profile_apply")) {
+      applyProfile(server.arg("profile_apply").toInt());
     }
-    if (server.hasArg("rist_dsec")) {
-      ristrettoSecOffset = server.arg("rist_dsec").toInt();
-      preferences.putLong("rist_dsec", ristrettoSecOffset);
+    if (server.hasArg("profile_save")) {
+      int idx = server.hasArg("profile_index") ? server.arg("profile_index").toInt() : -1;
+      String name = server.hasArg("profile_name") ? server.arg("profile_name") : "Profile";
+      double temp = server.hasArg("profile_temp") ? server.arg("profile_temp").toDouble() : BREW_SETPOINT_DEFAULT;
+      unsigned long autoStop = server.hasArg("profile_autostop")
+          ? constrain((long)server.arg("profile_autostop").toInt(), (long)SHOT_AUTO_STOP_SEC_MIN, (long)SHOT_AUTO_STOP_SEC_MAX)
+          : SHOT_AUTO_STOP_SEC_DEFAULT;
+      bool piEnabled = server.hasArg("profile_pi_enabled") && server.arg("profile_pi_enabled") == "1";
+      int pulses = server.hasArg("profile_pi_pulses")
+          ? constrain(server.arg("profile_pi_pulses").toInt(), 0, PREINFUSION_PULSES_MAX) : 0;
+      int onMs = server.hasArg("profile_pi_on_ms")
+          ? constrain(server.arg("profile_pi_on_ms").toInt(), PREINFUSION_PULSE_MS_MIN, PREINFUSION_PULSE_MS_MAX) : PREINFUSION_ON_MS_DEFAULT;
+      int offMs = server.hasArg("profile_pi_off_ms")
+          ? constrain(server.arg("profile_pi_off_ms").toInt(), PREINFUSION_PULSE_MS_MIN, PREINFUSION_PULSE_MS_MAX) : PREINFUSION_OFF_MS_DEFAULT;
+      int saved = profileSave(idx, name, temp, autoStop, piEnabled, pulses, onMs, offMs);
+      // Editing the profile that's currently active also refreshes the live
+      // settings from it, so tweaking "your current setup" takes effect
+      // immediately instead of silently drifting from what's now saved.
+      if (saved >= 0 && saved == activeProfileIndex) applyProfile(saved);
     }
-    if (server.hasArg("lungo_dtemp")) {
-      lungoTempOffset = server.arg("lungo_dtemp").toDouble();
-      preferences.putDouble("lungo_dtemp", lungoTempOffset);
-    }
-    if (server.hasArg("lungo_dsec")) {
-      lungoSecOffset = server.arg("lungo_dsec").toInt();
-      preferences.putLong("lungo_dsec", lungoSecOffset);
-    }
-    // Selecting a preset (-1/0/1) - Espresso (0) is the "unpress" back to the
-    // plain default (see applyPreset() in main.cpp for the full reasoning).
-    if (server.hasArg("preset_apply")) {
-      applyPreset(server.arg("preset_apply").toInt());
+    if (server.hasArg("profile_delete")) {
+      profileDelete(server.arg("profile_delete").toInt());
     }
 
     // Scheduled warm-up - SCHED_MAX_COUNT independent slots. Editing a slot's

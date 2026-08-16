@@ -23,6 +23,17 @@
 // ============================================================================
 #define PIN_SSR 4
 
+// Pump relay (HARDWARE_ROADMAP.md item 4) - NOT YET WIRED. Software (phase
+// state machine, pre-infusion timing) is built ahead of the hardware, same
+// pattern already used for shot auto-stop before item 4 existed at all.
+// GPIO5 is free (next available after PIN_SSR=4, PIN_SENSOR_RX/TX=18/17) -
+// confirm/change once the relay is actually wired in. PIN_PUMP_ACTIVE_LEVEL
+// is a one-line flip for whichever polarity the specific relay module turns
+// out to need - HARDWARE_ROADMAP.md item 4 explicitly warns many
+// opto-isolated modules energize on LOW, not HIGH; don't assume.
+#define PIN_PUMP 5
+#define PIN_PUMP_ACTIVE_LEVEL HIGH
+
 // ============================================================================
 // Temperature sensor module (UART, NOT SPI)
 // ----------------------------------------------------------------------------
@@ -239,25 +250,47 @@ enum class AutotuneState { IDLE, RUNNING, DONE_OK, DONE_FAIL };
 #define DESCALE_DAY_THRESHOLD_DEFAULT 60
 
 // ============================================================================
-// Brew presets (2026-08-16, redesigned same day after real-world feedback)
+// Shot profiles (2026-08-16, second redesign)
 // ----------------------------------------------------------------------------
-// Originally three independent absolute (temp, time) pairs - but that left
-// no real "off" state: once you tapped Ristretto there was nothing to revert
-// TO except tapping a different preset, since all three were equal siblings.
-// Redesigned so Espresso IS the plain Brew target/auto-stop (brewSetpoint/
-// shotAutoStopSec, edited exactly as before in the Tune/Settings tabs) - no
-// separate storage for it at all. Ristretto/Lungo are OFFSETS applied on top
-// of that default (see effectiveBrewSetpoint()/effectiveShotAutoStopSec() in
-// main.cpp), selected via activePreset (-1/0/1). Tapping Espresso always
-// returns to the plain default, acting as the "unpress" the button-based UI
-// needs. Offset defaults below reflect common practice: ristretto shorter
-// and slightly cooler, lungo longer and slightly hotter (extra water would
-// otherwise read as more diluted/bitter at the same temperature).
+// Superseded the previous "Espresso=default + Ristretto/Lungo offsets"
+// design the same day, after deciding to fold in pre-infusion: a real named-
+// profile LIST (like GaggiMate's file-per-profile approach, scaled down for
+// a single-user home machine rather than an open-ended library) solves the
+// original "can't unpress" complaint more naturally than the offset hack did
+// - there's no "off" state to escape, you just tap a DIFFERENT complete
+// profile, and the original default is always sitting right there in the
+// list. Stored as one CSV line per profile on LittleFS (profiles.cpp),
+// mirroring shot_log.cpp's existing pattern rather than introducing a JSON
+// library - each profile is small (name + a handful of numbers).
+//
+// PROFILE_MAX_COUNT=8 deliberately bounded (not Gaggiuino's cramped 5-slot
+// EEPROM array, not GaggiMate's unbounded file-per-profile design meant for
+// a shareable library) - a single home user realistically wants a handful of
+// named recipes (a couple of beans/roasts, ristretto/lungo variants), not a
+// browsable catalog.
 // ============================================================================
-#define PRESET_RISTRETTO_TEMP_OFFSET_DEFAULT (-1.0)
-#define PRESET_RISTRETTO_SEC_OFFSET_DEFAULT (-7)
-#define PRESET_LUNGO_TEMP_OFFSET_DEFAULT 2.0
-#define PRESET_LUNGO_SEC_OFFSET_DEFAULT 13
+#define PROFILE_MAX_COUNT 8
+#define PROFILE_NAME_MAX_LEN 20
+#define PROFILE_LOG_PATH "/profiles.csv"
+
+// Pre-infusion (2026-08-16) - see AGENTS.md/HARDWARE_ROADMAP.md item 4 for
+// the full reasoning. Pulses the pump relay on/off a few times before
+// switching to continuous power for the rest of the shot, approximating the
+// puck-saturation benefit of true low-pressure pre-infusion using only an
+// on/off relay (no dimmer/pressure transducer needed - those remain a
+// separate, harder item). Per-profile, not global - each saved profile
+// carries its own pre-infusion pattern (or none). Software-only until
+// PIN_PUMP is actually wired; the phase state machine and timing are built
+// now so nothing needs revisiting once the relay arrives, same "software
+// ahead of hardware" pattern already proven for shot auto-stop.
+#define PREINFUSION_PULSES_DEFAULT 4
+#define PREINFUSION_PULSES_MAX 10
+#define PREINFUSION_ON_MS_DEFAULT 1000
+#define PREINFUSION_OFF_MS_DEFAULT 1000
+#define PREINFUSION_PULSE_MS_MIN 200
+#define PREINFUSION_PULSE_MS_MAX 5000
+
+enum class ShotPhase { NONE, PREINFUSION_ON, PREINFUSION_OFF, EXTRACTION };
 
 // ============================================================================
 // Scheduled warm-up (2026-08-16; multiple slots added same day)
