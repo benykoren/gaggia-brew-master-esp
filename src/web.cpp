@@ -40,6 +40,8 @@ extern void stopAutotune();
 extern bool shotInProgress;
 extern unsigned long shotStartMillis;
 extern unsigned long shotAutoStopSec;
+extern unsigned long shotAutoStopTargetSec;
+extern unsigned long effectiveShotAutoStopSec();
 extern void startShot();
 extern void stopShot();
 
@@ -48,6 +50,17 @@ extern time_t lastDescaleTime;
 extern unsigned long descaleShotThreshold;
 extern unsigned long descaleDayThreshold;
 extern void markDescaled();
+
+extern int activePreset; // -1=Ristretto, 0=Espresso(default), 1=Lungo
+extern double ristrettoTempOffset, lungoTempOffset;
+extern long ristrettoSecOffset, lungoSecOffset;
+extern void applyPreset(int idx);
+
+extern bool schedEnabled[SCHED_MAX_COUNT];
+extern int schedHour[SCHED_MAX_COUNT], schedMin[SCHED_MAX_COUNT];
+extern bool schedModeSteam[SCHED_MAX_COUNT];
+extern int schedTzOffsetMin;
+extern void resetSchedFired(int i);
 
 WebServer server(80);
 
@@ -252,6 +265,15 @@ const char *index_html = R"rawliteral(
     .shot-progress > span.in-window { background: var(--green); }
     .shot-progress > span.over { background: var(--red); }
 
+    .preset-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--sp-2); margin-top: var(--sp-4); }
+    .btn-preset {
+      border: 1px solid var(--border); cursor: pointer; padding: 10px 6px; border-radius: var(--radius-md);
+      font-size: 12.5px; font-weight: 700; color: var(--text-dim); background: var(--surface);
+      transition: transform .05s ease, border-color .15s ease, color .15s ease;
+    }
+    .btn-preset:active { transform: translateY(1px); }
+    .btn-preset.active { color: var(--copper-light); border-color: var(--copper); }
+
     .btn-autotune {
       width: 100%; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: var(--sp-2);
       padding: 15px 16px; border-radius: var(--radius-md); font-size: 14.5px; font-weight: 700; color: #1a1206;
@@ -278,6 +300,12 @@ const char *index_html = R"rawliteral(
     input:focus { border-color: var(--copper); box-shadow: 0 0 0 3px rgba(217,140,63,.18); }
     .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
     .field-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--sp-3); }
+    .check-row { display: flex; align-items: center; gap: var(--sp-2); font-size: 14px; color: var(--text); cursor: pointer; }
+    .sched-slot { padding: var(--sp-3) 0; border-bottom: 1px solid var(--border-soft); }
+    .sched-slot:first-child { padding-top: 0; }
+    .sched-slot .field-row { margin-top: var(--sp-3); }
+    .check-row input { width: auto; }
+    select { width: 100%; padding: 12px 13px; border-radius: var(--radius-sm); font-size: 15px; background: #100d0b; border: 1px solid var(--border); color: var(--text); outline: none; }
 
     .submit, .btn-secondary, .btn-danger { width: 100%; border: none; cursor: pointer; padding: 14px; border-radius: var(--radius-md); font-size: 14.5px; font-weight: 700; margin-top: var(--sp-1); }
     .submit { color: #1a1206; background: linear-gradient(135deg, var(--copper-light), var(--copper-deep)); box-shadow: 0 6px 18px rgba(217,140,63,.28); }
@@ -374,6 +402,11 @@ const char *index_html = R"rawliteral(
           <button onclick="toggleShot()" id="btn_shot" class="btn-shot">Start Shot</button>
         </div>
         <div class="shot-progress"><span id="shot_progress_bar"></span></div>
+        <div class="preset-row">
+          <button onclick="applyPreset(-1)" class="btn-preset" data-preset="-1">Ristretto</button>
+          <button onclick="applyPreset(0)" class="btn-preset" data-preset="0">Espresso</button>
+          <button onclick="applyPreset(1)" class="btn-preset" data-preset="1">Lungo</button>
+        </div>
       </div>
 
       <div class="card">
@@ -444,6 +477,29 @@ const char *index_html = R"rawliteral(
           <button type="submit" class="submit">Save Steam</button>
         </form>
       </div>
+
+      <div class="card">
+        <div class="tab-section-title">Brew Presets</div>
+        <p class="hint">Espresso is just the Brew target/auto-stop above - tapping it on the Now tab returns to that plain default. Ristretto and Lungo are offsets from it, applied only while selected; tapping Espresso again always "unpresses" back to default.</p>
+        <div class="field-row-3">
+          <div class="field"><label>Ristretto</label><span class="hint" style="margin:0">Shorter &amp; cooler</span></div>
+          <div class="field"><label>Espresso</label><span class="hint" style="margin:0">= Brew target above</span></div>
+          <div class="field"><label>Lungo</label><span class="hint" style="margin:0">Longer &amp; hotter</span></div>
+        </div>
+        <form action="/update" method="GET">
+          <div class="field-row-3">
+            <div class="field"><label for="input_rist_dtemp">Ristretto &Delta;&deg;C</label><input type="number" step="0.1" name="rist_dtemp" id="input_rist_dtemp" value=""></div>
+            <div class="field"></div>
+            <div class="field"><label for="input_lungo_dtemp">Lungo &Delta;&deg;C</label><input type="number" step="0.1" name="lungo_dtemp" id="input_lungo_dtemp" value=""></div>
+          </div>
+          <div class="field-row-3">
+            <div class="field"><label for="input_rist_dsec">Ristretto &Delta;sec</label><input type="number" step="1" name="rist_dsec" id="input_rist_dsec" value=""></div>
+            <div class="field"></div>
+            <div class="field"><label for="input_lungo_dsec">Lungo &Delta;sec</label><input type="number" step="1" name="lungo_dsec" id="input_lungo_dsec" value=""></div>
+          </div>
+          <button type="submit" class="submit">Save Preset Offsets</button>
+        </form>
+      </div>
     </main>
 
     <main class="view" data-view="history" hidden>
@@ -452,9 +508,13 @@ const char *index_html = R"rawliteral(
         <div id="shot_history_empty" class="empty-hint">No shots logged yet.</div>
         <div class="table-scroll">
           <table class="history" id="shot_history_table" style="display:none">
-            <thead><tr><th>When</th><th>Duration</th><th>Peak &deg;C</th><th>Weight</th></tr></thead>
+            <thead><tr><th>When</th><th>Duration</th><th>Peak &deg;C</th><th>End &deg;C</th><th>Weight</th></tr></thead>
             <tbody id="shot_history_body"></tbody>
           </table>
+        </div>
+        <div class="chart-card">
+          <div class="chart-label"><span>Peak (&#9679;) &amp; end (&mdash;) temp &middot; last 20 shots</span><span>&deg;C</span></div>
+          <canvas id="shot_trend_chart" width="300" height="70"></canvas>
         </div>
       </div>
 
@@ -499,6 +559,45 @@ const char *index_html = R"rawliteral(
       </div>
 
       <div class="card">
+        <div class="tab-section-title">Scheduled Warm-Up</div>
+        <form action="/update" method="GET">
+          <div class="sched-slot">
+            <label class="check-row"><input type="checkbox" id="input_sched0_en_cb" onchange="setSchedEnabled(0,this.checked)"> Slot 1 enabled</label>
+            <div class="field-row">
+              <div class="field"><label for="input_sched0_time">Local time</label><input type="time" name="sched0_time" id="input_sched0_time" value="07:00"></div>
+              <div class="field">
+                <label for="input_sched0_steam">Mode</label>
+                <select name="sched0_steam" id="input_sched0_steam"><option value="0">Brew</option><option value="1">Steam</option></select>
+              </div>
+            </div>
+          </div>
+          <div class="sched-slot">
+            <label class="check-row"><input type="checkbox" id="input_sched1_en_cb" onchange="setSchedEnabled(1,this.checked)"> Slot 2 enabled</label>
+            <div class="field-row">
+              <div class="field"><label for="input_sched1_time">Local time</label><input type="time" name="sched1_time" id="input_sched1_time" value="07:00"></div>
+              <div class="field">
+                <label for="input_sched1_steam">Mode</label>
+                <select name="sched1_steam" id="input_sched1_steam"><option value="0">Brew</option><option value="1">Steam</option></select>
+              </div>
+            </div>
+          </div>
+          <div class="sched-slot">
+            <label class="check-row"><input type="checkbox" id="input_sched2_en_cb" onchange="setSchedEnabled(2,this.checked)"> Slot 3 enabled</label>
+            <div class="field-row">
+              <div class="field"><label for="input_sched2_time">Local time</label><input type="time" name="sched2_time" id="input_sched2_time" value="07:00"></div>
+              <div class="field">
+                <label for="input_sched2_steam">Mode</label>
+                <select name="sched2_steam" id="input_sched2_steam"><option value="0">Brew</option><option value="1">Steam</option></select>
+              </div>
+            </div>
+          </div>
+          <input type="hidden" name="sched_tz_min" id="input_sched_tz_min" value="0">
+          <button type="submit" class="submit">Save Schedule Times</button>
+        </form>
+        <p class="hint" style="margin-top:var(--sp-3)">Up to 3 independent times (e.g. a weekday morning and a separate weekend one). The controller only keeps UTC time (no timezone database) - your browser's timezone (<span id="sched_tz_display">--</span>) is detected automatically and kept in sync, so just enter real local wall-clock times above. Each fires once per calendar day.</p>
+      </div>
+
+      <div class="card">
         <div class="tab-section-title">Network</div>
         <button onclick="wifiReset()" class="btn-danger">Reset WiFi Settings</button>
         <p class="hint" style="margin-top:var(--sp-3)">Reboots into the <b>GaggiaBrewMasterESP_Setup</b> setup network so you can join a different WiFi without reflashing.</p>
@@ -518,7 +617,17 @@ const char *index_html = R"rawliteral(
           </div>
           <button type="submit" class="submit">Save &amp; Restart</button>
         </form>
-        <p class="hint" style="margin-top:var(--sp-3)">Saving MQTT settings reboots the controller.</p>
+        <p class="hint" style="margin-top:var(--sp-3)">Saving MQTT settings reboots the controller. Auto-discovers a mode select, Brew/Steam target+Kp/Ki/Kd numbers, temp/output sensors, and shot/fault/descale binary sensors in Home Assistant.</p>
+      </div>
+
+      <div class="card">
+        <div class="tab-section-title">Backup &amp; Restore</div>
+        <a href="/settings_export" class="btn-secondary" style="display:block;text-align:center;text-decoration:none;margin-top:0">Download Backup</a>
+        <label class="btn-secondary" style="display:block;text-align:center;cursor:pointer">
+          Restore From File
+          <input type="file" accept=".txt" onchange="restoreSettings(this)" style="display:none">
+        </label>
+        <p class="hint" style="margin-top:var(--sp-3)">Backs up every Brew/Steam/preset/schedule/MQTT setting to a plain text file. Restoring overwrites current settings and reboots if MQTT config is included - cheap insurance before an autotune run or firmware experiment.</p>
       </div>
     </main>
 
@@ -600,13 +709,15 @@ var shotRunning = false;
 var shotElapsedBaseMs = 0;
 var shotElapsedCapturedAt = null;
 var prevShotRunning = false; // detects the stop transition, to refresh history once
-// Populated from /status (shot_auto_stop_sec) - the progress bar and
-// in-window/over coloring track THIS configured value, not a hardcoded
-// number, so they stay correct whenever the auto-stop duration changes.
+// Populated from /status (shot_auto_stop_effective_sec - the base auto-stop
+// time with whichever preset offset is currently active already folded in,
+// snapshotted server-side once a shot is running) - the progress bar and
+// in-window/over coloring track THIS value, not a hardcoded number, so they
+// stay correct whenever the auto-stop duration or active preset changes.
 // 0 means auto-stop is disabled (manual-only); fall back to the original
 // fixed 25-30s SCA-referenced reference window in that case, since there's
 // no other meaningful target to size the bar against.
-var shotAutoStopSec = 0;
+var shotAutoStopEffectiveSec = 0;
 
 setInterval(function () {
   var el = document.getElementById("shot_time");
@@ -617,8 +728,8 @@ setInterval(function () {
   }
   el.textContent = formatElapsed(ms);
   var secs = ms / 1000;
-  var hasAutoStop = shotAutoStopSec > 0;
-  var target = hasAutoStop ? shotAutoStopSec : 30;
+  var hasAutoStop = shotAutoStopEffectiveSec > 0;
+  var target = hasAutoStop ? shotAutoStopEffectiveSec : 30;
   var inWindow = shotRunning && (hasAutoStop ? secs >= target - 5 && secs <= target : secs >= 25 && secs <= 30);
   var over = shotRunning && secs > target;
   el.classList.toggle("in-window", inWindow);
@@ -652,15 +763,125 @@ function fetchShotHistory() {
         var when = new Date(s.ts * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
         var dur = formatElapsed(s.duration_ms);
         var weight = s.weight > 0 ? s.weight.toFixed(1) + "g" : "&mdash;";
-        tr.innerHTML = "<td>" + when + "</td><td class='num'>" + dur + "</td><td class='num'>" + s.peak_temp.toFixed(1) + "</td><td class='num'>" + weight + "</td>";
+        var endTemp = s.end_temp > 0 ? s.end_temp.toFixed(1) : "&mdash;";
+        tr.innerHTML = "<td>" + when + "</td><td class='num'>" + dur + "</td><td class='num'>" + s.peak_temp.toFixed(1) + "</td><td class='num'>" + endTemp + "</td><td class='num'>" + weight + "</td>";
         body.appendChild(tr);
       });
+      drawShotTrendChart(shots.slice(-20)); // oldest-first, most recent 20
     }
   };
   xhttp.open("GET", "/shots", true);
   xhttp.send();
 }
 fetchShotHistory();
+
+// Last known Brew target, refreshed by the main /status poll below - drawn
+// as a reference line on the shot-trend chart so a peak-temp overshoot (like
+// the integral-windup bug this chart exists to catch) is visible against
+// what the shot was actually targeting, not just as a bare number.
+var lastBrewTarget = null;
+
+// Scheduled warm-up timezone (2026-08-16 fix): getTimezoneOffset() returns
+// minutes BEHIND UTC (positive west of UTC), the opposite sign of what the
+// firmware wants (UTC+3 -> +180) - hence the negation. Computed from the
+// browser, not entered by hand, specifically because a wrong manual UTC
+// offset was the root cause of the schedule silently firing at the wrong
+// hour (looked like it "didn't work" - it was just firing hours off from
+// the intended local time). Automatically follows DST since it's
+// recomputed fresh on every page load.
+var browserTzOffsetMin = -(new Date().getTimezoneOffset());
+var schedTzSyncedOnce = false;
+function syncSchedTz(serverValue) {
+  var disp = document.getElementById("sched_tz_display");
+  if (disp) {
+    var h = browserTzOffsetMin / 60;
+    disp.textContent = "UTC" + (h >= 0 ? "+" : "") + h;
+  }
+  if (schedTzSyncedOnce || serverValue === browserTzOffsetMin) return;
+  schedTzSyncedOnce = true;
+  if (serverValue !== browserTzOffsetMin) {
+    var xhttp = new XMLHttpRequest();
+    xhttp.open("GET", "/update?sched_tz_min=" + browserTzOffsetMin, true);
+    xhttp.send();
+  }
+}
+
+// Shot-quality trend (History tab) - peak temp per shot as a line, against a
+// dashed reference line at the current Brew target, so a regression (like
+// the overshoot this chart is meant to catch) is visible at a glance instead
+// of needing a manual trace every time. End temp draws as a second, thinner
+// line - a big peak/end gap shows a shot that spiked mid-pull then cooled
+// back down, vs. one that simply ended hot. Duration is encoded as the peak
+// marker's size (bigger dot = longer shot) rather than a third axis, to keep
+// this a single simple canvas rather than a multi-series chart library.
+// end_temp reads 0 ("unknown") for shots logged before that field existed -
+// filtered out of both the series and the min/max range rather than drawn
+// as a false dip to zero.
+function drawShotTrendChart(shots) {
+  var canvas = document.getElementById("shot_trend_chart");
+  if (!canvas) return;
+  var ctx = canvas.getContext("2d");
+  var w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  if (!shots || shots.length < 2) return;
+
+  var temps = shots.map(function (s) { return s.peak_temp; });
+  var ends = shots.map(function (s) { return s.end_temp > 0 ? s.end_temp : null; });
+  var durs = shots.map(function (s) { return s.duration_ms; });
+  var knownEnds = ends.filter(function (v) { return v !== null; });
+  var range = temps.concat(knownEnds).concat(lastBrewTarget != null ? [lastBrewTarget] : []);
+  var min = Math.min.apply(null, range), max = Math.max.apply(null, range);
+  if (max - min < 2) { max += 1; min -= 1; }
+  var minDur = Math.min.apply(null, durs), maxDur = Math.max.apply(null, durs);
+
+  function yFor(v) { return h - ((v - min) / (max - min)) * (h - 8) - 4; }
+  function xFor(i) { return (i / (shots.length - 1)) * (w - 8) + 4; }
+
+  if (lastBrewTarget != null) {
+    var ty = yFor(lastBrewTarget);
+    ctx.beginPath();
+    ctx.setLineDash([4, 3]);
+    ctx.moveTo(0, ty); ctx.lineTo(w, ty);
+    ctx.strokeStyle = "rgba(217,140,63,.5)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // End temp - drawn first (under the peak line), breaking the line across
+  // any unknown (null) gaps instead of interpolating through them.
+  ctx.beginPath();
+  var penDown = false;
+  ends.forEach(function (v, i) {
+    if (v === null) { penDown = false; return; }
+    var x = xFor(i), y = yFor(v);
+    if (!penDown) { ctx.moveTo(x, y); penDown = true; } else { ctx.lineTo(x, y); }
+  });
+  ctx.strokeStyle = "#6b93b0";
+  ctx.lineWidth = 1.5;
+  ctx.lineJoin = "round";
+  ctx.stroke();
+
+  ctx.beginPath();
+  temps.forEach(function (v, i) {
+    var x = xFor(i), y = yFor(v);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = "#d98c3f";
+  ctx.lineWidth = 2;
+  ctx.lineJoin = "round";
+  ctx.stroke();
+
+  temps.forEach(function (v, i) {
+    var x = xFor(i), y = yFor(v);
+    var durFrac = maxDur > minDur ? (durs[i] - minDur) / (maxDur - minDur) : 0.5;
+    var r = 2 + durFrac * 3.5; // 2-5.5px, longer shots draw a bigger dot
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, 2 * Math.PI);
+    ctx.fillStyle = (lastBrewTarget != null && v > lastBrewTarget + 1.5) ? "#e5544b" : "#d98c3f";
+    ctx.fill();
+  });
+}
 setInterval(function () {
   var el = document.getElementById("last_updated");
   if (!el) return;
@@ -721,6 +942,8 @@ setInterval(function () {
       document.getElementById("btn_brew").classList.toggle("active", mode === "brew");
       document.getElementById("btn_steam").classList.toggle("active", mode === "steam");
 
+      lastBrewTarget = json.brew_target;
+
       // Sync form fields (once, unless user is editing)
       setVal("input_brew_target", json.brew_target);
       setVal("input_brew_kp", json.brew_kp);
@@ -744,7 +967,47 @@ setInterval(function () {
       // Shot sub-label reflects the actual configured auto-stop, not a
       // hardcoded window - "disabled" reads plainly when set to 0.
       document.getElementById("shot_auto_stop_label").innerHTML =
-        json.shot_auto_stop_sec > 0 ? "Auto-stops at " + json.shot_auto_stop_sec + "s" : "Auto-stop disabled";
+        json.shot_auto_stop_effective_sec > 0 ? "Auto-stops at " + json.shot_auto_stop_effective_sec + "s" : "Auto-stop disabled";
+
+      // Brew presets - Espresso (0) IS the plain brew target/auto-stop above,
+      // no separate fields; Ristretto/Lungo offsets are synced below. Active-
+      // preset highlighting is an exact match against activePreset (-1/0/1),
+      // not a value comparison - always well-defined, so Espresso always
+      // shows as active whenever no offset is selected (the "unpress" state).
+      setVal("input_rist_dtemp", json.rist_dtemp);
+      setVal("input_rist_dsec", json.rist_dsec);
+      setVal("input_lungo_dtemp", json.lungo_dtemp);
+      setVal("input_lungo_dsec", json.lungo_dsec);
+      [-1, 0, 1].forEach(function (i) {
+        var btn = document.querySelector('.btn-preset[data-preset="' + i + '"]');
+        if (btn) btn.classList.toggle("active", json.active_preset === i);
+      });
+
+      // Shot label/progress bar target reflects the EFFECTIVE auto-stop
+      // (base +/- whichever preset offset is active, snapshotted for an
+      // in-progress shot - see shot_auto_stop_effective_sec in web.cpp).
+      shotAutoStopEffectiveSec = json.shot_auto_stop_effective_sec;
+
+      // Scheduled warm-up - checkbox/select use .checked/.value directly
+      // (setVal() targets plain text/number inputs' .value + its "synced
+      // once" guard, which doesn't apply the same way to these two).
+      if (json.sched) {
+        json.sched.forEach(function (s, i) {
+          var cb = document.getElementById("input_sched" + i + "_en_cb");
+          if (cb && document.activeElement !== cb) cb.checked = s.en;
+          var timeStr = (s.hr < 10 ? "0" : "") + s.hr + ":" + (s.mn < 10 ? "0" : "") + s.mn;
+          setVal("input_sched" + i + "_time", timeStr);
+          var steamSel = document.getElementById("input_sched" + i + "_steam");
+          if (steamSel && document.activeElement !== steamSel) steamSel.value = s.st ? "1" : "0";
+        });
+      }
+      // Timezone offset is auto-detected from the browser (see syncSchedTz()
+      // below), not user-entered - this hidden field just carries that
+      // detected value along whenever "Save Schedule Times" submits the
+      // time/mode fields, so it's never accidentally overwritten by a stale
+      // value.
+      document.getElementById("input_sched_tz_min").value = browserTzOffsetMin;
+      syncSchedTz(json.sched_tz_min);
 
       // Eco / auto-sleep banner
       document.getElementById("sleep_banner").style.display = json.auto_sleeping ? "flex" : "none";
@@ -785,10 +1048,10 @@ setInterval(function () {
       }
       lastAutotuneState = json.autotune_state;
 
-      // Shot timer
+      // Shot timer (shotAutoStopEffectiveSec is set earlier, alongside the
+      // rest of the preset sync, since it's derived from the active preset)
       shotRunning = json.shot_in_progress;
       shotElapsedBaseMs = json.shot_elapsed_ms;
-      shotAutoStopSec = json.shot_auto_stop_sec;
       shotElapsedCapturedAt = Date.now();
       var btnShot = document.getElementById("btn_shot");
       btnShot.textContent = shotRunning ? "Stop Shot" : "Start Shot";
@@ -839,6 +1102,34 @@ function toggleShot() {
   var xhttp = new XMLHttpRequest();
   xhttp.open("GET", "/update?shot=" + (shotRunning ? "stop" : "start"), true);
   xhttp.send();
+}
+
+function applyPreset(idx) {
+  var xhttp = new XMLHttpRequest();
+  xhttp.open("GET", "/update?preset_apply=" + idx, true);
+  xhttp.send();
+}
+
+function setSchedEnabled(i, checked) {
+  var xhttp = new XMLHttpRequest();
+  xhttp.open("GET", "/update?sched" + i + "_en=" + (checked ? "1" : "0"), true);
+  xhttp.send();
+}
+
+function restoreSettings(input) {
+  if (!input.files || !input.files.length) return;
+  if (!confirm("Restore settings from this backup file? This overwrites your current Brew/Steam/preset/schedule/MQTT settings and reboots if MQTT config is included.")) {
+    input.value = "";
+    return;
+  }
+  var reader = new FileReader();
+  reader.onload = function () {
+    var xhttp = new XMLHttpRequest();
+    xhttp.open("GET", "/update?" + reader.result.trim(), true);
+    xhttp.send();
+  };
+  reader.readAsText(input.files[0]);
+  input.value = "";
 }
 
 function markDescaled() {
@@ -955,6 +1246,12 @@ void setupWeb() {
 
     json += ",\"fault\":" + String(sensorFault ? "true" : "false");
 
+    // NTP sync status - an unsynced clock reads as ~1970 and silently blocks
+    // the scheduled-warmup check (main.cpp) with no other visible symptom.
+    time_t nowEpoch = time(nullptr);
+    json += ",\"ntp_synced\":" + String(nowEpoch > 1600000000L ? "true" : "false");
+    json += ",\"server_time\":" + String((long long)nowEpoch);
+
     json += ",\"eco_timeout_min\":" + String(ecoTimeoutMin);
     json += ",\"auto_sleeping\":" + String(autoSleeping ? "true" : "false");
     json += ",\"shot_auto_stop_sec\":" + String(shotAutoStopSec);
@@ -986,6 +1283,29 @@ void setupWeb() {
         (daysSinceDescale >= 0 && (unsigned long)daysSinceDescale >= descaleDayThreshold);
     json += ",\"descale_due\":" + String(descaleDue ? "true" : "false");
 
+    json += ",\"active_preset\":" + String(activePreset);
+    json += ",\"rist_dtemp\":" + String(ristrettoTempOffset, 1);
+    json += ",\"rist_dsec\":" + String(ristrettoSecOffset);
+    json += ",\"lungo_dtemp\":" + String(lungoTempOffset, 1);
+    json += ",\"lungo_dsec\":" + String(lungoSecOffset);
+    // While a shot is running, use the value already locked in for THIS shot
+    // (shotAutoStopTargetSec) rather than recomputing live - a mid-shot
+    // preset tap must not retime the progress bar out from under a shot
+    // that's already using the original target.
+    unsigned long effectiveAutoStop =
+        shotInProgress ? shotAutoStopTargetSec : effectiveShotAutoStopSec();
+    json += ",\"shot_auto_stop_effective_sec\":" + String(effectiveAutoStop);
+
+    json += ",\"sched\":[";
+    for (int i = 0; i < SCHED_MAX_COUNT; i++) {
+      if (i > 0) json += ",";
+      json += "{\"en\":" + String(schedEnabled[i] ? "true" : "false") +
+              ",\"hr\":" + String(schedHour[i]) + ",\"mn\":" + String(schedMin[i]) +
+              ",\"st\":" + String(schedModeSteam[i] ? "true" : "false") + "}";
+    }
+    json += "]";
+    json += ",\"sched_tz_min\":" + String(schedTzOffsetMin);
+
     json += ",\"history\":[";
     for (int i = 0; i < tempHistoryCount; i++) {
       int idx = (tempHistoryHead - tempHistoryCount + i + TEMP_HISTORY_LEN * 2) %
@@ -1002,6 +1322,70 @@ void setupWeb() {
   // Shot history log
   server.on("/shots", HTTP_GET,
             []() { server.send(200, "application/json", shotLogReadJson()); });
+
+  // Settings backup/restore (2026-08-16). Export builds a query-string in
+  // EXACTLY the same field names /update already accepts and applies; the
+  // browser downloads it as a plain text file. Restore is just the reverse:
+  // the Web UI reads that file back client-side and re-POSTs its contents
+  // straight to /update - no JSON parser needed on the device at all, and
+  // zero new field-handling code to keep in sync with /update itself.
+  server.on("/settings_export", HTTP_GET, []() {
+    auto enc = [](const String &s) {
+      String out;
+      char buf[4];
+      for (size_t i = 0; i < s.length(); i++) {
+        char c = s[i];
+        if (isalnum((unsigned char)c) || c == '-' || c == '_' || c == '.' || c == '~') {
+          out += c;
+        } else {
+          snprintf(buf, sizeof(buf), "%%%02X", (unsigned char)c);
+          out += buf;
+        }
+      }
+      return out;
+    };
+
+    Preferences preferences;
+    preferences.begin("gaggia", true);
+    String q;
+    q += "brew_target=" + String(brewSetpoint, 2);
+    q += "&brew_kp=" + String(brewKp, 4);
+    q += "&brew_ki=" + String(brewKi, 4);
+    q += "&brew_kd=" + String(brewKd, 4);
+    q += "&brew_akp=" + String(brewActiveKp, 4);
+    q += "&brew_aki=" + String(brewActiveKi, 4);
+    q += "&brew_akd=" + String(brewActiveKd, 4);
+    q += "&steam_target=" + String(steamSetpoint, 2);
+    q += "&steam_kp=" + String(steamKp, 4);
+    q += "&steam_ki=" + String(steamKi, 4);
+    q += "&steam_kd=" + String(steamKd, 4);
+    q += "&steam_max_safety=" + String(steamMaxSafety, 1);
+    q += "&shot_auto_stop_sec=" + String(shotAutoStopSec);
+    q += "&eco_timeout_min=" + String(ecoTimeoutMin);
+    q += "&descale_shot_threshold=" + String(descaleShotThreshold);
+    q += "&descale_day_threshold=" + String(descaleDayThreshold);
+    q += "&rist_dtemp=" + String(ristrettoTempOffset, 1);
+    q += "&rist_dsec=" + String(ristrettoSecOffset);
+    q += "&lungo_dtemp=" + String(lungoTempOffset, 1);
+    q += "&lungo_dsec=" + String(lungoSecOffset);
+    for (int i = 0; i < SCHED_MAX_COUNT; i++) {
+      char timeBuf[6];
+      snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d", schedHour[i], schedMin[i]);
+      q += "&sched" + String(i) + "_en=" + String(schedEnabled[i] ? "1" : "0");
+      q += "&sched" + String(i) + "_time=" + String(timeBuf);
+      q += "&sched" + String(i) + "_steam=" + String(schedModeSteam[i] ? "1" : "0");
+    }
+    q += "&sched_tz_min=" + String(schedTzOffsetMin);
+    q += "&mqtt_server=" + enc(preferences.getString("mqtt_server", ""));
+    q += "&mqtt_port=" + String(preferences.getInt("mqtt_port", 1883));
+    q += "&mqtt_user=" + enc(preferences.getString("mqtt_user", ""));
+    q += "&mqtt_pass=" + enc(preferences.getString("mqtt_pass", ""));
+    preferences.end();
+
+    server.sendHeader("Content-Disposition",
+                       "attachment; filename=\"gaggia-settings-backup.txt\"");
+    server.send(200, "text/plain", q);
+  });
 
   // Settings Update Handler
   server.on("/update", HTTP_GET, []() {
@@ -1139,6 +1523,68 @@ void setupWeb() {
     if (server.hasArg("descale_day_threshold")) {
       descaleDayThreshold = server.arg("descale_day_threshold").toInt();
       preferences.putULong("descale_days", descaleDayThreshold);
+    }
+
+    // Brew preset offsets (Espresso itself is just brew_target/
+    // shot_auto_stop_sec above, no separate storage - see config.h/main.cpp).
+    if (server.hasArg("rist_dtemp")) {
+      ristrettoTempOffset = server.arg("rist_dtemp").toDouble();
+      preferences.putDouble("rist_dtemp", ristrettoTempOffset);
+    }
+    if (server.hasArg("rist_dsec")) {
+      ristrettoSecOffset = server.arg("rist_dsec").toInt();
+      preferences.putLong("rist_dsec", ristrettoSecOffset);
+    }
+    if (server.hasArg("lungo_dtemp")) {
+      lungoTempOffset = server.arg("lungo_dtemp").toDouble();
+      preferences.putDouble("lungo_dtemp", lungoTempOffset);
+    }
+    if (server.hasArg("lungo_dsec")) {
+      lungoSecOffset = server.arg("lungo_dsec").toInt();
+      preferences.putLong("lungo_dsec", lungoSecOffset);
+    }
+    // Selecting a preset (-1/0/1) - Espresso (0) is the "unpress" back to the
+    // plain default (see applyPreset() in main.cpp for the full reasoning).
+    if (server.hasArg("preset_apply")) {
+      applyPreset(server.arg("preset_apply").toInt());
+    }
+
+    // Scheduled warm-up - SCHED_MAX_COUNT independent slots. Editing a slot's
+    // enabled state or time always re-arms it for today (resetSchedFired) -
+    // otherwise a slot that already fired once today would silently refuse
+    // to fire again after a later edit the same day, until the next
+    // calendar day (confirmed 2026-08-16 as the actual cause of a schedule
+    // that looked like it "stopped working" mid-testing).
+    for (int i = 0; i < SCHED_MAX_COUNT; i++) {
+      String prefix = "sched" + String(i) + "_";
+      String enArg = prefix + "en", timeArg = prefix + "time", steamArg = prefix + "steam";
+      String enKey = "sched" + String(i) + "_en", hrKey = "sched" + String(i) + "_hr",
+             mnKey = "sched" + String(i) + "_mn", stKey = "sched" + String(i) + "_st";
+      if (server.hasArg(enArg)) {
+        schedEnabled[i] = server.arg(enArg) == "1";
+        preferences.putBool(enKey.c_str(), schedEnabled[i]);
+        resetSchedFired(i);
+      }
+      if (server.hasArg(timeArg)) {
+        // Native <input type="time"> submits "HH:MM" as one field.
+        String t = server.arg(timeArg);
+        int colon = t.indexOf(':');
+        if (colon > 0) {
+          schedHour[i] = constrain(t.substring(0, colon).toInt(), 0, 23);
+          schedMin[i] = constrain(t.substring(colon + 1).toInt(), 0, 59);
+          preferences.putInt(hrKey.c_str(), schedHour[i]);
+          preferences.putInt(mnKey.c_str(), schedMin[i]);
+          resetSchedFired(i);
+        }
+      }
+      if (server.hasArg(steamArg)) {
+        schedModeSteam[i] = server.arg(steamArg) == "1";
+        preferences.putBool(stKey.c_str(), schedModeSteam[i]);
+      }
+    }
+    if (server.hasArg("sched_tz_min")) {
+      schedTzOffsetMin = server.arg("sched_tz_min").toInt();
+      preferences.putInt("sched_tz_min", schedTzOffsetMin);
     }
 
     // MQTT Settings
