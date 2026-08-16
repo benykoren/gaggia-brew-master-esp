@@ -186,6 +186,11 @@ static int autotuneCycleCount = 0;
 
 void startAutotune(OpMode forMode) {
   if (autotuneState == AutotuneState::RUNNING) return;
+  if (currentMode == OpMode::OFF) {
+    autotuneState = AutotuneState::DONE_FAIL;
+    autotuneMessage = "Cannot start: select Brew or Steam mode first";
+    return;
+  }
   if (sensorFault || currentTemperature <= 0) {
     autotuneState = AutotuneState::DONE_FAIL;
     autotuneMessage = "Cannot start: sensor fault or no reading yet";
@@ -568,10 +573,12 @@ void loop() {
             TEMP_EMA_ALPHA * temp + (1.0f - TEMP_EMA_ALPHA) * currentTemperature;
       }
 
-      // Safety Cutoff (mode-aware: brew and steam have different ceilings)
+      // Safety Cutoff (mode-aware: brew and steam have different ceilings) -
+      // logging only here; actual enforcement is the PID-branch gate and the
+      // SSR force-off check further down in loop(), both keyed off the same
+      // activeMaxSafety.
       if (currentTemperature > activeMaxSafety) {
         Serial.println("SAFETY CUTOFF TRIGGERED");
-         // Additional safety logic could go here
       }
 
       if (shotInProgress && currentTemperature > shotPeakTemp) {
@@ -602,8 +609,18 @@ void loop() {
     stopShot();
   }
 
-  // PID Computation - autotune (if running) owns Output directly instead
-  if (autotuneState == AutotuneState::RUNNING) {
+  // PID Computation - autotune (if running) owns Output directly instead.
+  // currentMode==OFF is checked FIRST and unconditionally: activeMaxSafety
+  // stays at whatever the last active profile left it, so the temperature
+  // condition below is true almost all the time, Off included - without
+  // this explicit gate, the integral-bleed/safety-reset code's bumpless
+  // MANUAL->AUTOMATIC toggle could silently re-engage the PID (and start
+  // firing the heater on the last-active setpoint/gains) while the UI still
+  // shows Off. setOpMode(OFF) already parked things in MANUAL with
+  // Output=0; nothing below should ever undo that while Off.
+  if (currentMode == OpMode::OFF) {
+    // no-op
+  } else if (autotuneState == AutotuneState::RUNNING) {
     runAutotuneStep(now);
   } else if (currentTemperature > 0 && currentTemperature < activeMaxSafety) {
     // Integral anti-windup (2026-08-16): a long, far-from-setpoint approach
