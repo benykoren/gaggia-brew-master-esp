@@ -125,7 +125,16 @@ enum class OpMode { OFF, BREW, STEAM };
 // only applies if nothing's been saved yet. Clamped server-side to
 // [STEAM_MAX_SAFETY_MIN, STEAM_MAX_SAFETY_MAX] to guard against a typo in
 // the Web UI creating a dangerously high ceiling.
-#define STEAM_MAX_SAFETY_DEFAULT 125.0
+//
+// Raised from 125 to 135 (2026-08-16): at the old value there was only 2C
+// of headroom above STEAM_SETPOINT_DEFAULT (123), and real-hardware brew
+// testing the same day showed 7-8C of overshoot was possible before the
+// integral anti-windup fix (main.cpp) - steam's Ki was in the same range as
+// brew's pre-fix idle profile, so the old margin was genuinely at risk of
+// tripping on a normal heatup. 135 restores roughly the same proportional
+// margin BREW_MAX_SAFETY gives brewSetpoint (~11-12C). Still a placeholder,
+// not verified against this machine's real thermal limits - see AGENTS.md.
+#define STEAM_MAX_SAFETY_DEFAULT 135.0
 #define STEAM_MAX_SAFETY_MIN 100.0
 #define STEAM_MAX_SAFETY_MAX 150.0
 
