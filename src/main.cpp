@@ -49,6 +49,10 @@ double steamSetpoint = STEAM_SETPOINT_DEFAULT, steamKp = STEAM_KP_DEFAULT,
 double steamMaxSafety = STEAM_MAX_SAFETY_DEFAULT; // configurable, unlike BREW_MAX_SAFETY
 double activeMaxSafety = BREW_MAX_SAFETY;
 
+// Integral anti-windup state (see the bleed logic in loop()) - starts armed
+// so the very first approach to setpoint after boot also gets bled.
+bool integralBleedArmed = true;
+
 // Applies the active profile's setpoint/gains to the live PID. Used both by
 // setOpMode() (mode switch) and by the Web UI when the currently-active
 // profile's own values are edited live (no mode change, so no PID reset).
@@ -602,6 +606,33 @@ void loop() {
   if (autotuneState == AutotuneState::RUNNING) {
     runAutotuneStep(now);
   } else if (currentTemperature > 0 && currentTemperature < activeMaxSafety) {
+    // Integral anti-windup (2026-08-16): a long, far-from-setpoint approach
+    // (cold boiler warmup, or recovering after a big brew-time sag) lets
+    // PID_v1's internal integral accumulator build up a large "energy
+    // commitment" that can't unwind fast enough once setpoint is reached -
+    // confirmed on real hardware climbing to a 94C brew target: output was
+    // STILL ~35% (350-363/1000) two-plus degrees PAST setpoint, and thermal
+    // lag then carried the reading to 101C+ before it turned around. The
+    // accumulator is private to the library, so the only way to clear it is
+    // the same bumpless MANUAL->AUTOMATIC trick already used elsewhere
+    // (PID::Initialize() reseeds it from the just-zeroed Output). Bled once
+    // per approach, the first time error crosses within
+    // INTEGRAL_BLEED_BAND_C of setpoint, so the final stretch runs on
+    // P(+D) alone instead of dragging that stale commitment through the
+    // crossing. Re-arms once error drifts back out past
+    // INTEGRAL_BLEED_REARM_C, so it also catches the climb back to
+    // setpoint after a shot sag, not just the initial cold start.
+    double errorNow = Setpoint - currentTemperature;
+    if (errorNow > INTEGRAL_BLEED_REARM_C) {
+      integralBleedArmed = true;
+    } else if (integralBleedArmed && errorNow <= INTEGRAL_BLEED_BAND_C) {
+      Output = 0;
+      myPID.SetMode(MANUAL);
+      myPID.SetMode(AUTOMATIC);
+      integralBleedArmed = false;
+      Serial.println("Integral bleed: PID reset on setpoint approach");
+    }
+
     Input = currentTemperature;
     myPID.Compute();
 
@@ -618,7 +649,18 @@ void loop() {
                           (double)WindowSize);
     }
   } else {
-    Output = 0; // Forced OFF if error or over temp
+    // Forced OFF - sensor fault or over the safety ceiling. Also reset the
+    // PID's integral accumulator (same bumpless trick as above) so it isn't
+    // left wound-up at whatever value it held right before crossing the
+    // ceiling. Previously this only happened when the mode was manually
+    // cycled Off->Brew, which is exactly why the temperature looked like it
+    // "wouldn't come back down" on its own after tripping the safety cutoff
+    // - the stale accumulator could re-fire the heater at high duty the
+    // instant it dipped back under the ceiling.
+    Output = 0;
+    myPID.SetMode(MANUAL);
+    myPID.SetMode(AUTOMATIC);
+    integralBleedArmed = true; // re-arm so the next approach gets a fresh bleed too
   }
 
   // Eco / auto-sleep (never fights an in-progress autotune)

@@ -110,6 +110,16 @@ enum class OpMode { OFF, BREW, STEAM };
 #define BREW_SHOT_FEEDFORWARD_BOOST 400.0
 #define BREW_SHOT_FEEDFORWARD_TAPER_C 1.5
 
+// Integral anti-windup (2026-08-16) - see the bleed logic in main.cpp's
+// loop(). BAND is how close to setpoint counts as "arrived" (bleed fires
+// once, letting the final approach run on P+D alone instead of a wound-up
+// integral). REARM is how far error must drift back out before the next
+// approach (e.g. recovering after a shot sag) can trigger another bleed -
+// wider than BAND on purpose, so normal small wobbles right at setpoint
+// don't repeatedly retrigger it.
+#define INTEGRAL_BLEED_BAND_C 3.0
+#define INTEGRAL_BLEED_REARM_C 6.0
+
 // Steam's safety ceiling is configurable live from the Web UI (persisted in
 // NVS) - unlike BREW_MAX_SAFETY, which stays a fixed constant. This default
 // only applies if nothing's been saved yet. Clamped server-side to
