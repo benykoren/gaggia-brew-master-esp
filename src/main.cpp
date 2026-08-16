@@ -53,6 +53,23 @@ double activeMaxSafety = BREW_MAX_SAFETY;
 // so the very first approach to setpoint after boot also gets bled.
 bool integralBleedArmed = true;
 
+// Brew presets (see config.h) - Espresso (0) IS brewSetpoint/shotAutoStopSec
+// directly, no separate storage. Ristretto (-1) and Lungo (1) are configurable
+// offsets from that default, selected via activePreset. Declared here (not
+// with the rest of the shot-timer/preset state below) so
+// effectiveBrewSetpoint() is available to applyActiveProfile() just below.
+int activePreset = 0; // -1=Ristretto, 0=Espresso(default), 1=Lungo
+double ristrettoTempOffset = PRESET_RISTRETTO_TEMP_OFFSET_DEFAULT;
+long ristrettoSecOffset = PRESET_RISTRETTO_SEC_OFFSET_DEFAULT;
+double lungoTempOffset = PRESET_LUNGO_TEMP_OFFSET_DEFAULT;
+long lungoSecOffset = PRESET_LUNGO_SEC_OFFSET_DEFAULT;
+
+double effectiveBrewSetpoint() {
+  if (activePreset < 0) return brewSetpoint + ristrettoTempOffset;
+  if (activePreset > 0) return brewSetpoint + lungoTempOffset;
+  return brewSetpoint;
+}
+
 // Applies the active profile's setpoint/gains to the live PID. Used both by
 // setOpMode() (mode switch) and by the Web UI when the currently-active
 // profile's own values are edited live (no mode change, so no PID reset).
@@ -61,7 +78,7 @@ bool integralBleedArmed = true;
 // unrelated Web UI action.
 static void applyActiveProfile() {
   if (currentMode == OpMode::BREW) {
-    Setpoint = brewSetpoint;
+    Setpoint = effectiveBrewSetpoint();
     if (shotInProgress) {
       Kp = brewActiveKp;
       Ki = brewActiveKi;
@@ -408,6 +425,22 @@ static void runAutotuneStep(unsigned long now) {
 unsigned long shotStartMillis = 0;
 float shotPeakTemp = 0.0;
 unsigned long shotAutoStopSec = SHOT_AUTO_STOP_SEC_DEFAULT; // 0 = disabled, persisted
+// Snapshotted from effectiveShotAutoStopSec() at startShot() - see there.
+unsigned long shotAutoStopTargetSec = 0;
+
+// Effective auto-stop duration once the active preset's time offset (see
+// applyPreset()) is applied - 0 always stays disabled regardless of preset,
+// and the offset result is clamped back into the normal valid range so a
+// large negative offset can't accidentally zero it out (which would read as
+// "disabled" rather than "very short").
+unsigned long effectiveShotAutoStopSec() {
+  if (shotAutoStopSec == 0) return 0;
+  long off = (activePreset < 0) ? ristrettoSecOffset : (activePreset > 0) ? lungoSecOffset : 0;
+  long v = (long)shotAutoStopSec + off;
+  if (v < (long)SHOT_AUTO_STOP_SEC_MIN) v = SHOT_AUTO_STOP_SEC_MIN;
+  if (v > (long)SHOT_AUTO_STOP_SEC_MAX) v = SHOT_AUTO_STOP_SEC_MAX;
+  return (unsigned long)v;
+}
 
 // Descale / maintenance reminder - both persisted in NVS.
 unsigned long shotCount = 0;         // shots since the last descale/reset
@@ -420,6 +453,9 @@ void startShot() {
   shotInProgress = true;
   shotStartMillis = millis();
   shotPeakTemp = currentTemperature;
+  // Snapshotted once here, not recomputed live in loop() - a preset tap
+  // mid-shot shouldn't retime an already-running shot's auto-stop target.
+  shotAutoStopTargetSec = effectiveShotAutoStopSec();
   // Switch Brew to the more aggressive active-brewing gains immediately -
   // see config.h. Deliberately NOT a bumpless MANUAL/AUTOMATIC reset here:
   // we want the stronger Kp's instant response to apply right away, and the
@@ -431,7 +467,10 @@ void stopShot() {
   if (!shotInProgress) return;
   shotInProgress = false;
   unsigned long durationMs = millis() - shotStartMillis;
-  shotLogAppend(time(nullptr), durationMs, shotPeakTemp, 0.0);
+  // 0 = unknown, same convention as weight - covers both a genuine fault
+  // (-999) and the plain "no reading yet" default (0) at the moment of stop.
+  float endTemp = (currentTemperature > 0) ? currentTemperature : 0.0f;
+  shotLogAppend(time(nullptr), durationMs, shotPeakTemp, 0.0, endTemp);
 
   // Bumpless reset back to the gentle profile: the aggressive active-brewing
   // Ki can accumulate a real amount of integral over a 25-30s shot, and
@@ -462,6 +501,69 @@ void markDescaled() {
   preferences.putULong("shot_count", shotCount);
   preferences.putULong("last_descale", (unsigned long)lastDescaleTime);
   preferences.end();
+}
+
+// ============================================================================
+// Brew presets, part 2 (state itself + effectiveBrewSetpoint() are declared
+// up near brewSetpoint, so applyActiveProfile() can use them) - the actual
+// apply function lives here since it needs refreshActiveProfileIfChanged().
+// ============================================================================
+
+// Applies preset `idx` (-1/0/1) - see the state declaration up top for the
+// full reasoning (redesigned 2026-08-16 so Espresso/0 acts as a real
+// "unpress" back to the plain default, not just another equal sibling).
+void applyPreset(int idx) {
+  if (idx < -1 || idx > 1) return;
+  activePreset = idx;
+  Preferences preferences;
+  preferences.begin("gaggia", false);
+  preferences.putInt("active_preset", activePreset);
+  preferences.end();
+  refreshActiveProfileIfChanged();
+}
+
+// ============================================================================
+// Scheduled warm-up (see config.h) - SCHED_MAX_COUNT independent slots, each
+// firing setOpMode() once per calendar day (local time, via the one shared
+// schedTzOffsetMin) at its own configured hour:minute. Checked every loop()
+// tick in main.cpp's loop(), guarded per-slot against firing before NTP has
+// synced and against re-firing within the same day.
+// ============================================================================
+bool schedEnabled[SCHED_MAX_COUNT] = {SCHED_ENABLED_DEFAULT, false, false};
+int schedHour[SCHED_MAX_COUNT] = {SCHED_HOUR_DEFAULT, SCHED_HOUR_DEFAULT, SCHED_HOUR_DEFAULT};
+int schedMin[SCHED_MAX_COUNT] = {SCHED_MIN_DEFAULT, SCHED_MIN_DEFAULT, SCHED_MIN_DEFAULT};
+bool schedModeSteam[SCHED_MAX_COUNT] = {SCHED_MODE_STEAM_DEFAULT, SCHED_MODE_STEAM_DEFAULT, SCHED_MODE_STEAM_DEFAULT};
+int schedTzOffsetMin = SCHED_TZ_OFFSET_MIN_DEFAULT; // shared - see config.h
+static long schedFiredDayIndex[SCHED_MAX_COUNT] = {-1, -1, -1}; // -1 = never fired
+
+static void checkScheduledWarmup(time_t utcNow) {
+  if (utcNow < 1600000000L) return; // NTP not synced yet (reads as ~1970 otherwise)
+
+  time_t localNow = utcNow + (time_t)schedTzOffsetMin * 60;
+  struct tm lt;
+  gmtime_r(&localNow, &lt); // gmtime, not localtime - offset already applied above
+  long dayIndex = (long)(localNow / 86400L);
+
+  for (int i = 0; i < SCHED_MAX_COUNT; i++) {
+    if (!schedEnabled[i]) continue;
+    if (dayIndex != schedFiredDayIndex[i] &&
+        lt.tm_hour == schedHour[i] && lt.tm_min == schedMin[i]) {
+      Serial.printf("Scheduled warm-up %d: switching to %s\n", i,
+                    schedModeSteam[i] ? "steam" : "brew");
+      setOpMode(schedModeSteam[i] ? OpMode::STEAM : OpMode::BREW);
+      schedFiredDayIndex[i] = dayIndex;
+    }
+  }
+}
+
+// Re-arms slot `i` so it can fire again today - called from web.cpp whenever
+// that slot's enabled/time is edited. Without this, firing once and then
+// adjusting the time later the same day (e.g. testing, or just changing your
+// mind about tomorrow's wake-up time) would silently refuse to fire again
+// until the NEXT calendar day - confirmed 2026-08-16 as the actual cause of
+// a schedule that appeared to "stop working" after an earlier edit that day.
+void resetSchedFired(int i) {
+  if (i >= 0 && i < SCHED_MAX_COUNT) schedFiredDayIndex[i] = -1;
 }
 
 void setup() {
@@ -500,6 +602,19 @@ void setup() {
       preferences.getULong("descale_shots", DESCALE_SHOT_THRESHOLD_DEFAULT);
   descaleDayThreshold =
       preferences.getULong("descale_days", DESCALE_DAY_THRESHOLD_DEFAULT);
+  activePreset = preferences.getInt("active_preset", 0);
+  ristrettoTempOffset = preferences.getDouble("rist_dtemp", PRESET_RISTRETTO_TEMP_OFFSET_DEFAULT);
+  ristrettoSecOffset = preferences.getLong("rist_dsec", PRESET_RISTRETTO_SEC_OFFSET_DEFAULT);
+  lungoTempOffset = preferences.getDouble("lungo_dtemp", PRESET_LUNGO_TEMP_OFFSET_DEFAULT);
+  lungoSecOffset = preferences.getLong("lungo_dsec", PRESET_LUNGO_SEC_OFFSET_DEFAULT);
+  for (int i = 0; i < SCHED_MAX_COUNT; i++) {
+    String p = "sched" + String(i) + "_";
+    schedEnabled[i] = preferences.getBool((p + "en").c_str(), i == 0 ? SCHED_ENABLED_DEFAULT : false);
+    schedHour[i] = preferences.getInt((p + "hr").c_str(), SCHED_HOUR_DEFAULT);
+    schedMin[i] = preferences.getInt((p + "mn").c_str(), SCHED_MIN_DEFAULT);
+    schedModeSteam[i] = preferences.getBool((p + "st").c_str(), SCHED_MODE_STEAM_DEFAULT);
+  }
+  schedTzOffsetMin = preferences.getInt("sched_tz_min", SCHED_TZ_OFFSET_MIN_DEFAULT);
   preferences.end();
 
   // Shot history log (LittleFS)
@@ -602,11 +717,23 @@ void loop() {
   // caveat: this ends the firmware's OWN shot bookkeeping (timer, history
   // log, Brew gain profile revert) at the configured duration, timed from
   // the manual Start Shot tap. It does not physically stop the pump - no
-  // hardware exists yet to do that (see HARDWARE_ROADMAP.md item 4).
-  if (shotInProgress && shotAutoStopSec > 0 &&
-      now - shotStartMillis >= shotAutoStopSec * 1000UL) {
-    Serial.printf("Shot auto-stop: %lu s reached\n", shotAutoStopSec);
+  // hardware exists yet to do that (see HARDWARE_ROADMAP.md item 4). Uses
+  // the EFFECTIVE duration (base +/- whichever preset offset is active),
+  // snapshotted once at shot-start so a mid-shot preset tap can't retime an
+  // already-running shot out from under it.
+  if (shotInProgress && shotAutoStopTargetSec > 0 &&
+      now - shotStartMillis >= shotAutoStopTargetSec * 1000UL) {
+    Serial.printf("Shot auto-stop: %lu s reached\n", shotAutoStopTargetSec);
     stopShot();
+  }
+
+  // Scheduled warm-up (see config.h) - minute-granularity, so checking once a
+  // second is more than enough and avoids a redundant time()/gmtime_r() call
+  // on every single loop() iteration.
+  static unsigned long lastSchedCheck = 0;
+  if (now - lastSchedCheck >= 1000) {
+    lastSchedCheck = now;
+    checkScheduledWarmup(time(nullptr));
   }
 
   // PID Computation - autotune (if running) owns Output directly instead.

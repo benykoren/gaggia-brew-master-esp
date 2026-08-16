@@ -19,7 +19,7 @@ static int countLines(File &f) {
 }
 
 void shotLogAppend(time_t timestamp, unsigned long durationMs, float peakTemp,
-                   float weightGrams) {
+                   float weightGrams, float endTemp) {
   int lineCount = 0;
   File existing = LittleFS.open(SHOT_LOG_PATH, "r");
   if (existing) {
@@ -58,8 +58,8 @@ void shotLogAppend(time_t timestamp, unsigned long durationMs, float peakTemp,
     Serial.println("shotLogAppend: failed to open log file for append");
     return;
   }
-  f.printf("%lld,%lu,%.1f,%.1f\n", (long long)timestamp, durationMs, peakTemp,
-            weightGrams);
+  f.printf("%lld,%lu,%.1f,%.1f,%.1f\n", (long long)timestamp, durationMs,
+            peakTemp, weightGrams, endTemp);
   f.close();
 }
 
@@ -79,15 +79,21 @@ String shotLogReadJson() {
       int c3 = line.indexOf(',', c2 + 1);
       if (c1 < 0 || c2 < 0 || c3 < 0) continue;  // malformed line, skip
 
+      // c4 (end_temp) is optional - older rows written before this field
+      // existed only have 4 columns, so its absence isn't malformed.
+      int c4 = line.indexOf(',', c3 + 1);
+
       String ts = line.substring(0, c1);
       String dur = line.substring(c1 + 1, c2);
       String peak = line.substring(c2 + 1, c3);
-      String wt = line.substring(c3 + 1);
+      String wt = (c4 < 0) ? line.substring(c3 + 1) : line.substring(c3 + 1, c4);
+      String endTemp = (c4 < 0) ? "0.0" : line.substring(c4 + 1);
 
       if (!first) json += ",";
       first = false;
       json += "{\"ts\":" + ts + ",\"duration_ms\":" + dur +
-              ",\"peak_temp\":" + peak + ",\"weight\":" + wt + "}";
+              ",\"peak_temp\":" + peak + ",\"weight\":" + wt +
+              ",\"end_temp\":" + endTemp + "}";
     }
     f.close();
   }

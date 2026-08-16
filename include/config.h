@@ -237,3 +237,51 @@ enum class AutotuneState { IDLE, RUNNING, DONE_OK, DONE_FAIL };
 // ============================================================================
 #define DESCALE_SHOT_THRESHOLD_DEFAULT 100
 #define DESCALE_DAY_THRESHOLD_DEFAULT 60
+
+// ============================================================================
+// Brew presets (2026-08-16, redesigned same day after real-world feedback)
+// ----------------------------------------------------------------------------
+// Originally three independent absolute (temp, time) pairs - but that left
+// no real "off" state: once you tapped Ristretto there was nothing to revert
+// TO except tapping a different preset, since all three were equal siblings.
+// Redesigned so Espresso IS the plain Brew target/auto-stop (brewSetpoint/
+// shotAutoStopSec, edited exactly as before in the Tune/Settings tabs) - no
+// separate storage for it at all. Ristretto/Lungo are OFFSETS applied on top
+// of that default (see effectiveBrewSetpoint()/effectiveShotAutoStopSec() in
+// main.cpp), selected via activePreset (-1/0/1). Tapping Espresso always
+// returns to the plain default, acting as the "unpress" the button-based UI
+// needs. Offset defaults below reflect common practice: ristretto shorter
+// and slightly cooler, lungo longer and slightly hotter (extra water would
+// otherwise read as more diluted/bitter at the same temperature).
+// ============================================================================
+#define PRESET_RISTRETTO_TEMP_OFFSET_DEFAULT (-1.0)
+#define PRESET_RISTRETTO_SEC_OFFSET_DEFAULT (-7)
+#define PRESET_LUNGO_TEMP_OFFSET_DEFAULT 2.0
+#define PRESET_LUNGO_SEC_OFFSET_DEFAULT 13
+
+// ============================================================================
+// Scheduled warm-up (2026-08-16; multiple slots added same day)
+// ----------------------------------------------------------------------------
+// Auto-switches to Brew or Steam at a configured local time of day, once per
+// slot per calendar day, using the NTP-synced UTC clock already set up for
+// shot log timestamps (see setup()/configTime in main.cpp). SCHED_MAX_COUNT
+// fixed slots (not a fully dynamic list, same bounded-slots approach as the
+// brew presets) - independently enabled, so e.g. a weekday morning slot and
+// a separate weekend-morning slot can coexist without fighting each other.
+// One shared timezone offset for all slots (not per-slot) - auto-detected
+// from the browser (see syncSchedTz() in web.cpp), not entered by hand; a
+// wrong manual UTC offset was the original bug that made the schedule look
+// like it "didn't work" (it fired, just hours off from the intended local
+// time). Each slot independently guarded against firing before NTP has
+// synced (an unsynced clock reads as 1970) and against re-firing more than
+// once per calendar day via its own "day index" (days since epoch, local
+// time) that resets on rollover.
+// ============================================================================
+#define SCHED_MAX_COUNT 3
+#define SCHED_ENABLED_DEFAULT false
+#define SCHED_HOUR_DEFAULT 7
+#define SCHED_MIN_DEFAULT 0
+#define SCHED_TZ_OFFSET_MIN_DEFAULT 0
+// SCHED_MODE_DEFAULT: false = Brew, true = Steam (stored as a bool - only
+// two useful choices, matches OpMode without pulling in a 3rd NVS type)
+#define SCHED_MODE_STEAM_DEFAULT false
