@@ -1,5 +1,6 @@
 #include "config.h"
 #include "mqtt.h"
+#include "profiles.h"
 #include "shot_log.h"
 #include "temp_sensor.h"
 #include "web.h"
@@ -53,23 +54,6 @@ double activeMaxSafety = BREW_MAX_SAFETY;
 // so the very first approach to setpoint after boot also gets bled.
 bool integralBleedArmed = true;
 
-// Brew presets (see config.h) - Espresso (0) IS brewSetpoint/shotAutoStopSec
-// directly, no separate storage. Ristretto (-1) and Lungo (1) are configurable
-// offsets from that default, selected via activePreset. Declared here (not
-// with the rest of the shot-timer/preset state below) so
-// effectiveBrewSetpoint() is available to applyActiveProfile() just below.
-int activePreset = 0; // -1=Ristretto, 0=Espresso(default), 1=Lungo
-double ristrettoTempOffset = PRESET_RISTRETTO_TEMP_OFFSET_DEFAULT;
-long ristrettoSecOffset = PRESET_RISTRETTO_SEC_OFFSET_DEFAULT;
-double lungoTempOffset = PRESET_LUNGO_TEMP_OFFSET_DEFAULT;
-long lungoSecOffset = PRESET_LUNGO_SEC_OFFSET_DEFAULT;
-
-double effectiveBrewSetpoint() {
-  if (activePreset < 0) return brewSetpoint + ristrettoTempOffset;
-  if (activePreset > 0) return brewSetpoint + lungoTempOffset;
-  return brewSetpoint;
-}
-
 // Applies the active profile's setpoint/gains to the live PID. Used both by
 // setOpMode() (mode switch) and by the Web UI when the currently-active
 // profile's own values are edited live (no mode change, so no PID reset).
@@ -78,7 +62,7 @@ double effectiveBrewSetpoint() {
 // unrelated Web UI action.
 static void applyActiveProfile() {
   if (currentMode == OpMode::BREW) {
-    Setpoint = effectiveBrewSetpoint();
+    Setpoint = brewSetpoint;
     if (shotInProgress) {
       Kp = brewActiveKp;
       Ki = brewActiveKi;
@@ -425,22 +409,6 @@ static void runAutotuneStep(unsigned long now) {
 unsigned long shotStartMillis = 0;
 float shotPeakTemp = 0.0;
 unsigned long shotAutoStopSec = SHOT_AUTO_STOP_SEC_DEFAULT; // 0 = disabled, persisted
-// Snapshotted from effectiveShotAutoStopSec() at startShot() - see there.
-unsigned long shotAutoStopTargetSec = 0;
-
-// Effective auto-stop duration once the active preset's time offset (see
-// applyPreset()) is applied - 0 always stays disabled regardless of preset,
-// and the offset result is clamped back into the normal valid range so a
-// large negative offset can't accidentally zero it out (which would read as
-// "disabled" rather than "very short").
-unsigned long effectiveShotAutoStopSec() {
-  if (shotAutoStopSec == 0) return 0;
-  long off = (activePreset < 0) ? ristrettoSecOffset : (activePreset > 0) ? lungoSecOffset : 0;
-  long v = (long)shotAutoStopSec + off;
-  if (v < (long)SHOT_AUTO_STOP_SEC_MIN) v = SHOT_AUTO_STOP_SEC_MIN;
-  if (v > (long)SHOT_AUTO_STOP_SEC_MAX) v = SHOT_AUTO_STOP_SEC_MAX;
-  return (unsigned long)v;
-}
 
 // Descale / maintenance reminder - both persisted in NVS.
 unsigned long shotCount = 0;         // shots since the last descale/reset
@@ -448,24 +416,130 @@ time_t lastDescaleTime = 0;          // epoch seconds; 0 = never set (unknown)
 unsigned long descaleShotThreshold = DESCALE_SHOT_THRESHOLD_DEFAULT;
 unsigned long descaleDayThreshold = DESCALE_DAY_THRESHOLD_DEFAULT;
 
+// ============================================================================
+// Shot profiles (see config.h/profiles.cpp) - a saved profile is just a
+// named (temp, auto-stop, pre-infusion pattern) bundle you can load into the
+// plain live settings below. Loading one does NOT bind future edits to it -
+// editing "Brew target" directly still works exactly as before; it just
+// means the live value may no longer match whichever profile was last
+// loaded, same as how the live settings always worked before profiles
+// existed. activeProfileIndex is remembered purely so the Web UI can
+// highlight "which one did I last load," not as a strict live binding.
+// ============================================================================
+int activeProfileIndex = 0; // persisted; -1 = none loaded / edited since
+bool activePreinfusionEnabled = false;
+int activePreinfusionPulses = 0;
+int activePreinfusionOnMs = 0;
+int activePreinfusionOffMs = 0;
+
+// Loads profile `idx` into the live settings (brewSetpoint/shotAutoStopSec/
+// pre-infusion pattern), persists them exactly like editing those fields by
+// hand would, and remembers idx as the active profile for UI highlighting.
+void applyProfile(int idx) {
+  String name;
+  double temp;
+  unsigned long autoStop;
+  bool preinfEnabled;
+  int pulses, onMs, offMs;
+  if (!profileGet(idx, name, temp, autoStop, preinfEnabled, pulses, onMs, offMs)) return;
+
+  activeProfileIndex = idx;
+  brewSetpoint = temp;
+  shotAutoStopSec = autoStop;
+  activePreinfusionEnabled = preinfEnabled;
+  activePreinfusionPulses = pulses;
+  activePreinfusionOnMs = onMs;
+  activePreinfusionOffMs = offMs;
+
+  Preferences preferences;
+  preferences.begin("gaggia", false);
+  preferences.putInt("active_profile", activeProfileIndex);
+  preferences.putDouble("brew_target", brewSetpoint);
+  preferences.putULong("shot_auto_stop", shotAutoStopSec);
+  preferences.putBool("pi_enabled", activePreinfusionEnabled);
+  preferences.putInt("pi_pulses", activePreinfusionPulses);
+  preferences.putInt("pi_on_ms", activePreinfusionOnMs);
+  preferences.putInt("pi_off_ms", activePreinfusionOffMs);
+  preferences.end();
+
+  refreshActiveProfileIfChanged();
+}
+
+// ============================================================================
+// Pre-infusion phase state machine (see config.h) - pulses PIN_PUMP on/off a
+// few times before switching to continuous power for the rest of the shot.
+// PIN_PUMP is NOT YET WIRED (HARDWARE_ROADMAP.md item 4) - setPumpRelay()
+// safely toggles an unconnected GPIO until then; built now so the timing
+// logic doesn't need revisiting once the relay exists, same "software ahead
+// of hardware" pattern already proven for shot auto-stop.
+// ============================================================================
+ShotPhase currentShotPhase = ShotPhase::NONE;
+static int preinfusionPulsesRemaining = 0;
+static unsigned long phaseStartMillis = 0;
+
+static void setPumpRelay(bool energized) {
+  int level = energized ? PIN_PUMP_ACTIVE_LEVEL
+                        : (PIN_PUMP_ACTIVE_LEVEL == HIGH ? LOW : HIGH);
+  digitalWrite(PIN_PUMP, level);
+}
+
+// Advances the pre-infusion state machine - called unthrottled from loop()
+// while a shot is running, since pulse timing can be sub-second
+// (PREINFUSION_PULSE_MS_MIN). No-ops once in EXTRACTION (the common case for
+// most of a shot's duration) or if no shot is running.
+static void tickShotPhase(unsigned long now) {
+  if (!shotInProgress) return;
+  if (currentShotPhase != ShotPhase::PREINFUSION_ON &&
+      currentShotPhase != ShotPhase::PREINFUSION_OFF) {
+    return;
+  }
+  unsigned long elapsed = now - phaseStartMillis;
+
+  if (currentShotPhase == ShotPhase::PREINFUSION_ON) {
+    if (elapsed < (unsigned long)activePreinfusionOnMs) return;
+    preinfusionPulsesRemaining--;
+    if (preinfusionPulsesRemaining <= 0) {
+      currentShotPhase = ShotPhase::EXTRACTION;
+      setPumpRelay(true); // no trailing OFF after the last pulse
+    } else {
+      currentShotPhase = ShotPhase::PREINFUSION_OFF;
+      setPumpRelay(false);
+      phaseStartMillis = now;
+    }
+  } else { // PREINFUSION_OFF
+    if (elapsed < (unsigned long)activePreinfusionOffMs) return;
+    currentShotPhase = ShotPhase::PREINFUSION_ON;
+    setPumpRelay(true);
+    phaseStartMillis = now;
+  }
+}
+
 void startShot() {
   if (shotInProgress) return;
   shotInProgress = true;
   shotStartMillis = millis();
   shotPeakTemp = currentTemperature;
-  // Snapshotted once here, not recomputed live in loop() - a preset tap
-  // mid-shot shouldn't retime an already-running shot's auto-stop target.
-  shotAutoStopTargetSec = effectiveShotAutoStopSec();
   // Switch Brew to the more aggressive active-brewing gains immediately -
   // see config.h. Deliberately NOT a bumpless MANUAL/AUTOMATIC reset here:
   // we want the stronger Kp's instant response to apply right away, and the
   // gentle profile's small accumulated integral is harmless to inherit.
   refreshActiveProfileIfChanged();
+
+  if (activePreinfusionEnabled && activePreinfusionPulses > 0) {
+    currentShotPhase = ShotPhase::PREINFUSION_ON;
+    preinfusionPulsesRemaining = activePreinfusionPulses;
+    phaseStartMillis = shotStartMillis;
+  } else {
+    currentShotPhase = ShotPhase::EXTRACTION;
+  }
+  setPumpRelay(true);
 }
 
 void stopShot() {
   if (!shotInProgress) return;
   shotInProgress = false;
+  setPumpRelay(false);
+  currentShotPhase = ShotPhase::NONE;
   unsigned long durationMs = millis() - shotStartMillis;
   // 0 = unknown, same convention as weight - covers both a genuine fault
   // (-999) and the plain "no reading yet" default (0) at the moment of stop.
@@ -501,25 +575,6 @@ void markDescaled() {
   preferences.putULong("shot_count", shotCount);
   preferences.putULong("last_descale", (unsigned long)lastDescaleTime);
   preferences.end();
-}
-
-// ============================================================================
-// Brew presets, part 2 (state itself + effectiveBrewSetpoint() are declared
-// up near brewSetpoint, so applyActiveProfile() can use them) - the actual
-// apply function lives here since it needs refreshActiveProfileIfChanged().
-// ============================================================================
-
-// Applies preset `idx` (-1/0/1) - see the state declaration up top for the
-// full reasoning (redesigned 2026-08-16 so Espresso/0 acts as a real
-// "unpress" back to the plain default, not just another equal sibling).
-void applyPreset(int idx) {
-  if (idx < -1 || idx > 1) return;
-  activePreset = idx;
-  Preferences preferences;
-  preferences.begin("gaggia", false);
-  preferences.putInt("active_preset", activePreset);
-  preferences.end();
-  refreshActiveProfileIfChanged();
 }
 
 // ============================================================================
@@ -574,6 +629,11 @@ void setup() {
   // Initialize/Configure Pins
   pinMode(PIN_SSR, OUTPUT);
   digitalWrite(PIN_SSR, LOW);
+  // PIN_PUMP not yet wired (HARDWARE_ROADMAP.md item 4) - initialized
+  // de-energized regardless, same "always boot to the safe state" rule as
+  // PIN_SSR, so it's ready the moment the relay is actually installed.
+  pinMode(PIN_PUMP, OUTPUT);
+  digitalWrite(PIN_PUMP, PIN_PUMP_ACTIVE_LEVEL == HIGH ? LOW : HIGH);
 
   // Initialize temperature sensor (UART PT100 module)
   Serial.println("Initializing temperature sensor...");
@@ -602,11 +662,11 @@ void setup() {
       preferences.getULong("descale_shots", DESCALE_SHOT_THRESHOLD_DEFAULT);
   descaleDayThreshold =
       preferences.getULong("descale_days", DESCALE_DAY_THRESHOLD_DEFAULT);
-  activePreset = preferences.getInt("active_preset", 0);
-  ristrettoTempOffset = preferences.getDouble("rist_dtemp", PRESET_RISTRETTO_TEMP_OFFSET_DEFAULT);
-  ristrettoSecOffset = preferences.getLong("rist_dsec", PRESET_RISTRETTO_SEC_OFFSET_DEFAULT);
-  lungoTempOffset = preferences.getDouble("lungo_dtemp", PRESET_LUNGO_TEMP_OFFSET_DEFAULT);
-  lungoSecOffset = preferences.getLong("lungo_dsec", PRESET_LUNGO_SEC_OFFSET_DEFAULT);
+  activeProfileIndex = preferences.getInt("active_profile", 0);
+  activePreinfusionEnabled = preferences.getBool("pi_enabled", false);
+  activePreinfusionPulses = preferences.getInt("pi_pulses", PREINFUSION_PULSES_DEFAULT);
+  activePreinfusionOnMs = preferences.getInt("pi_on_ms", PREINFUSION_ON_MS_DEFAULT);
+  activePreinfusionOffMs = preferences.getInt("pi_off_ms", PREINFUSION_OFF_MS_DEFAULT);
   for (int i = 0; i < SCHED_MAX_COUNT; i++) {
     String p = "sched" + String(i) + "_";
     schedEnabled[i] = preferences.getBool((p + "en").c_str(), i == 0 ? SCHED_ENABLED_DEFAULT : false);
@@ -617,8 +677,9 @@ void setup() {
   schedTzOffsetMin = preferences.getInt("sched_tz_min", SCHED_TZ_OFFSET_MIN_DEFAULT);
   preferences.end();
 
-  // Shot history log (LittleFS)
+  // Shot history log + named shot profiles (both LittleFS)
   shotLogInit();
+  profilesInit();
 
   // NTP time sync, for real shot timestamps. Stored/compared in UTC
   // throughout - the Web UI converts to local time for display.
@@ -717,15 +778,17 @@ void loop() {
   // caveat: this ends the firmware's OWN shot bookkeeping (timer, history
   // log, Brew gain profile revert) at the configured duration, timed from
   // the manual Start Shot tap. It does not physically stop the pump - no
-  // hardware exists yet to do that (see HARDWARE_ROADMAP.md item 4). Uses
-  // the EFFECTIVE duration (base +/- whichever preset offset is active),
-  // snapshotted once at shot-start so a mid-shot preset tap can't retime an
-  // already-running shot out from under it.
-  if (shotInProgress && shotAutoStopTargetSec > 0 &&
-      now - shotStartMillis >= shotAutoStopTargetSec * 1000UL) {
-    Serial.printf("Shot auto-stop: %lu s reached\n", shotAutoStopTargetSec);
+  // hardware exists yet to do that (see HARDWARE_ROADMAP.md item 4).
+  if (shotInProgress && shotAutoStopSec > 0 &&
+      now - shotStartMillis >= shotAutoStopSec * 1000UL) {
+    Serial.printf("Shot auto-stop: %lu s reached\n", shotAutoStopSec);
     stopShot();
   }
+
+  // Pre-infusion phase state machine - unthrottled (pulse timing can be
+  // sub-second), but a cheap no-op once past PREINFUSION_* or with no shot
+  // running (see tickShotPhase()).
+  tickShotPhase(now);
 
   // Scheduled warm-up (see config.h) - minute-granularity, so checking once a
   // second is more than enough and avoids a redundant time()/gmtime_r() call
