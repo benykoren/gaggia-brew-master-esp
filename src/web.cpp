@@ -1946,6 +1946,15 @@ void setupWeb() {
       []() {
         HTTPUpload &upload = server.upload();
         if (upload.status == UPLOAD_FILE_START) {
+          // handleClient() blocks through the entire multipart upload
+          // (measured at 60-70+ seconds) without ever returning to loop(),
+          // so the PID/safety-cutoff logic that normally drives PIN_SSR
+          // doesn't run at all for that whole window - whatever duty state
+          // the heater was in when the upload started would otherwise stay
+          // latched. Force it off up front, before Update.begin() (which
+          // itself can block for a while erasing flash), same "safe state"
+          // rule already used for boot in setup().
+          digitalWrite(PIN_SSR, LOW);
           Serial.printf("Update: %s\n", upload.filename.c_str());
           if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
             Update.printError(Serial);

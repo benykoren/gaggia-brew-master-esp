@@ -476,6 +476,27 @@ Steam LED's function, or to make Thermostat 2 do real work again).
   `loop()` and confirm via a fresh USB serial capture that it's actually
   printing every iteration *before* trusting the watchdog again — don't
   jump straight back to a live OTA test.
+- **Dual-core task pinning for the control loop — considered 2026-08-23,
+  declined for now.** See Section 10 change log for the full reasoning
+  (35+ unsynchronized shared globals, no measured problem it would fix).
+  The one concrete issue that prompted it (OTA blocking `loop()` for
+  60-70+ seconds, freezing the heater-safety cutoff) got a much smaller,
+  bounded fix instead (force `PIN_SSR` off at OTA start). Revisit only if
+  real control-loop jitter is actually observed once more sensors land.
+- **Software architecture ideas from the Gaggiuino/GaggiMate comparison,
+  not yet built** (discussed 2026-08-16/2026-08-23, not previously
+  written down):
+  - **Brew-ratio-based auto-stop** and **predictive weight/drip-lag
+    compensation** — both need item 5's BLE scale first (see
+    `HARDWARE_ROADMAP.md`).
+  - **OR-logic multi-target stop conditions** (GaggiMate's
+    `Phase::isFinished()` shape: first of time/weight/pressure/flow to hit
+    its own target wins) and a **`PhaseExitReason`-style log** of why a
+    shot phase actually ended — more valuable once there's more than one
+    sensor to race against (today only time exists as a stop condition).
+  - **Continuous transition/easing curves** between phase targets, instead
+    of this project's current discrete step targets (pulsed pre-infusion
+    on/off, not a ramp).
 
 ### Competitive research (2026-08-16)
 
@@ -761,6 +782,39 @@ rather than renumbering everything again.
 ---
 
 ## 10. Change Log
+
+### 2026-08-23 — Claude Code (Sonnet 5) — Force heater off during OTA uploads; dual-core pinning considered and declined
+- **Fixed a real safety gap found while investigating dual-core task
+  pinning** (brainstormed, see below): `web.cpp`'s OTA handler
+  (`/update_fw`) processes the entire multipart upload inside one blocking
+  `handleClient()` call - measured at 60-70+ seconds - during which
+  `loop()` never runs at all. That means the PID computation, the SSR
+  window update, and the `activeMaxSafety` cutoff check are **all frozen**
+  for the whole transfer; whatever heater duty state was active when the
+  OTA started would otherwise stay latched with zero safety supervision.
+  Fixed by forcing `digitalWrite(PIN_SSR, LOW)` as the very first thing the
+  `UPLOAD_FILE_START` handler does, before `Update.begin()` even runs.
+  Verified via a real OTA push (fw_build advanced, device came back up
+  clean).
+- **Considered full dual-core task pinning for the control loop** (control
+  loop on its own pinned FreeRTOS task, WebServer/MQTT on the other core -
+  the GaggiMate-style architecture), motivated by a general sense that a
+  synchronous WebServer sharing one `loop()` with the PID is fragile by
+  design, not any specific measured jitter incident. **Declined for now**:
+  audited the global state and found 35+ top-level globals
+  (`currentTemperature`, `Output`, `shotInProgress`, every profile/schedule
+  array, etc.) all written by `loop()` and read directly by `web.cpp`/
+  `mqtt.cpp` with zero synchronization anywhere - safe today only because
+  everything is cooperative/single-threaded. Splitting to two real cores
+  would turn every one of those into a genuine data race requiring a
+  mutex/atomic/queue strategy, on a mains-connected machine driving a live
+  heating element, to fix a problem that hasn't actually been observed.
+  The one concrete problem that motivated this (OTA blocking) has the
+  much smaller, safer fix above instead. Revisit only if actual measured
+  control-loop jitter shows up once more sensors/features land (BLE scale,
+  pressure transducer, Nextion UART) - and even then, consider isolating
+  just the slow path (WebServer/OTA) onto its own task before reaching for
+  full dual-core pinning of the control loop itself.
 
 ### 2026-08-16 — Claude Code (Sonnet 5) — Competitive research (Gaggiuino/GaggiMate) + coffee science; roadmap refined
 - **Researched two mature sibling open-source projects** (parallel background
