@@ -4,3 +4,7 @@
 .vscode/launch.json
 .vscode/ipch
 firmware.bin
+
+# Cloned reference copies of Gaggiuino/GaggiMate for source comparison -
+# not part of this project, never committed.
+reference/

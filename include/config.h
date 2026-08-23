@@ -12,6 +12,49 @@
 #define FIRMWARE_BUILD_TIMESTAMP (__DATE__ " " __TIME__)
 
 // ============================================================================
+// Hardware watchdog - REMOVED again (2026-08-23), see AGENTS.md change log
+// ----------------------------------------------------------------------------
+// First added 2026-08-18, pulled hours later after repeated hangs during OTA
+// (theorized cause: WebServer's handleClient() blocks through the entire
+// multipart upload without returning to loop(), so a watchdog only petted
+// from loop() starves mid-transfer). Tried again 2026-08-23 with the pet
+// moved into the OTA upload handler itself, plus a fix for
+// esp_task_wdt_init() silently failing with ESP_ERR_INVALID_STATE (Arduino
+// already auto-initializes its own TWDT before setup() runs) by falling
+// back to esp_task_wdt_reconfigure(). Verified via USB serial capture
+// (not a live OTA guess) before trusting it further - and it STILL
+// panic-rebooted loopTask, at ~10s then ~25s across two boots, with no
+// OTA involved at all (plain WiFi connect + idle /status polling). Since
+// the reconfigure fix measurably shifted the trip time later (10s -> 25s),
+// the config is being applied, but esp_task_wdt_reset() in loop() is
+// apparently not preventing the trip - true root cause still unknown.
+// Reverted again to keep a mains-connected machine stable. If revisited:
+// add a Serial heartbeat inside loop() itself (not just at the top) to
+// prove the reset() call is actually being reached every iteration before
+// trusting the watchdog at all.
+// ============================================================================
+
+// ============================================================================
+// Sensor fault detection (2026-08-18, replaces a consecutive-bad-read latch)
+// ----------------------------------------------------------------------------
+// The previous rule ("fault only after N consecutive bad reads") is blind to
+// a sensor that's intermittently flaky forever - e.g. failing 1-in-3 reads
+// indefinitely never accumulates N consecutive failures, so it would never
+// latch a fault, even though that's a genuinely unreliable sensor. Comparing
+// against GaggiMate's own thermocouple fault handling (a rolling error-rate
+// window) informed this replacement: track the last SENSOR_FAULT_WINDOW
+// reads and latch a fault once the bad-rate within that window reaches
+// SENSOR_FAULT_RATE_THRESHOLD, rather than requiring failures back-to-back.
+// SENSOR_FAULT_MIN_SAMPLES keeps the same ~1s grace period the old rule gave
+// a fresh boot/reconnect before evaluating the rate at all, so a handful of
+// early reads can't trip a fault on a tiny sample (e.g. 1 bad out of 1 read
+// is a 100% "rate" but meaningless).
+// ============================================================================
+#define SENSOR_FAULT_WINDOW 20
+#define SENSOR_FAULT_MIN_SAMPLES 5
+#define SENSOR_FAULT_RATE_THRESHOLD 0.5f
+
+// ============================================================================
 // Pin Definitions - ESP32-S3-DevKitC-1 (N16R8)
 // ----------------------------------------------------------------------------
 // Chosen to avoid reserved S3 pins:

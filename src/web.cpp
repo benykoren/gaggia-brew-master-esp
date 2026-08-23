@@ -533,7 +533,7 @@ const char *index_html = R"rawliteral(
         <div id="shot_history_empty" class="empty-hint">No shots logged yet.</div>
         <div class="table-scroll">
           <table class="history" id="shot_history_table" style="display:none">
-            <thead><tr><th>When</th><th>Duration</th><th>Peak &deg;C</th><th>End &deg;C</th><th>Weight</th></tr></thead>
+            <thead><tr><th>When</th><th>Duration</th><th>Peak &deg;C</th><th>End &deg;C</th><th>Weight</th><th>Notes</th></tr></thead>
             <tbody id="shot_history_body"></tbody>
           </table>
         </div>
@@ -541,6 +541,37 @@ const char *index_html = R"rawliteral(
           <div class="chart-label"><span>Peak (&#9679;) &amp; end (&mdash;) temp &middot; last 20 shots</span><span>&deg;C</span></div>
           <canvas id="shot_trend_chart" width="300" height="70"></canvas>
         </div>
+      </div>
+
+      <div class="card" id="shot_notes_card" hidden>
+        <div class="tab-section-title" id="shot_notes_title">Shot Notes</div>
+        <p class="hint">Filled in after tasting, not at pull time - bean/dose/grind/rating are a dial-in journal, not something you'd want to stop and type mid-shot.</p>
+        <form onsubmit="submitShotNotes(event)">
+          <input type="hidden" id="input_shot_note_index" value="-1">
+          <div class="field-row">
+            <div class="field"><label for="input_shot_note_bean">Bean</label><input type="text" id="input_shot_note_bean" maxlength="24" placeholder="e.g. Ethiopia Yirgacheffe"></div>
+            <div class="field"><label for="input_shot_note_dose">Dose in (g)</label><input type="number" step="0.1" id="input_shot_note_dose" value="18"></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label for="input_shot_note_grind">Grind setting</label><input type="text" id="input_shot_note_grind" maxlength="16" placeholder="e.g. 3.2"></div>
+            <div class="field">
+              <label for="input_shot_note_rating">Rating</label>
+              <select id="input_shot_note_rating">
+                <option value="0">Unrated</option>
+                <option value="1">1 - Poor</option>
+                <option value="2">2</option>
+                <option value="3">3 - OK</option>
+                <option value="4">4</option>
+                <option value="5">5 - Great</option>
+              </select>
+            </div>
+          </div>
+          <div class="field">
+            <label for="input_shot_note_text">Notes</label>
+            <input type="text" id="input_shot_note_text" maxlength="60" placeholder="e.g. sour, tighten grind next time">
+          </div>
+          <button type="submit" class="submit">Save Shot Notes</button>
+        </form>
       </div>
 
       <div class="card">
@@ -766,15 +797,27 @@ setInterval(function () {
   }
 }, 1000);
 
+// Cached oldest-first, exactly as /shots returns it - shotLogUpdateNotes()
+// on the device indexes by this same oldest-first order, NOT the table's
+// reversed (newest-first) display order, so editShotNotes()/submitShotNotes()
+// need the original index preserved alongside each displayed row.
+var shotsCache = [];
+
+function shotNotesSummary(s) {
+  if (!s.bean && !s.rating && !s.notes) return "<span class='hint-link'>+ Add</span>";
+  var stars = s.rating > 0 ? "&#9733;".repeat(s.rating) : "";
+  return "<b>" + stars + "</b> " + (s.bean || "");
+}
+
 function fetchShotHistory() {
   var xhttp = new XMLHttpRequest();
   xhttp.onreadystatechange = function () {
     if (this.readyState == 4 && this.status == 200) {
-      var shots = JSON.parse(this.responseText);
+      shotsCache = JSON.parse(this.responseText);
       var body = document.getElementById("shot_history_body");
       var table = document.getElementById("shot_history_table");
       var empty = document.getElementById("shot_history_empty");
-      if (!shots.length) {
+      if (!shotsCache.length) {
         table.style.display = "none";
         empty.style.display = "block";
         return;
@@ -782,22 +825,63 @@ function fetchShotHistory() {
       empty.style.display = "none";
       table.style.display = "table";
       body.innerHTML = "";
-      shots.slice().reverse().slice(0, 15).forEach(function (s) {
+      // Pair each shot with its original (oldest-first) index BEFORE
+      // reversing for newest-first display, so edits write back to the
+      // right row on the device.
+      shotsCache.map(function (s, i) { return { s: s, idx: i }; })
+        .reverse().slice(0, 15).forEach(function (entry) {
+        var s = entry.s;
         var tr = document.createElement("tr");
         var when = new Date(s.ts * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
         var dur = formatElapsed(s.duration_ms);
         var weight = s.weight > 0 ? s.weight.toFixed(1) + "g" : "&mdash;";
         var endTemp = s.end_temp > 0 ? s.end_temp.toFixed(1) : "&mdash;";
-        tr.innerHTML = "<td>" + when + "</td><td class='num'>" + dur + "</td><td class='num'>" + s.peak_temp.toFixed(1) + "</td><td class='num'>" + endTemp + "</td><td class='num'>" + weight + "</td>";
+        tr.innerHTML = "<td>" + when + "</td><td class='num'>" + dur + "</td><td class='num'>" + s.peak_temp.toFixed(1) + "</td><td class='num'>" + endTemp + "</td><td class='num'>" + weight + "</td>" +
+          "<td onclick='editShotNotes(" + entry.idx + ")' style='cursor:pointer'>" + shotNotesSummary(s) + "</td>";
         body.appendChild(tr);
       });
-      drawShotTrendChart(shots.slice(-20)); // oldest-first, most recent 20
+      drawShotTrendChart(shotsCache.slice(-20)); // oldest-first, most recent 20
     }
   };
   xhttp.open("GET", "/shots", true);
   xhttp.send();
 }
 fetchShotHistory();
+
+function editShotNotes(idx) {
+  var s = shotsCache[idx];
+  if (!s) return;
+  document.getElementById("input_shot_note_index").value = idx;
+  document.getElementById("input_shot_note_bean").value = s.bean || "";
+  document.getElementById("input_shot_note_dose").value = s.dose_in || 18;
+  document.getElementById("input_shot_note_grind").value = s.grind || "";
+  document.getElementById("input_shot_note_rating").value = s.rating || 0;
+  document.getElementById("input_shot_note_text").value = s.notes || "";
+  var when = new Date(s.ts * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  document.getElementById("shot_notes_title").textContent = "Shot Notes — " + when;
+  var card = document.getElementById("shot_notes_card");
+  card.hidden = false;
+  card.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function submitShotNotes(ev) {
+  ev.preventDefault();
+  var q = "shot_note_index=" + document.getElementById("input_shot_note_index").value;
+  q += "&shot_note_bean=" + encodeURIComponent(document.getElementById("input_shot_note_bean").value);
+  q += "&shot_note_dose=" + document.getElementById("input_shot_note_dose").value;
+  q += "&shot_note_grind=" + encodeURIComponent(document.getElementById("input_shot_note_grind").value);
+  q += "&shot_note_rating=" + document.getElementById("input_shot_note_rating").value;
+  q += "&shot_note_text=" + encodeURIComponent(document.getElementById("input_shot_note_text").value);
+  var xhttp = new XMLHttpRequest();
+  xhttp.open("GET", "/update?" + q, true);
+  xhttp.onreadystatechange = function () {
+    if (this.readyState == 4) {
+      document.getElementById("shot_notes_card").hidden = true;
+      fetchShotHistory();
+    }
+  };
+  xhttp.send();
+}
 
 // Last known Brew target, refreshed by the main /status poll below - drawn
 // as a reference line on the shot-trend chart so a peak-temp overshoot (like
@@ -1703,6 +1787,22 @@ void setupWeb() {
     if (server.hasArg("descale_day_threshold")) {
       descaleDayThreshold = server.arg("descale_day_threshold").toInt();
       preferences.putULong("descale_days", descaleDayThreshold);
+    }
+
+    // Shot tasting/dial-in notes (shot_log.cpp) - edited after the fact
+    // (you don't know the rating/notes until you've tasted the coffee), so
+    // this is a separate action from shotLogAppend() at shot-stop time, not
+    // a field collected while starting/stopping a shot. shot_note_index is
+    // the JSON array's own 0-based (oldest-first) index, NOT the Web UI's
+    // reversed (newest-first) display order - the frontend translates.
+    if (server.hasArg("shot_note_index")) {
+      int idx = server.arg("shot_note_index").toInt();
+      String bean = server.hasArg("shot_note_bean") ? server.arg("shot_note_bean") : "";
+      float doseIn = server.hasArg("shot_note_dose") ? server.arg("shot_note_dose").toFloat() : 0.0f;
+      String grind = server.hasArg("shot_note_grind") ? server.arg("shot_note_grind") : "";
+      int rating = server.hasArg("shot_note_rating") ? server.arg("shot_note_rating").toInt() : 0;
+      String notes = server.hasArg("shot_note_text") ? server.arg("shot_note_text") : "";
+      shotLogUpdateNotes(idx, bean, doseIn, grind, rating, notes);
     }
 
     // Named shot profiles (profiles.cpp) - three independent actions, same

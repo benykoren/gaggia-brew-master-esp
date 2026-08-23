@@ -626,6 +626,14 @@ void setup() {
   delay(1000);
   Serial.println("Gaggia PID Controller Starting...");
 
+  // Hardware watchdog - disabled again 2026-08-23 (see config.h). A live
+  // serial capture proved loopTask panics ~10-25s into boot even with the
+  // ESP_ERR_INVALID_STATE/reconfigure() fallback in place, meaning
+  // esp_task_wdt_reset() in loop() isn't actually preventing the trip -
+  // root cause not yet found. Reverted to keep the (mains-connected)
+  // machine stable while that's investigated via code reading, not more
+  // live flashes.
+
   // Initialize/Configure Pins
   pinMode(PIN_SSR, OUTPUT);
   digitalWrite(PIN_SSR, LOW);
@@ -717,29 +725,52 @@ void loop() {
     float temp;
     TempSensorStatus status = tempSensorRead(temp);
 
-    // Fault Check. Single shared counter so good reads actually reset it
-    // (previously two separate block-scoped statics meant the counter never
-    // reset on a good read and would latch a false -999 error over time).
-    static uint8_t faultCounter = 0;
-    if (status != TempSensorStatus::OK) {
+    // Fault check - rolling error-rate window (see config.h for why this
+    // replaced a consecutive-bad-read latch). badWindow[] holds the last
+    // SENSOR_FAULT_WINDOW read outcomes (true = bad); badCount is kept in
+    // sync incrementally rather than resummed every read.
+    static bool badWindow[SENSOR_FAULT_WINDOW] = {false};
+    static int badWindowIndex = 0;
+    static int badWindowFilled = 0;
+    static int badCount = 0;
+
+    bool badRead = (status != TempSensorStatus::OK);
+    if (badWindow[badWindowIndex]) badCount--; // evict the slot being overwritten
+    badWindow[badWindowIndex] = badRead;
+    if (badRead) badCount++;
+    badWindowIndex = (badWindowIndex + 1) % SENSOR_FAULT_WINDOW;
+    if (badWindowFilled < SENSOR_FAULT_WINDOW) badWindowFilled++;
+
+    float badRate = (float)badCount / badWindowFilled;
+    bool newFault = (badWindowFilled >= SENSOR_FAULT_MIN_SAMPLES) &&
+                    (badRate >= SENSOR_FAULT_RATE_THRESHOLD);
+
+    if (badRead) {
       Serial.println(status == TempSensorStatus::ERROR_REPLY
                           ? "Sensor replied ERROR_1"
                           : "Sensor read timed out");
+    }
 
-      faultCounter++;
+    if (newFault && !sensorFault) {
+      Serial.printf("Sensor fault latched: %d/%d bad reads in window\n", badCount,
+                    badWindowFilled);
+    } else if (!newFault && sensorFault) {
+      Serial.println("Sensor fault cleared: read rate recovered");
+    }
+    sensorFault = newFault;
 
-      // Only report error if fault persists for > 1 second (4 readings)
-      if (faultCounter > 4) {
-        currentTemperature = -999.0; // Real error
-        sensorFault = true;
-      } else {
-        // Transient fault - keep using last valid temperature
-        Serial.println("Transient Sensor Fault - Ignoring");
-      }
+    // Keyed off the AGGREGATE fault state, not just this instant's read
+    // result - while sensorFault is latched, don't trust currentTemperature
+    // even if this particular read happened to succeed (a stray good read
+    // mixed into an otherwise-bad window shouldn't let the PID branch treat
+    // the reading as valid again before the fault actually clears).
+    if (sensorFault) {
+      currentTemperature = -999.0; // Real error
+    } else if (badRead) {
+      // This read failed, but the overall rate is still below the fault
+      // threshold - keep using the last valid temperature, don't blend a
+      // bad reading in.
     } else {
-      faultCounter = 0; // Reset counter on good read
-      sensorFault = false;
-
       // Exponential moving average - smooths sensor noise reaching the PID.
       // Skip blending right after boot or a fault (no meaningful history).
       if (currentTemperature <= 0 || currentTemperature == -999.0) {
@@ -843,17 +874,25 @@ void loop() {
     Input = currentTemperature;
     myPID.Compute();
 
-    // Shot-start feedforward (see config.h) - an open-loop boost added on
-    // top of the PID's own output, timed to the KNOWN start of the
-    // disturbance rather than waiting for an error to develop. Tapered to
-    // zero as currentTemperature approaches/exceeds brewSetpoint so it can't
-    // itself drive an overshoot once the disturbance is already handled.
+    // TEMPORARY diagnostic override (2026-08-17): force full heater output
+    // for the whole shot, replacing the additive feedforward this used to
+    // be (see git history). The additive form - PID output + up to
+    // BREW_SHOT_FEEDFORWARD_BOOST, capped at WindowSize - was assumed to
+    // reliably saturate at max during a shot, but real-hardware observation
+    // the same day showed it often doesn't: whether it reaches the cap
+    // depends on the PID's own live integral state, which the integral-
+    // bleed fix now actively limits. This forces TRUE 100% duty the whole
+    // time brewSetpoint hasn't been reached, to directly test whether that
+    // closes the brew-time sag any further. Existing safety systems
+    // (activeMaxSafety/BREW_MAX_SAFETY cutoff just above, and the SSR
+    // force-off check further down in loop()) remain fully independent of
+    // this and still apply - this cannot exceed the safety ceiling. Revisit
+    // once real shot data (History tab's peak/end temp) shows whether this
+    // actually helps.
     if (currentMode == OpMode::BREW && shotInProgress &&
-        autotuneState != AutotuneState::RUNNING) {
-      double margin = brewSetpoint - currentTemperature; // >0 while still below target
-      double taper = constrain(margin / BREW_SHOT_FEEDFORWARD_TAPER_C, 0.0, 1.0);
-      Output = constrain(Output + BREW_SHOT_FEEDFORWARD_BOOST * taper, 0.0,
-                          (double)WindowSize);
+        autotuneState != AutotuneState::RUNNING &&
+        currentTemperature < brewSetpoint) {
+      Output = (double)WindowSize;
     }
   } else {
     // Forced OFF - sensor fault or over the safety ceiling. Also reset the
