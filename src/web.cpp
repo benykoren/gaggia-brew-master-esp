@@ -1,7 +1,8 @@
 #include "config.h"
 #include <Arduino.h>
 #include <PID_v1.h>
-#include <WebServer.h>
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
 #include <WiFi.h>
 #include <WiFiManager.h>
 #include <ESPmDNS.h>
@@ -62,7 +63,13 @@ extern bool schedModeSteam[SCHED_MAX_COUNT];
 extern int schedTzOffsetMin;
 extern void resetSchedFired(int i);
 
-WebServer server(80);
+// See config.h "Shared-state lock" - this handler runs on the AsyncTCP task,
+// a different task than controlTick(), so mutating PID/mode/shot globals
+// needs the same lock controlTick() holds during its own tick.
+extern void lockState();
+extern void unlockState();
+
+AsyncWebServer server(80);
 
 // ============================================================================
 // Web dashboard (self-contained: no external assets, no CDN, no build step -
@@ -339,6 +346,7 @@ const char *index_html = R"rawliteral(
       padding: 6px 11px; border-radius: var(--radius-sm); font-size: 11.5px; font-weight: 700; cursor: pointer;
     }
     .btn-chip-sm.danger { border-color: rgba(229,84,75,.4); color: #f3c6c2; }
+    .btn-chip-sm.danger.armed { background: var(--red); border-color: var(--red); color: #fff; }
 
     .footer { text-align: center; color: var(--text-dim); font-size: 11.5px; margin: var(--sp-5) 0 var(--sp-3); }
     .footer a { color: var(--copper); text-decoration: none; }
@@ -728,6 +736,25 @@ function showTab(name) {
 })();
 showTab(location.hash.slice(1));
 
+// Phase-transition markers on the temp sparkline (2026-08-23) - adapted from
+// GaggiMate's live shot chart, which draws a vertical annotation line each
+// time the brew phase changes. history[] has no per-sample timestamp/phase
+// of its own (it's a plain rolling temperature buffer, 2s/sample,
+// independent of any shot), so markers are tracked client-side purely by
+// "how many samples ago did shot_phase last change" - aged by one every
+// poll (each poll adds exactly one new history sample) and dropped once
+// they scroll off the visible window.
+var phaseMarkers = [];
+var lastSeenShotPhase = null;
+
+function trackPhaseMarkers(shotPhase, shotInProgress) {
+  phaseMarkers.forEach(function (m) { m.age++; });
+  if (shotInProgress && lastSeenShotPhase !== null && shotPhase !== lastSeenShotPhase) {
+    phaseMarkers.push({ age: 0 });
+  }
+  lastSeenShotPhase = shotInProgress ? shotPhase : null;
+}
+
 function drawSparkline(data) {
   var canvas = document.getElementById("temp_chart");
   if (!canvas || !data || data.length < 2) return;
@@ -736,6 +763,24 @@ function drawSparkline(data) {
   ctx.clearRect(0, 0, w, h);
   var min = Math.min.apply(null, data), max = Math.max.apply(null, data);
   if (max - min < 1) { max += 0.5; min -= 0.5; }
+
+  phaseMarkers = phaseMarkers.filter(function (m) { return m.age < data.length; });
+  if (phaseMarkers.length) {
+    ctx.save();
+    ctx.strokeStyle = "rgba(224,161,58,.55)"; // --amber, translucent
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 2]);
+    phaseMarkers.forEach(function (m) {
+      var idx = data.length - 1 - m.age;
+      var x = (idx / (data.length - 1)) * w;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, h);
+      ctx.stroke();
+    });
+    ctx.restore();
+  }
+
   ctx.beginPath();
   data.forEach(function (v, i) {
     var x = (i / (data.length - 1)) * w;
@@ -1022,6 +1067,7 @@ setInterval(function () {
       document.getElementById("temp").innerHTML = json.fault ? "--" : temp.toFixed(1);
       document.getElementById("target").innerHTML = hasTarget ? target.toFixed(1) : "--";
       document.getElementById("output").innerHTML = outputPct.toFixed(0);
+      trackPhaseMarkers(json.shot_phase, json.shot_in_progress);
       drawSparkline(json.history);
 
       // Temperature ring - fill amount reuses the same ratio the linear bar
@@ -1240,7 +1286,7 @@ function renderProfileList() {
       "<span>" + p.temp.toFixed(1) + "&deg;C &middot; " + p.auto_stop_sec + "s &middot; pre-infusion: " + piSummary(p) + "</span></div>" +
       "<div class='profile-row-actions'>" +
       "<button onclick='editProfile(" + i + ")' class='btn-chip-sm'>Edit</button>" +
-      "<button onclick='deleteProfileRow(" + i + ")' class='btn-chip-sm danger'>Delete</button>" +
+      "<button onclick='armDeleteProfile(this, " + i + ")' class='btn-chip-sm danger'>Delete</button>" +
       "</div>";
     body.appendChild(row);
   });
@@ -1342,13 +1388,32 @@ function newProfileForm() {
   drawProfilePreview();
 }
 
-function deleteProfileRow(idx) {
+// Arm-then-confirm instead of a native confirm() popup - first click arms
+// the button (relabels it, 4s window to change your mind), second click
+// within that window actually deletes. Any other Delete button clicked
+// while one is armed disarms it first, so only one can ever be armed.
+var armedDeleteBtn = null, armedDeleteTimer = null;
+
+function disarmDeleteProfile() {
+  if (armedDeleteTimer) { clearTimeout(armedDeleteTimer); armedDeleteTimer = null; }
+  if (armedDeleteBtn) { armedDeleteBtn.textContent = "Delete"; armedDeleteBtn.classList.remove("armed"); armedDeleteBtn = null; }
+}
+
+function armDeleteProfile(btn, idx) {
   if (profilesCache.length <= 1) { alert("Can't delete the last remaining profile."); return; }
-  if (!confirm('Delete profile "' + profilesCache[idx].name + '"?')) return;
-  var xhttp = new XMLHttpRequest();
-  xhttp.open("GET", "/update?profile_delete=" + idx, true);
-  xhttp.onreadystatechange = function () { if (this.readyState == 4) fetchProfiles(); };
-  xhttp.send();
+  if (btn === armedDeleteBtn) {
+    disarmDeleteProfile();
+    var xhttp = new XMLHttpRequest();
+    xhttp.open("GET", "/update?profile_delete=" + idx, true);
+    xhttp.onreadystatechange = function () { if (this.readyState == 4) fetchProfiles(); };
+    xhttp.send();
+    return;
+  }
+  disarmDeleteProfile();
+  armedDeleteBtn = btn;
+  btn.textContent = "Confirm?";
+  btn.classList.add("armed");
+  armedDeleteTimer = setTimeout(disarmDeleteProfile, 4000);
 }
 
 function submitProfileForm(ev) {
@@ -1362,9 +1427,22 @@ function submitProfileForm(ev) {
   q += "&profile_pi_pulses=" + document.getElementById("input_profile_pi_pulses").value;
   q += "&profile_pi_on_ms=" + Math.round(document.getElementById("input_profile_pi_on").value * 1000);
   q += "&profile_pi_off_ms=" + Math.round(document.getElementById("input_profile_pi_off").value * 1000);
+
+  // Inline save feedback (disable + label swap) instead of nothing happening
+  // until the list silently refreshes - same "no toast library, just button
+  // state" pattern GaggiMate's settings pages use.
+  var btn = document.getElementById("profile_form_submit");
+  var priorLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Saving…";
   var xhttp = new XMLHttpRequest();
   xhttp.open("GET", "/update?" + q, true);
-  xhttp.onreadystatechange = function () { if (this.readyState == 4) fetchProfiles(); };
+  xhttp.onreadystatechange = function () {
+    if (this.readyState != 4) return;
+    fetchProfiles();
+    btn.textContent = "Saved ✓";
+    setTimeout(function () { btn.disabled = false; btn.textContent = priorLabel; }, 1500);
+  };
   xhttp.send();
 }
 
@@ -1428,6 +1506,472 @@ const char *manifest_json = R"rawliteral({
 "icons":[{"src":"/icon.svg","sizes":"any","type":"image/svg+xml"}]
 })rawliteral";
 
+// Snapshots every control-task-owned field under the lock first (see
+// config.h "Shared-state lock"), then builds JSON from the local copies
+// unlocked - keeps the lock held for microseconds instead of for the whole
+// (much slower) String-concatenation pass below.
+static void handleStatus(AsyncWebServerRequest *request) {
+  lockState();
+  float snapTemp = currentTemperature;
+  double snapSetpoint = Setpoint, snapOutput = Output;
+  OpMode snapMode = currentMode;
+  double snapBrewTarget = brewSetpoint, snapBrewKp = brewKp, snapBrewKi = brewKi, snapBrewKd = brewKd;
+  double snapBrewAkp = brewActiveKp, snapBrewAki = brewActiveKi, snapBrewAkd = brewActiveKd;
+  double snapSteamTarget = steamSetpoint, snapSteamKp = steamKp, snapSteamKi = steamKi, snapSteamKd = steamKd;
+  double snapSteamMaxSafety = steamMaxSafety;
+  bool snapFault = sensorFault;
+  unsigned long snapEcoTimeoutMin = ecoTimeoutMin;
+  bool snapAutoSleeping = autoSleeping;
+  unsigned long snapShotAutoStopSec = shotAutoStopSec;
+  AutotuneState snapAutotuneState = autotuneState;
+  String snapAutotuneMessage = autotuneMessage;
+  bool snapShotInProgress = shotInProgress;
+  unsigned long snapShotStartMillis = shotStartMillis;
+  unsigned long snapShotCount = shotCount;
+  time_t snapLastDescaleTime = lastDescaleTime;
+  unsigned long snapDescaleShotThreshold = descaleShotThreshold;
+  unsigned long snapDescaleDayThreshold = descaleDayThreshold;
+  int snapActiveProfileIndex = activeProfileIndex;
+  bool snapPiEnabled = activePreinfusionEnabled;
+  int snapPiPulses = activePreinfusionPulses, snapPiOnMs = activePreinfusionOnMs, snapPiOffMs = activePreinfusionOffMs;
+  ShotPhase snapShotPhase = currentShotPhase;
+  bool snapSchedEnabled[SCHED_MAX_COUNT];
+  int snapSchedHour[SCHED_MAX_COUNT], snapSchedMin[SCHED_MAX_COUNT];
+  bool snapSchedModeSteam[SCHED_MAX_COUNT];
+  for (int i = 0; i < SCHED_MAX_COUNT; i++) {
+    snapSchedEnabled[i] = schedEnabled[i];
+    snapSchedHour[i] = schedHour[i];
+    snapSchedMin[i] = schedMin[i];
+    snapSchedModeSteam[i] = schedModeSteam[i];
+  }
+  int snapHistoryCount = tempHistoryCount, snapHistoryHead = tempHistoryHead;
+  float snapHistory[TEMP_HISTORY_LEN];
+  for (int i = 0; i < snapHistoryCount; i++) {
+    int idx = (snapHistoryHead - snapHistoryCount + i + TEMP_HISTORY_LEN * 2) % TEMP_HISTORY_LEN;
+    snapHistory[i] = tempHistory[idx];
+  }
+  unlockState();
+
+  String json = "{";
+  json += "\"temp\":" + String(snapTemp);
+  json += ",\"target\":" + String(snapSetpoint);
+  json += ",\"output\":" + String(snapOutput);
+
+  json += ",\"opmode\":\"";
+  json += (snapMode == OpMode::BREW)    ? "brew"
+           : (snapMode == OpMode::STEAM) ? "steam"
+                                          : "off";
+  json += "\"";
+
+  // Kp/Ki/Kd get 4 decimal places, not String()'s default 2 - a value like
+  // autotune's Ki=1.1782 would otherwise silently truncate to "1.18" here,
+  // and re-saving without noticing would overwrite the real value with
+  // the rounded one. Target/safety fields stay at the default (2 decimals
+  // is already more precision than a human ever types for a temperature).
+  json += ",\"brew_target\":" + String(snapBrewTarget);
+  json += ",\"brew_kp\":" + String(snapBrewKp, 4);
+  json += ",\"brew_ki\":" + String(snapBrewKi, 4);
+  json += ",\"brew_kd\":" + String(snapBrewKd, 4);
+  json += ",\"brew_akp\":" + String(snapBrewAkp, 4);
+  json += ",\"brew_aki\":" + String(snapBrewAki, 4);
+  json += ",\"brew_akd\":" + String(snapBrewAkd, 4);
+  json += ",\"steam_target\":" + String(snapSteamTarget);
+  json += ",\"steam_kp\":" + String(snapSteamKp, 4);
+  json += ",\"steam_ki\":" + String(snapSteamKi, 4);
+  json += ",\"steam_kd\":" + String(snapSteamKd, 4);
+  json += ",\"steam_max_safety\":" + String(snapSteamMaxSafety);
+
+  Preferences preferences;
+  preferences.begin("gaggia", true);
+  json +=
+      ",\"mqtt_server\":\"" + preferences.getString("mqtt_server", "") + "\"";
+  json += ",\"mqtt_port\":" + String(preferences.getInt("mqtt_port", 1883));
+  json += ",\"mqtt_user\":\"" + preferences.getString("mqtt_user", "") + "\"";
+  json += ",\"mqtt_pass\":\"" + preferences.getString("mqtt_pass", "") + "\"";
+  preferences.end();
+
+  json += ",\"fw_build\":\"" + String(FIRMWARE_BUILD_TIMESTAMP) + "\"";
+
+  json += ",\"fault\":" + String(snapFault ? "true" : "false");
+
+  // NTP sync status - an unsynced clock reads as ~1970 and silently blocks
+  // the scheduled-warmup check (main.cpp) with no other visible symptom.
+  time_t nowEpoch = time(nullptr);
+  json += ",\"ntp_synced\":" + String(nowEpoch > 1600000000L ? "true" : "false");
+  json += ",\"server_time\":" + String((long long)nowEpoch);
+
+  json += ",\"eco_timeout_min\":" + String(snapEcoTimeoutMin);
+  json += ",\"auto_sleeping\":" + String(snapAutoSleeping ? "true" : "false");
+  json += ",\"shot_auto_stop_sec\":" + String(snapShotAutoStopSec);
+
+  json += ",\"autotune_state\":\"";
+  switch (snapAutotuneState) {
+    case AutotuneState::RUNNING: json += "running"; break;
+    case AutotuneState::DONE_OK: json += "done_ok"; break;
+    case AutotuneState::DONE_FAIL: json += "done_fail"; break;
+    default: json += "idle"; break;
+  }
+  json += "\"";
+  json += ",\"autotune_message\":\"" + snapAutotuneMessage + "\"";
+
+  json += ",\"shot_in_progress\":" + String(snapShotInProgress ? "true" : "false");
+  json += ",\"shot_elapsed_ms\":" +
+          String(snapShotInProgress ? (millis() - snapShotStartMillis) : 0);
+
+  json += ",\"shot_count\":" + String(snapShotCount);
+  json += ",\"descale_shot_threshold\":" + String(snapDescaleShotThreshold);
+  json += ",\"descale_day_threshold\":" + String(snapDescaleDayThreshold);
+  // -1 means "unknown" (never descaled/reset since this feature was added) -
+  // avoids flashing a false "descale overdue" banner from an epoch-0 default.
+  long daysSinceDescale =
+      (snapLastDescaleTime > 0) ? (long)((time(nullptr) - snapLastDescaleTime) / 86400L) : -1;
+  json += ",\"days_since_descale\":" + String(daysSinceDescale);
+  bool descaleDue =
+      (snapShotCount >= snapDescaleShotThreshold) ||
+      (daysSinceDescale >= 0 && (unsigned long)daysSinceDescale >= snapDescaleDayThreshold);
+  json += ",\"descale_due\":" + String(descaleDue ? "true" : "false");
+
+  json += ",\"active_profile\":" + String(snapActiveProfileIndex);
+  json += ",\"pi_enabled\":" + String(snapPiEnabled ? "true" : "false");
+  json += ",\"pi_pulses\":" + String(snapPiPulses);
+  json += ",\"pi_on_ms\":" + String(snapPiOnMs);
+  json += ",\"pi_off_ms\":" + String(snapPiOffMs);
+  json += ",\"shot_phase\":\"";
+  switch (snapShotPhase) {
+    case ShotPhase::PREINFUSION_ON:
+    case ShotPhase::PREINFUSION_OFF: json += "preinfusion"; break;
+    case ShotPhase::EXTRACTION: json += "extraction"; break;
+    default: json += "none"; break;
+  }
+  json += "\"";
+
+  json += ",\"sched\":[";
+  for (int i = 0; i < SCHED_MAX_COUNT; i++) {
+    if (i > 0) json += ",";
+    json += "{\"en\":" + String(snapSchedEnabled[i] ? "true" : "false") +
+            ",\"hr\":" + String(snapSchedHour[i]) + ",\"mn\":" + String(snapSchedMin[i]) +
+            ",\"st\":" + String(snapSchedModeSteam[i] ? "true" : "false") + "}";
+  }
+  json += "]";
+  json += ",\"sched_tz_min\":" + String(schedTzOffsetMin);
+
+  json += ",\"history\":[";
+  for (int i = 0; i < snapHistoryCount; i++) {
+    if (i > 0) json += ",";
+    json += String(snapHistory[i], 1);
+  }
+  json += "]";
+
+  json += "}";
+  request->send(200, "application/json", json);
+}
+
+// Settings/action endpoint - every mode/tuning/shot/profile/schedule/MQTT
+// change funnels through this one handler (see the comment above the
+// server.on("/update", ...) registration in setupWeb() for why).
+static void handleUpdate(AsyncWebServerRequest *request) {
+  // Thin wrappers so the body below reads exactly like the old
+  // WebServer-based handler did, instead of request->getParam(x)->value()
+  // at every call site.
+  auto hasArg = [request](const char *name) { return request->hasParam(name); };
+  auto arg = [request](const char *name) { return request->getParam(name)->value(); };
+
+  noteActivity(); // any /update call is explicit user action - resets eco-sleep timer
+
+  // Holds the whole handler body under stateMutex - see config.h
+  // "Shared-state lock". This runs on the AsyncTCP task, a different task
+  // than controlTick(), so every field this handler touches (mode,
+  // setpoint, gains, shot state) needs the same lock controlTick() holds
+  // during its own tick, for exactly the same reason.
+  lockState();
+
+  Preferences preferences;
+  preferences.begin("gaggia", false); // false = read/write
+
+  if (hasArg("brew_target")) {
+    brewSetpoint = arg("brew_target").toDouble();
+    preferences.putDouble("brew_target", brewSetpoint);
+  }
+  if (hasArg("brew_kp")) {
+    brewKp = arg("brew_kp").toDouble();
+    preferences.putDouble("brew_kp", brewKp);
+  }
+  if (hasArg("brew_ki")) {
+    brewKi = arg("brew_ki").toDouble();
+    preferences.putDouble("brew_ki", brewKi);
+  }
+  if (hasArg("brew_kd")) {
+    brewKd = arg("brew_kd").toDouble();
+    preferences.putDouble("brew_kd", brewKd);
+  }
+  if (hasArg("brew_akp")) {
+    brewActiveKp = arg("brew_akp").toDouble();
+    preferences.putDouble("brew_akp", brewActiveKp);
+  }
+  if (hasArg("brew_aki")) {
+    brewActiveKi = arg("brew_aki").toDouble();
+    preferences.putDouble("brew_aki", brewActiveKi);
+  }
+  if (hasArg("brew_akd")) {
+    brewActiveKd = arg("brew_akd").toDouble();
+    preferences.putDouble("brew_akd", brewActiveKd);
+  }
+  if (hasArg("steam_target")) {
+    steamSetpoint = arg("steam_target").toDouble();
+    preferences.putDouble("steam_target", steamSetpoint);
+  }
+  if (hasArg("steam_kp")) {
+    steamKp = arg("steam_kp").toDouble();
+    preferences.putDouble("steam_kp", steamKp);
+  }
+  if (hasArg("steam_ki")) {
+    steamKi = arg("steam_ki").toDouble();
+    preferences.putDouble("steam_ki", steamKi);
+  }
+  if (hasArg("steam_kd")) {
+    steamKd = arg("steam_kd").toDouble();
+    preferences.putDouble("steam_kd", steamKd);
+  }
+  if (hasArg("steam_max_safety")) {
+    // Clamped server-side - a typo in this field shouldn't be able to set
+    // a dangerously high (or uselessly low) steam safety ceiling.
+    double v = arg("steam_max_safety").toDouble();
+    steamMaxSafety = constrain(v, STEAM_MAX_SAFETY_MIN, STEAM_MAX_SAFETY_MAX);
+    preferences.putDouble("steam_max_safety", steamMaxSafety);
+  }
+  // If the currently-active profile's own values just changed, apply them
+  // live (no mode change, so no PID reset - matches how tuning edits have
+  // always behaved here).
+  if (hasArg("brew_target") || hasArg("brew_kp") ||
+      hasArg("brew_ki") || hasArg("brew_kd") ||
+      hasArg("brew_akp") || hasArg("brew_aki") ||
+      hasArg("brew_akd") || hasArg("steam_target") ||
+      hasArg("steam_kp") || hasArg("steam_ki") ||
+      hasArg("steam_kd") || hasArg("steam_max_safety")) {
+    refreshActiveProfileIfChanged();
+  }
+
+  if (hasArg("mode")) {
+    // A mode-button click always safely interrupts an in-progress
+    // autotune first - autotune's relay-driven Output must never keep
+    // running once the user has asked for a different mode.
+    stopAutotune();
+    String mode = arg("mode");
+    if (mode == "off") {
+      setOpMode(OpMode::OFF);
+    } else if (mode == "brew") {
+      setOpMode(OpMode::BREW);
+    } else if (mode == "steam") {
+      setOpMode(OpMode::STEAM);
+    }
+  }
+
+  // Shot auto-stop - 0 (disabled) passes through untouched; any nonzero
+  // value gets clamped so a typo can't set an unreasonably short/long
+  // duration (same pattern as steam_max_safety's clamp above).
+  if (hasArg("shot_auto_stop_sec")) {
+    long v = arg("shot_auto_stop_sec").toInt();
+    shotAutoStopSec = (v <= 0) ? 0 : constrain(v, SHOT_AUTO_STOP_SEC_MIN, SHOT_AUTO_STOP_SEC_MAX);
+    preferences.putULong("shot_auto_stop", shotAutoStopSec);
+  }
+
+  // Eco / auto-sleep
+  if (hasArg("eco_timeout_min")) {
+    ecoTimeoutMin = arg("eco_timeout_min").toInt();
+    preferences.putULong("eco_min", ecoTimeoutMin);
+  }
+  if (hasArg("wake") && arg("wake") == "1") {
+    wakeFromSleep();
+  }
+
+  // PID Autotune - runs the currently-active profile (must be Brew or
+  // Steam already, not Off) through a relay-feedback tuning cycle.
+  if (hasArg("autotune")) {
+    String at = arg("autotune");
+    if (at == "start") {
+      startAutotune(currentMode == OpMode::STEAM ? OpMode::STEAM : OpMode::BREW);
+    } else if (at == "stop") {
+      stopAutotune();
+    }
+  }
+
+  // Shot timer (manual Start/Stop trigger - see config.h / AGENTS.md
+  // roadmap item 7 for why this isn't automatic yet).
+  if (hasArg("shot")) {
+    String s = arg("shot");
+    if (s == "start") {
+      startShot();
+    } else if (s == "stop") {
+      stopShot();
+    }
+  }
+
+  // Descale / maintenance reminder
+  if (hasArg("mark_descaled") && arg("mark_descaled") == "1") {
+    markDescaled();
+  }
+  if (hasArg("descale_shot_threshold")) {
+    descaleShotThreshold = arg("descale_shot_threshold").toInt();
+    preferences.putULong("descale_shots", descaleShotThreshold);
+  }
+  if (hasArg("descale_day_threshold")) {
+    descaleDayThreshold = arg("descale_day_threshold").toInt();
+    preferences.putULong("descale_days", descaleDayThreshold);
+  }
+
+  // Shot tasting/dial-in notes (shot_log.cpp) - edited after the fact
+  // (you don't know the rating/notes until you've tasted the coffee), so
+  // this is a separate action from shotLogAppend() at shot-stop time, not
+  // a field collected while starting/stopping a shot. shot_note_index is
+  // the JSON array's own 0-based (oldest-first) index, NOT the Web UI's
+  // reversed (newest-first) display order - the frontend translates.
+  if (hasArg("shot_note_index")) {
+    int idx = arg("shot_note_index").toInt();
+    String bean = hasArg("shot_note_bean") ? arg("shot_note_bean") : "";
+    float doseIn = hasArg("shot_note_dose") ? arg("shot_note_dose").toFloat() : 0.0f;
+    String grind = hasArg("shot_note_grind") ? arg("shot_note_grind") : "";
+    int rating = hasArg("shot_note_rating") ? arg("shot_note_rating").toInt() : 0;
+    String notes = hasArg("shot_note_text") ? arg("shot_note_text") : "";
+    shotLogUpdateNotes(idx, bean, doseIn, grind, rating, notes);
+  }
+
+  // Named shot profiles (profiles.cpp) - three independent actions, same
+  // split as everywhere else in this handler (editing vs. an explicit
+  // apply action):
+  //   profile_apply=<idx>       - load a saved profile into the live
+  //                               settings (temp/auto-stop/pre-infusion)
+  //   profile_save=1 (+ fields) - add (profile_index=-1) or overwrite an
+  //                               existing saved profile
+  //   profile_delete=<idx>      - remove a saved profile
+  if (hasArg("profile_apply")) {
+    applyProfile(arg("profile_apply").toInt());
+  }
+  if (hasArg("profile_save")) {
+    int idx = hasArg("profile_index") ? arg("profile_index").toInt() : -1;
+    String name = hasArg("profile_name") ? arg("profile_name") : "Profile";
+    double temp = hasArg("profile_temp") ? arg("profile_temp").toDouble() : BREW_SETPOINT_DEFAULT;
+    unsigned long autoStop = hasArg("profile_autostop")
+        ? constrain((long)arg("profile_autostop").toInt(), (long)SHOT_AUTO_STOP_SEC_MIN, (long)SHOT_AUTO_STOP_SEC_MAX)
+        : SHOT_AUTO_STOP_SEC_DEFAULT;
+    bool piEnabled = hasArg("profile_pi_enabled") && arg("profile_pi_enabled") == "1";
+    int pulses = hasArg("profile_pi_pulses")
+        ? constrain(arg("profile_pi_pulses").toInt(), 0, PREINFUSION_PULSES_MAX) : 0;
+    int onMs = hasArg("profile_pi_on_ms")
+        ? constrain(arg("profile_pi_on_ms").toInt(), PREINFUSION_PULSE_MS_MIN, PREINFUSION_PULSE_MS_MAX) : PREINFUSION_ON_MS_DEFAULT;
+    int offMs = hasArg("profile_pi_off_ms")
+        ? constrain(arg("profile_pi_off_ms").toInt(), PREINFUSION_PULSE_MS_MIN, PREINFUSION_PULSE_MS_MAX) : PREINFUSION_OFF_MS_DEFAULT;
+    int saved = profileSave(idx, name, temp, autoStop, piEnabled, pulses, onMs, offMs);
+    // Editing the profile that's currently active also refreshes the live
+    // settings from it, so tweaking "your current setup" takes effect
+    // immediately instead of silently drifting from what's now saved.
+    if (saved >= 0 && saved == activeProfileIndex) applyProfile(saved);
+  }
+  if (hasArg("profile_delete")) {
+    profileDelete(arg("profile_delete").toInt());
+  }
+
+  // Scheduled warm-up - SCHED_MAX_COUNT independent slots. Editing a slot's
+  // enabled state or time always re-arms it for today (resetSchedFired) -
+  // otherwise a slot that already fired once today would silently refuse
+  // to fire again after a later edit the same day, until the next
+  // calendar day (confirmed 2026-08-16 as the actual cause of a schedule
+  // that looked like it "stopped working" mid-testing).
+  for (int i = 0; i < SCHED_MAX_COUNT; i++) {
+    String prefix = "sched" + String(i) + "_";
+    String enArg = prefix + "en", timeArg = prefix + "time", steamArg = prefix + "steam";
+    String enKey = "sched" + String(i) + "_en", hrKey = "sched" + String(i) + "_hr",
+           mnKey = "sched" + String(i) + "_mn", stKey = "sched" + String(i) + "_st";
+    if (hasArg(enArg.c_str())) {
+      schedEnabled[i] = arg(enArg.c_str()) == "1";
+      preferences.putBool(enKey.c_str(), schedEnabled[i]);
+      resetSchedFired(i);
+    }
+    if (hasArg(timeArg.c_str())) {
+      // Native <input type="time"> submits "HH:MM" as one field.
+      String t = arg(timeArg.c_str());
+      int colon = t.indexOf(':');
+      if (colon > 0) {
+        schedHour[i] = constrain(t.substring(0, colon).toInt(), 0, 23);
+        schedMin[i] = constrain(t.substring(colon + 1).toInt(), 0, 59);
+        preferences.putInt(hrKey.c_str(), schedHour[i]);
+        preferences.putInt(mnKey.c_str(), schedMin[i]);
+        resetSchedFired(i);
+      }
+    }
+    if (hasArg(steamArg.c_str())) {
+      schedModeSteam[i] = arg(steamArg.c_str()) == "1";
+      preferences.putBool(stKey.c_str(), schedModeSteam[i]);
+    }
+  }
+  if (hasArg("sched_tz_min")) {
+    schedTzOffsetMin = arg("sched_tz_min").toInt();
+    preferences.putInt("sched_tz_min", schedTzOffsetMin);
+  }
+
+  // MQTT Settings
+  if (hasArg("mqtt_server")) {
+    preferences.putString("mqtt_server", arg("mqtt_server"));
+  }
+  if (hasArg("mqtt_port")) {
+    preferences.putInt("mqtt_port", arg("mqtt_port").toInt());
+  }
+  if (hasArg("mqtt_user")) {
+    preferences.putString("mqtt_user", arg("mqtt_user"));
+  }
+  if (hasArg("mqtt_pass")) {
+    preferences.putString("mqtt_pass", arg("mqtt_pass"));
+  }
+
+  preferences.end();
+  bool restartForMqtt = hasArg("mqtt_server");
+
+  unlockState();
+
+  request->redirect("/");
+
+  // Reboot to apply MQTT settings cleanly (simplest way)
+  if (restartForMqtt) {
+    delay(500);
+    ESP.restart();
+  }
+}
+
+static void handleOtaComplete(AsyncWebServerRequest *request) {
+  request->send(200, "text/plain",
+                (Update.hasError()) ? "Update Failed"
+                                    : "Update Success! Restarting...");
+  ESP.restart();
+}
+
+static void handleOtaUpload(AsyncWebServerRequest *request, String filename, size_t index,
+                             uint8_t *data, size_t len, bool final) {
+  if (index == 0) {
+    // Force the heater off up front as a defensive "safe state on a risky
+    // operation" measure, same rule already used for boot in setup() - not
+    // a workaround for a blocked control loop anymore (controlTick() keeps
+    // running throughout the upload), just belt and suspenders before
+    // Update.begin() (which itself can block a while erasing flash, on the
+    // AsyncTCP task only).
+    digitalWrite(PIN_SSR, LOW);
+    Serial.printf("Update: %s\n", filename.c_str());
+    if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+      Update.printError(Serial);
+    }
+  }
+  if (len) {
+    if (Update.write(data, len) != len) {
+      Update.printError(Serial);
+    }
+  }
+  if (final) {
+    if (Update.end(true)) {
+      Serial.printf("Update Success: %u\n", (unsigned)(index + len));
+    } else {
+      Update.printError(Serial);
+    }
+  }
+}
+
 void setupWeb() {
   WiFi.mode(WIFI_STA);
 
@@ -1451,143 +1995,36 @@ void setupWeb() {
   }
 
   // Main Page Handler
-  server.on("/", HTTP_GET, []() { server.send(200, "text/html", index_html); });
+  server.on("/", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "text/html", index_html);
+  });
 
   // PWA manifest + icon (add-to-home-screen support)
-  server.on("/manifest.json", HTTP_GET, []() {
-    server.send(200, "application/manifest+json", manifest_json);
+  server.on("/manifest.json", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "application/manifest+json", manifest_json);
   });
-  server.on("/icon.svg", HTTP_GET,
-            []() { server.send(200, "image/svg+xml", icon_svg); });
-
-  // Status Handler
-  server.on("/status", HTTP_GET, []() {
-    String json = "{";
-    json += "\"temp\":" + String(currentTemperature);
-    json += ",\"target\":" + String(Setpoint);
-    json += ",\"output\":" + String(Output);
-
-    json += ",\"opmode\":\"";
-    json += (currentMode == OpMode::BREW)    ? "brew"
-             : (currentMode == OpMode::STEAM) ? "steam"
-                                               : "off";
-    json += "\"";
-
-    // Kp/Ki/Kd get 4 decimal places, not String()'s default 2 - a value like
-    // autotune's Ki=1.1782 would otherwise silently truncate to "1.18" here,
-    // and re-saving without noticing would overwrite the real value with
-    // the rounded one. Target/safety fields stay at the default (2 decimals
-    // is already more precision than a human ever types for a temperature).
-    json += ",\"brew_target\":" + String(brewSetpoint);
-    json += ",\"brew_kp\":" + String(brewKp, 4);
-    json += ",\"brew_ki\":" + String(brewKi, 4);
-    json += ",\"brew_kd\":" + String(brewKd, 4);
-    json += ",\"brew_akp\":" + String(brewActiveKp, 4);
-    json += ",\"brew_aki\":" + String(brewActiveKi, 4);
-    json += ",\"brew_akd\":" + String(brewActiveKd, 4);
-    json += ",\"steam_target\":" + String(steamSetpoint);
-    json += ",\"steam_kp\":" + String(steamKp, 4);
-    json += ",\"steam_ki\":" + String(steamKi, 4);
-    json += ",\"steam_kd\":" + String(steamKd, 4);
-    json += ",\"steam_max_safety\":" + String(steamMaxSafety);
-
-    Preferences preferences;
-    preferences.begin("gaggia", true);
-    json +=
-        ",\"mqtt_server\":\"" + preferences.getString("mqtt_server", "") + "\"";
-    json += ",\"mqtt_port\":" + String(preferences.getInt("mqtt_port", 1883));
-    json += ",\"mqtt_user\":\"" + preferences.getString("mqtt_user", "") + "\"";
-    json += ",\"mqtt_pass\":\"" + preferences.getString("mqtt_pass", "") + "\"";
-    preferences.end();
-
-    json += ",\"fw_build\":\"" + String(FIRMWARE_BUILD_TIMESTAMP) + "\"";
-
-    json += ",\"fault\":" + String(sensorFault ? "true" : "false");
-
-    // NTP sync status - an unsynced clock reads as ~1970 and silently blocks
-    // the scheduled-warmup check (main.cpp) with no other visible symptom.
-    time_t nowEpoch = time(nullptr);
-    json += ",\"ntp_synced\":" + String(nowEpoch > 1600000000L ? "true" : "false");
-    json += ",\"server_time\":" + String((long long)nowEpoch);
-
-    json += ",\"eco_timeout_min\":" + String(ecoTimeoutMin);
-    json += ",\"auto_sleeping\":" + String(autoSleeping ? "true" : "false");
-    json += ",\"shot_auto_stop_sec\":" + String(shotAutoStopSec);
-
-    json += ",\"autotune_state\":\"";
-    switch (autotuneState) {
-      case AutotuneState::RUNNING: json += "running"; break;
-      case AutotuneState::DONE_OK: json += "done_ok"; break;
-      case AutotuneState::DONE_FAIL: json += "done_fail"; break;
-      default: json += "idle"; break;
-    }
-    json += "\"";
-    json += ",\"autotune_message\":\"" + autotuneMessage + "\"";
-
-    json += ",\"shot_in_progress\":" + String(shotInProgress ? "true" : "false");
-    json += ",\"shot_elapsed_ms\":" +
-            String(shotInProgress ? (millis() - shotStartMillis) : 0);
-
-    json += ",\"shot_count\":" + String(shotCount);
-    json += ",\"descale_shot_threshold\":" + String(descaleShotThreshold);
-    json += ",\"descale_day_threshold\":" + String(descaleDayThreshold);
-    // -1 means "unknown" (never descaled/reset since this feature was added) -
-    // avoids flashing a false "descale overdue" banner from an epoch-0 default.
-    long daysSinceDescale =
-        (lastDescaleTime > 0) ? (long)((time(nullptr) - lastDescaleTime) / 86400L) : -1;
-    json += ",\"days_since_descale\":" + String(daysSinceDescale);
-    bool descaleDue =
-        (shotCount >= descaleShotThreshold) ||
-        (daysSinceDescale >= 0 && (unsigned long)daysSinceDescale >= descaleDayThreshold);
-    json += ",\"descale_due\":" + String(descaleDue ? "true" : "false");
-
-    json += ",\"active_profile\":" + String(activeProfileIndex);
-    json += ",\"pi_enabled\":" + String(activePreinfusionEnabled ? "true" : "false");
-    json += ",\"pi_pulses\":" + String(activePreinfusionPulses);
-    json += ",\"pi_on_ms\":" + String(activePreinfusionOnMs);
-    json += ",\"pi_off_ms\":" + String(activePreinfusionOffMs);
-    json += ",\"shot_phase\":\"";
-    switch (currentShotPhase) {
-      case ShotPhase::PREINFUSION_ON:
-      case ShotPhase::PREINFUSION_OFF: json += "preinfusion"; break;
-      case ShotPhase::EXTRACTION: json += "extraction"; break;
-      default: json += "none"; break;
-    }
-    json += "\"";
-
-    json += ",\"sched\":[";
-    for (int i = 0; i < SCHED_MAX_COUNT; i++) {
-      if (i > 0) json += ",";
-      json += "{\"en\":" + String(schedEnabled[i] ? "true" : "false") +
-              ",\"hr\":" + String(schedHour[i]) + ",\"mn\":" + String(schedMin[i]) +
-              ",\"st\":" + String(schedModeSteam[i] ? "true" : "false") + "}";
-    }
-    json += "]";
-    json += ",\"sched_tz_min\":" + String(schedTzOffsetMin);
-
-    json += ",\"history\":[";
-    for (int i = 0; i < tempHistoryCount; i++) {
-      int idx = (tempHistoryHead - tempHistoryCount + i + TEMP_HISTORY_LEN * 2) %
-                TEMP_HISTORY_LEN;
-      if (i > 0) json += ",";
-      json += String(tempHistory[idx], 1);
-    }
-    json += "]";
-
-    json += "}";
-    server.send(200, "application/json", json);
+  server.on("/icon.svg", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "image/svg+xml", icon_svg);
   });
+
+  // Status Handler. Snapshots every control-task-owned field under the lock
+  // first (see config.h "Shared-state lock"), then builds JSON from the
+  // local copies unlocked - keeps the lock held for microseconds instead of
+  // for the whole (much slower) String-concatenation pass below.
+  server.on("/status", AsyncWebRequestMethod::HTTP_GET, handleStatus);
 
   // Shot history log
-  server.on("/shots", HTTP_GET,
-            []() { server.send(200, "application/json", shotLogReadJson()); });
+  server.on("/shots", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "application/json", shotLogReadJson());
+  });
 
   // Named shot profiles (temp + auto-stop + pre-infusion pattern) - see
   // profiles.cpp. List only; add/edit/delete/apply all go through /update
   // like every other setting, for the same reason /settings_export reuses
   // it for restore - one code path, not two.
-  server.on("/profiles", HTTP_GET,
-            []() { server.send(200, "application/json", profilesReadJson()); });
+  server.on("/profiles", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "application/json", profilesReadJson());
+  });
 
   // Settings backup/restore (2026-08-16). Export builds a query-string in
   // EXACTLY the same field names /update already accepts and applies; the
@@ -1595,7 +2032,7 @@ void setupWeb() {
   // the Web UI reads that file back client-side and re-POSTs its contents
   // straight to /update - no JSON parser needed on the device at all, and
   // zero new field-handling code to keep in sync with /update itself.
-  server.on("/settings_export", HTTP_GET, []() {
+  server.on("/settings_export", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
     auto enc = [](const String &s) {
       String out;
       char buf[4];
@@ -1646,276 +2083,29 @@ void setupWeb() {
     q += "&mqtt_pass=" + enc(preferences.getString("mqtt_pass", ""));
     preferences.end();
 
-    server.sendHeader("Content-Disposition",
-                       "attachment; filename=\"gaggia-settings-backup.txt\"");
-    server.send(200, "text/plain", q);
+    AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", q);
+    response->addHeader("Content-Disposition",
+                         "attachment; filename=\"gaggia-settings-backup.txt\"");
+    request->send(response);
   });
 
   // Settings Update Handler
-  server.on("/update", HTTP_GET, []() {
-    noteActivity(); // any /update call is explicit user action - resets eco-sleep timer
-
-    Preferences preferences;
-    preferences.begin("gaggia", false); // false = read/write
-
-    if (server.hasArg("brew_target")) {
-      brewSetpoint = server.arg("brew_target").toDouble();
-      preferences.putDouble("brew_target", brewSetpoint);
-    }
-    if (server.hasArg("brew_kp")) {
-      brewKp = server.arg("brew_kp").toDouble();
-      preferences.putDouble("brew_kp", brewKp);
-    }
-    if (server.hasArg("brew_ki")) {
-      brewKi = server.arg("brew_ki").toDouble();
-      preferences.putDouble("brew_ki", brewKi);
-    }
-    if (server.hasArg("brew_kd")) {
-      brewKd = server.arg("brew_kd").toDouble();
-      preferences.putDouble("brew_kd", brewKd);
-    }
-    if (server.hasArg("brew_akp")) {
-      brewActiveKp = server.arg("brew_akp").toDouble();
-      preferences.putDouble("brew_akp", brewActiveKp);
-    }
-    if (server.hasArg("brew_aki")) {
-      brewActiveKi = server.arg("brew_aki").toDouble();
-      preferences.putDouble("brew_aki", brewActiveKi);
-    }
-    if (server.hasArg("brew_akd")) {
-      brewActiveKd = server.arg("brew_akd").toDouble();
-      preferences.putDouble("brew_akd", brewActiveKd);
-    }
-    if (server.hasArg("steam_target")) {
-      steamSetpoint = server.arg("steam_target").toDouble();
-      preferences.putDouble("steam_target", steamSetpoint);
-    }
-    if (server.hasArg("steam_kp")) {
-      steamKp = server.arg("steam_kp").toDouble();
-      preferences.putDouble("steam_kp", steamKp);
-    }
-    if (server.hasArg("steam_ki")) {
-      steamKi = server.arg("steam_ki").toDouble();
-      preferences.putDouble("steam_ki", steamKi);
-    }
-    if (server.hasArg("steam_kd")) {
-      steamKd = server.arg("steam_kd").toDouble();
-      preferences.putDouble("steam_kd", steamKd);
-    }
-    if (server.hasArg("steam_max_safety")) {
-      // Clamped server-side - a typo in this field shouldn't be able to set
-      // a dangerously high (or uselessly low) steam safety ceiling.
-      double v = server.arg("steam_max_safety").toDouble();
-      steamMaxSafety = constrain(v, STEAM_MAX_SAFETY_MIN, STEAM_MAX_SAFETY_MAX);
-      preferences.putDouble("steam_max_safety", steamMaxSafety);
-    }
-    // If the currently-active profile's own values just changed, apply them
-    // live (no mode change, so no PID reset - matches how tuning edits have
-    // always behaved here).
-    if (server.hasArg("brew_target") || server.hasArg("brew_kp") ||
-        server.hasArg("brew_ki") || server.hasArg("brew_kd") ||
-        server.hasArg("brew_akp") || server.hasArg("brew_aki") ||
-        server.hasArg("brew_akd") || server.hasArg("steam_target") ||
-        server.hasArg("steam_kp") || server.hasArg("steam_ki") ||
-        server.hasArg("steam_kd") || server.hasArg("steam_max_safety")) {
-      refreshActiveProfileIfChanged();
-    }
-
-    if (server.hasArg("mode")) {
-      // A mode-button click always safely interrupts an in-progress
-      // autotune first - autotune's relay-driven Output must never keep
-      // running once the user has asked for a different mode.
-      stopAutotune();
-      String mode = server.arg("mode");
-      if (mode == "off") {
-        setOpMode(OpMode::OFF);
-      } else if (mode == "brew") {
-        setOpMode(OpMode::BREW);
-      } else if (mode == "steam") {
-        setOpMode(OpMode::STEAM);
-      }
-    }
-
-    // Shot auto-stop - 0 (disabled) passes through untouched; any nonzero
-    // value gets clamped so a typo can't set an unreasonably short/long
-    // duration (same pattern as steam_max_safety's clamp above).
-    if (server.hasArg("shot_auto_stop_sec")) {
-      long v = server.arg("shot_auto_stop_sec").toInt();
-      shotAutoStopSec = (v <= 0) ? 0 : constrain(v, SHOT_AUTO_STOP_SEC_MIN, SHOT_AUTO_STOP_SEC_MAX);
-      preferences.putULong("shot_auto_stop", shotAutoStopSec);
-    }
-
-    // Eco / auto-sleep
-    if (server.hasArg("eco_timeout_min")) {
-      ecoTimeoutMin = server.arg("eco_timeout_min").toInt();
-      preferences.putULong("eco_min", ecoTimeoutMin);
-    }
-    if (server.hasArg("wake") && server.arg("wake") == "1") {
-      wakeFromSleep();
-    }
-
-    // PID Autotune - runs the currently-active profile (must be Brew or
-    // Steam already, not Off) through a relay-feedback tuning cycle.
-    if (server.hasArg("autotune")) {
-      String at = server.arg("autotune");
-      if (at == "start") {
-        startAutotune(currentMode == OpMode::STEAM ? OpMode::STEAM : OpMode::BREW);
-      } else if (at == "stop") {
-        stopAutotune();
-      }
-    }
-
-    // Shot timer (manual Start/Stop trigger - see config.h / AGENTS.md
-    // roadmap item 7 for why this isn't automatic yet).
-    if (server.hasArg("shot")) {
-      String s = server.arg("shot");
-      if (s == "start") {
-        startShot();
-      } else if (s == "stop") {
-        stopShot();
-      }
-    }
-
-    // Descale / maintenance reminder
-    if (server.hasArg("mark_descaled") && server.arg("mark_descaled") == "1") {
-      markDescaled();
-    }
-    if (server.hasArg("descale_shot_threshold")) {
-      descaleShotThreshold = server.arg("descale_shot_threshold").toInt();
-      preferences.putULong("descale_shots", descaleShotThreshold);
-    }
-    if (server.hasArg("descale_day_threshold")) {
-      descaleDayThreshold = server.arg("descale_day_threshold").toInt();
-      preferences.putULong("descale_days", descaleDayThreshold);
-    }
-
-    // Shot tasting/dial-in notes (shot_log.cpp) - edited after the fact
-    // (you don't know the rating/notes until you've tasted the coffee), so
-    // this is a separate action from shotLogAppend() at shot-stop time, not
-    // a field collected while starting/stopping a shot. shot_note_index is
-    // the JSON array's own 0-based (oldest-first) index, NOT the Web UI's
-    // reversed (newest-first) display order - the frontend translates.
-    if (server.hasArg("shot_note_index")) {
-      int idx = server.arg("shot_note_index").toInt();
-      String bean = server.hasArg("shot_note_bean") ? server.arg("shot_note_bean") : "";
-      float doseIn = server.hasArg("shot_note_dose") ? server.arg("shot_note_dose").toFloat() : 0.0f;
-      String grind = server.hasArg("shot_note_grind") ? server.arg("shot_note_grind") : "";
-      int rating = server.hasArg("shot_note_rating") ? server.arg("shot_note_rating").toInt() : 0;
-      String notes = server.hasArg("shot_note_text") ? server.arg("shot_note_text") : "";
-      shotLogUpdateNotes(idx, bean, doseIn, grind, rating, notes);
-    }
-
-    // Named shot profiles (profiles.cpp) - three independent actions, same
-    // split as everywhere else in this handler (editing vs. an explicit
-    // apply action):
-    //   profile_apply=<idx>       - load a saved profile into the live
-    //                               settings (temp/auto-stop/pre-infusion)
-    //   profile_save=1 (+ fields) - add (profile_index=-1) or overwrite an
-    //                               existing saved profile
-    //   profile_delete=<idx>      - remove a saved profile
-    if (server.hasArg("profile_apply")) {
-      applyProfile(server.arg("profile_apply").toInt());
-    }
-    if (server.hasArg("profile_save")) {
-      int idx = server.hasArg("profile_index") ? server.arg("profile_index").toInt() : -1;
-      String name = server.hasArg("profile_name") ? server.arg("profile_name") : "Profile";
-      double temp = server.hasArg("profile_temp") ? server.arg("profile_temp").toDouble() : BREW_SETPOINT_DEFAULT;
-      unsigned long autoStop = server.hasArg("profile_autostop")
-          ? constrain((long)server.arg("profile_autostop").toInt(), (long)SHOT_AUTO_STOP_SEC_MIN, (long)SHOT_AUTO_STOP_SEC_MAX)
-          : SHOT_AUTO_STOP_SEC_DEFAULT;
-      bool piEnabled = server.hasArg("profile_pi_enabled") && server.arg("profile_pi_enabled") == "1";
-      int pulses = server.hasArg("profile_pi_pulses")
-          ? constrain(server.arg("profile_pi_pulses").toInt(), 0, PREINFUSION_PULSES_MAX) : 0;
-      int onMs = server.hasArg("profile_pi_on_ms")
-          ? constrain(server.arg("profile_pi_on_ms").toInt(), PREINFUSION_PULSE_MS_MIN, PREINFUSION_PULSE_MS_MAX) : PREINFUSION_ON_MS_DEFAULT;
-      int offMs = server.hasArg("profile_pi_off_ms")
-          ? constrain(server.arg("profile_pi_off_ms").toInt(), PREINFUSION_PULSE_MS_MIN, PREINFUSION_PULSE_MS_MAX) : PREINFUSION_OFF_MS_DEFAULT;
-      int saved = profileSave(idx, name, temp, autoStop, piEnabled, pulses, onMs, offMs);
-      // Editing the profile that's currently active also refreshes the live
-      // settings from it, so tweaking "your current setup" takes effect
-      // immediately instead of silently drifting from what's now saved.
-      if (saved >= 0 && saved == activeProfileIndex) applyProfile(saved);
-    }
-    if (server.hasArg("profile_delete")) {
-      profileDelete(server.arg("profile_delete").toInt());
-    }
-
-    // Scheduled warm-up - SCHED_MAX_COUNT independent slots. Editing a slot's
-    // enabled state or time always re-arms it for today (resetSchedFired) -
-    // otherwise a slot that already fired once today would silently refuse
-    // to fire again after a later edit the same day, until the next
-    // calendar day (confirmed 2026-08-16 as the actual cause of a schedule
-    // that looked like it "stopped working" mid-testing).
-    for (int i = 0; i < SCHED_MAX_COUNT; i++) {
-      String prefix = "sched" + String(i) + "_";
-      String enArg = prefix + "en", timeArg = prefix + "time", steamArg = prefix + "steam";
-      String enKey = "sched" + String(i) + "_en", hrKey = "sched" + String(i) + "_hr",
-             mnKey = "sched" + String(i) + "_mn", stKey = "sched" + String(i) + "_st";
-      if (server.hasArg(enArg)) {
-        schedEnabled[i] = server.arg(enArg) == "1";
-        preferences.putBool(enKey.c_str(), schedEnabled[i]);
-        resetSchedFired(i);
-      }
-      if (server.hasArg(timeArg)) {
-        // Native <input type="time"> submits "HH:MM" as one field.
-        String t = server.arg(timeArg);
-        int colon = t.indexOf(':');
-        if (colon > 0) {
-          schedHour[i] = constrain(t.substring(0, colon).toInt(), 0, 23);
-          schedMin[i] = constrain(t.substring(colon + 1).toInt(), 0, 59);
-          preferences.putInt(hrKey.c_str(), schedHour[i]);
-          preferences.putInt(mnKey.c_str(), schedMin[i]);
-          resetSchedFired(i);
-        }
-      }
-      if (server.hasArg(steamArg)) {
-        schedModeSteam[i] = server.arg(steamArg) == "1";
-        preferences.putBool(stKey.c_str(), schedModeSteam[i]);
-      }
-    }
-    if (server.hasArg("sched_tz_min")) {
-      schedTzOffsetMin = server.arg("sched_tz_min").toInt();
-      preferences.putInt("sched_tz_min", schedTzOffsetMin);
-    }
-
-    // MQTT Settings
-    if (server.hasArg("mqtt_server")) {
-      preferences.putString("mqtt_server", server.arg("mqtt_server"));
-    }
-    if (server.hasArg("mqtt_port")) {
-      preferences.putInt("mqtt_port", server.arg("mqtt_port").toInt());
-    }
-    if (server.hasArg("mqtt_user")) {
-      preferences.putString("mqtt_user", server.arg("mqtt_user"));
-    }
-    if (server.hasArg("mqtt_pass")) {
-      preferences.putString("mqtt_pass", server.arg("mqtt_pass"));
-    }
-
-    preferences.end();
-
-    server.sendHeader("Location", "/");
-    server.send(303);
-
-    // Reboot to apply MQTT settings cleanly (simplest way)
-    if (server.hasArg("mqtt_server")) {
-      delay(500);
-      ESP.restart();
-    }
-  });
+  // Settings/action endpoint (mode, tuning, shot control, profiles,
+  // schedule, MQTT) - see handleUpdate() above setupWeb().
+  server.on("/update", AsyncWebRequestMethod::HTTP_GET, handleUpdate);
 
   // WiFi reconfiguration - clears stored credentials and reboots. On next
   // boot, WiFiManager's autoConnect() (in this same setupWeb()) will fail to
   // join and fall back to the "GaggiaBrewMasterESP_Setup" captive portal
   // automatically - the same well-tested path used on first boot, reused
   // here instead of building a second, custom WiFi-config UI from scratch.
-  server.on("/wifi_reset", HTTP_GET, []() {
-    server.send(200, "text/html",
-                "<html><body><h2>Resetting WiFi...</h2>"
-                "<p>Rejoin the <b>GaggiaBrewMasterESP_Setup</b> WiFi network "
-                "from your phone/laptop in a few seconds to enter new "
-                "credentials.</p>"
-                "</body></html>");
+  server.on("/wifi_reset", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "text/html",
+                  "<html><body><h2>Resetting WiFi...</h2>"
+                  "<p>Rejoin the <b>GaggiaBrewMasterESP_Setup</b> WiFi network "
+                  "from your phone/laptop in a few seconds to enter new "
+                  "credentials.</p>"
+                  "</body></html>");
     delay(500);
     WiFiManager wm;
     wm.resetSettings();
@@ -1924,58 +2114,22 @@ void setupWeb() {
   });
 
   // OTA Update Form
-  server.on("/firmware", HTTP_GET, []() {
+  server.on("/firmware", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
     String html = "<html><body><h2>OTA Update</h2>";
     html += "<form method='POST' action='/update_fw' "
             "enctype='multipart/form-data'>";
     html += "<input type='file' name='update'>";
     html += "<input type='submit' value='Update Firmware'>";
     html += "</form></body></html>";
-    server.send(200, "text/html", html);
+    request->send(200, "text/html", html);
   });
 
-  // OTA Update Handler
-  server.on(
-      "/update_fw", HTTP_POST,
-      []() {
-        server.send(200, "text/plain",
-                    (Update.hasError()) ? "Update Failed"
-                                        : "Update Success! Restarting...");
-        ESP.restart();
-      },
-      []() {
-        HTTPUpload &upload = server.upload();
-        if (upload.status == UPLOAD_FILE_START) {
-          // handleClient() blocks through the entire multipart upload
-          // (measured at 60-70+ seconds) without ever returning to loop(),
-          // so the PID/safety-cutoff logic that normally drives PIN_SSR
-          // doesn't run at all for that whole window - whatever duty state
-          // the heater was in when the upload started would otherwise stay
-          // latched. Force it off up front, before Update.begin() (which
-          // itself can block for a while erasing flash), same "safe state"
-          // rule already used for boot in setup().
-          digitalWrite(PIN_SSR, LOW);
-          Serial.printf("Update: %s\n", upload.filename.c_str());
-          if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
-            Update.printError(Serial);
-          }
-        } else if (upload.status == UPLOAD_FILE_WRITE) {
-          if (Update.write(upload.buf, upload.currentSize) !=
-              upload.currentSize) {
-            Update.printError(Serial);
-          }
-        } else if (upload.status == UPLOAD_FILE_END) {
-          if (Update.end(true)) {
-            Serial.printf("Update Success: %u\n", upload.totalSize);
-          } else {
-            Update.printError(Serial);
-          }
-        }
-      });
+  // OTA Update Handler. Async by construction - unlike the old synchronous
+  // WebServer, this upload callback runs on the AsyncTCP task and never
+  // blocks controlTick() (its own dedicated task), so PID/safety-cutoff
+  // timing and the watchdog keep running normally for the whole 60-70+
+  // second upload instead of stalling (see config.h "Hardware watchdog").
+  server.on("/update_fw", AsyncWebRequestMethod::HTTP_POST, handleOtaComplete, handleOtaUpload);
 
   server.begin();
 }
-
-// Function to handle client requests in the loop (standard WebServer needs
-// this)
-void handleWebLoop() { server.handleClient(); }

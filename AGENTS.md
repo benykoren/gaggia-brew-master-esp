@@ -783,6 +783,86 @@ rather than renumbering everything again.
 
 ## 10. Change Log
 
+### 2026-08-23 — Claude Code (Sonnet 5) — Dual-core task split (reversing the earlier decline) + async web server + watchdog; ShotStage state machine; Web UI patterns; profiles.cpp migrated to JSON
+
+- **Reverses the "dual-core pinning considered and declined" decision below**,
+  based on new evidence that didn't exist when that decision was made: the
+  same day, the third watchdog attempt (see `config.h`) panicked at ~10-25s
+  during **plain idle `/status` polling with no OTA involved at all** - proof
+  the risk wasn't hypothetical "a general sense that a synchronous WebServer
+  is fragile," it was an actual, reproducible failure. The decline's stated
+  objection - 35+ globals shared with zero synchronization, real data races
+  once split across cores - is exactly what the new `stateMutex`
+  (`lockState()`/`unlockState()`, recursive) exists to close. Comparing
+  against GaggiMate's own architecture (which hit and solved this identical
+  problem - a synchronous web-server task starving its control loop's core
+  and tripping its watchdog) confirmed the fix shape: a dedicated,
+  cooperative-lock-protected control task, not a bigger workaround bolted
+  onto the shared-task design.
+- **`main.cpp`**: extracted the old `loop()` body into `controlTick()`,
+  which now runs on its own FreeRTOS task (`controlLoopTask`, pinned to core
+  1, `CONTROL_TASK_PERIOD_MS`=50ms via `vTaskDelayUntil`) and is the ONLY
+  task registered with the TWDT (`esp_task_wdt_add(nullptr)` inside the task
+  itself). `setup()` calls `disableLoopWDT()` so the Arduino loop task -
+  which now only runs MQTT - can never trip the watchdog regardless of how
+  long a broker reconnect takes. Added `lockState()`/`unlockState()` (a
+  recursive mutex) since `controlTick()`, `web.cpp`'s `/update` handler, and
+  `mqtt.cpp`'s command callback now run on three different tasks instead of
+  one and all touch the same PID/mode/shot globals.
+- **`web.cpp`**: replaced the synchronous `WebServer` with `ESPAsyncWebServer`
+  (`esp32async/ESPAsyncWebServer`) so OTA/HTTP handling can never block
+  `controlTick()` - this is the structural fix for the exact failure the
+  previous entry below patched around (heater forced off for the whole
+  60-70s OTA upload). `/status` and MQTT's `publishStatus()` snapshot the
+  fields they need under the lock, then build their JSON response unlocked.
+  Also pulled the `/status`, `/update`, and OTA upload handlers out of
+  `setupWeb()` into named functions (`handleStatus`, `handleUpdate`,
+  `handleOtaComplete`/`handleOtaUpload`) so the route table itself is a
+  clean list of one-liners, matching GaggiMate's route-table/handler-body
+  separation (competitive research, 2026-08-16 entry).
+- **Generalized the pre-infusion state machine**: `ShotPhase`
+  `PREINFUSION_ON`/`PREINFUSION_OFF` pulse-counting (`preinfusionPulsesRemaining`)
+  replaced with a small ordered `ShotStage` list (`PUMP_ON`/`PUMP_OFF`/
+  `EXTRACTION`, each with a duration) built once at shot start
+  (`buildShotStages()`) and advanced generically (`tickShotStages()`).
+  `currentShotPhase` (the external/`/status` field) is kept in sync from the
+  active stage purely for reporting - no API/wire-format change. Adding a
+  future stage shape (a soak hold, a taper) is now a data change, not a new
+  enum value plus new branches.
+- **Web UI**: arm-then-confirm delete on profile rows (two clicks within 4s,
+  replacing the native `confirm()` popup - adapted from GaggiMate's
+  `useConfirmAction` pattern), inline "Saving…/Saved ✓" feedback on the
+  profile save button, and amber dashed phase-transition markers drawn on
+  the temperature sparkline when `shot_phase` changes during a running shot
+  (tracked client-side by sample-age, since `history[]` has no per-sample
+  phase of its own - adapted from GaggiMate's chart annotation lines).
+- **`profiles.cpp` migrated from hand-rolled CSV to ArduinoJson** - storage
+  format now matches the wire format exactly (`profilesReadJson()` just
+  hands the stored document back out), and profile names can contain commas/
+  newlines now (previously silently stripped).
+- **Live incident found and fixed during OTA testing**: `profilesInit()`
+  only reseeded starter profiles when `PROFILE_LOG_PATH` didn't exist at
+  all - on this already-deployed device, the OLD CSV-format file at that
+  same path DID exist, so it was never reseeded; every read then silently
+  failed to parse it as JSON and returned an empty list (looked like "all
+  profiles deleted"), and the next profile-save attempt overwrote the file
+  with a single generic entry, permanently losing the original CSV content
+  (no backup existed - `/settings_export` explicitly excludes profiles).
+  Fixed live via direct `/update?profile_save=...` calls restoring the 4
+  profiles the user confirmed they'd actually been using (Classic/Medium
+  Roast/Light Roast/Dark Roast, values taken from this file's own seed
+  data). A general CSV-recovery migration path was written and then
+  deliberately reverted per the user's explicit call - single-device
+  project, the live file is valid JSON now, so the recovery path this
+  device would need doesn't exist.
+- **Verified live via OTA** (device was NOT on the bench - user's explicit
+  call to proceed anyway): survived 60+ seconds of stable idle `/status`
+  polling past the ~10-25s mark that killed the two prior watchdog attempts;
+  a real shot start/stop cycle on the Medium Roast profile showed
+  `shot_phase` correctly holding `preinfusion` through all 3 pulses (~7s,
+  matching 1000ms-on/2000ms-off × 3) before transitioning to `extraction`
+  and logging cleanly on stop.
+
 ### 2026-08-23 — Claude Code (Sonnet 5) — Force heater off during OTA uploads; dual-core pinning considered and declined
 - **Fixed a real safety gap found while investigating dual-core task
   pinning** (brainstormed, see below): `web.cpp`'s OTA handler
