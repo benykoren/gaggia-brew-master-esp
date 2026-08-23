@@ -454,6 +454,28 @@ Steam LED's function, or to make Thermostat 2 do real work again).
 
 - **Tune PID gains** for the Gaggia aluminum boiler — brew is largely dialed
   in (see Section 10 change log), steam still needs real testing.
+- **Hardware watchdog (`esp_task_wdt`) — deferred, tried twice and reverted
+  both times (2026-08-18, 2026-08-23).** Goal: guard against a hung `loop()`
+  leaving `PIN_SSR` stuck energized on this mains-connected machine. Both
+  attempts caused real, repeated panic-reboots on the actual device instead
+  of fixing anything, each requiring a manual power-cycle or a stability-
+  restoring revert. The 2026-08-23 attempt got much further — via direct USB
+  serial-log evidence (not a live OTA guess) it found and fixed a real bug
+  (Arduino-ESP32 already auto-initializes its own TWDT before `setup()`
+  runs, so `esp_task_wdt_init()` was silently failing with
+  `ESP_ERR_INVALID_STATE` and the configured timeout never applied — fixed
+  by falling back to `esp_task_wdt_reconfigure()`) — but the device *still*
+  panic-reboots `loopTask` roughly 10-25s after boot even with that fix and
+  with `esp_task_wdt_reset()` correctly placed at the end of `loop()`, with
+  no OTA involved at all. True root cause not yet found: the leading theory
+  is that `esp_task_wdt_reset()` isn't actually preventing the trip, i.e.
+  something prevents `loop()` from ever reaching that line, or reset()
+  itself isn't applying to the tracked task the way expected. See
+  `config.h`'s watchdog comment for the full detail. **If revisited:** add a
+  `Serial` heartbeat print immediately before `esp_task_wdt_reset()` in
+  `loop()` and confirm via a fresh USB serial capture that it's actually
+  printing every iteration *before* trusting the watchdog again — don't
+  jump straight back to a live OTA test.
 
 ### Competitive research (2026-08-16)
 
