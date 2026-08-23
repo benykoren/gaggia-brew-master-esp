@@ -8,6 +8,21 @@
 #include <PID_v1.h>
 #include <Preferences.h>
 #include <time.h>
+#include <esp_task_wdt.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#include <freertos/task.h>
+
+// Coarse-grained lock protecting every global the control loop reads/writes
+// (currentTemperature, Setpoint/Output, currentMode, shotInProgress,
+// currentShotPhase, tempHistory, brew/steam gains, activeMaxSafety) - see
+// config.h "Shared-state lock" for why this exists now that control logic
+// runs on its own FreeRTOS task (controlLoopTask() below) instead of inline
+// in loop(). Recursive: setOpMode() calls applyActiveProfile() internally,
+// and callers hold the lock across both.
+static SemaphoreHandle_t stateMutex = nullptr;
+void lockState() { xSemaphoreTakeRecursive(stateMutex, portMAX_DELAY); }
+void unlockState() { xSemaphoreGiveRecursive(stateMutex); }
 
 // Global Variables
 float currentTemperature = 0.0;
@@ -466,16 +481,39 @@ void applyProfile(int idx) {
 }
 
 // ============================================================================
-// Pre-infusion phase state machine (see config.h) - pulses PIN_PUMP on/off a
-// few times before switching to continuous power for the rest of the shot.
+// Shot stage state machine (2026-08-23, generalizes the old ad hoc
+// PREINFUSION_ON/OFF pulse counter) - a shot is a small ordered list of
+// stages (pump on/off for a fixed duration, then a final open-ended
+// extraction stage), advanced purely by millis() comparisons, same
+// "declarative phase list" principle Gaggiuino/GaggiMate both use for their
+// (much richer) pressure/flow profiles. Today's profiles only ever produce
+// PUMP_ON/PUMP_OFF pulse pairs followed by EXTRACTION, but adding a new
+// stage shape later (e.g. a soak hold, a declining-pressure taper) is now a
+// buildShotStages() change, not a new ShotPhase enum value plus new
+// tickShotStages() branches. currentShotPhase (config.h) is kept in sync
+// from the active stage purely for external reporting (/status, MQTT) -
+// nothing outside this file needs to know stages exist.
+//
 // PIN_PUMP is NOT YET WIRED (HARDWARE_ROADMAP.md item 4) - setPumpRelay()
 // safely toggles an unconnected GPIO until then; built now so the timing
 // logic doesn't need revisiting once the relay exists, same "software ahead
 // of hardware" pattern already proven for shot auto-stop.
 // ============================================================================
 ShotPhase currentShotPhase = ShotPhase::NONE;
-static int preinfusionPulsesRemaining = 0;
-static unsigned long phaseStartMillis = 0;
+
+struct ShotStage {
+  enum class Type { PUMP_ON, PUMP_OFF, EXTRACTION } type;
+  unsigned long durationMs; // unused for EXTRACTION - runs until shot stop
+};
+
+// Longest possible sequence: PREINFUSION_PULSES_MAX on/off pairs (minus the
+// trailing off after the last pulse) plus the final EXTRACTION stage. Fixed-
+// size, not std::vector - a shot starts often enough that a heap alloc/free
+// every time is worth avoiding on an embedded target.
+static ShotStage activeShotStages[PREINFUSION_PULSES_MAX * 2 + 1];
+static int activeStageCount = 0;
+static int currentStageIndex = 0;
+static unsigned long stageStartMillis = 0;
 
 static void setPumpRelay(bool energized) {
   int level = energized ? PIN_PUMP_ACTIVE_LEVEL
@@ -483,35 +521,47 @@ static void setPumpRelay(bool energized) {
   digitalWrite(PIN_PUMP, level);
 }
 
-// Advances the pre-infusion state machine - called unthrottled from loop()
-// while a shot is running, since pulse timing can be sub-second
-// (PREINFUSION_PULSE_MS_MIN). No-ops once in EXTRACTION (the common case for
-// most of a shot's duration) or if no shot is running.
-static void tickShotPhase(unsigned long now) {
-  if (!shotInProgress) return;
-  if (currentShotPhase != ShotPhase::PREINFUSION_ON &&
-      currentShotPhase != ShotPhase::PREINFUSION_OFF) {
-    return;
-  }
-  unsigned long elapsed = now - phaseStartMillis;
-
-  if (currentShotPhase == ShotPhase::PREINFUSION_ON) {
-    if (elapsed < (unsigned long)activePreinfusionOnMs) return;
-    preinfusionPulsesRemaining--;
-    if (preinfusionPulsesRemaining <= 0) {
-      currentShotPhase = ShotPhase::EXTRACTION;
-      setPumpRelay(true); // no trailing OFF after the last pulse
-    } else {
-      currentShotPhase = ShotPhase::PREINFUSION_OFF;
-      setPumpRelay(false);
-      phaseStartMillis = now;
+// Builds the stage sequence for the profile active at shot-start - pulses
+// interleaved with off periods (no trailing off after the last pulse, same
+// as the old design), then one open-ended EXTRACTION stage.
+static void buildShotStages() {
+  activeStageCount = 0;
+  if (activePreinfusionEnabled && activePreinfusionPulses > 0) {
+    for (int i = 0; i < activePreinfusionPulses; i++) {
+      activeShotStages[activeStageCount++] = {ShotStage::Type::PUMP_ON, (unsigned long)activePreinfusionOnMs};
+      if (i < activePreinfusionPulses - 1) {
+        activeShotStages[activeStageCount++] = {ShotStage::Type::PUMP_OFF, (unsigned long)activePreinfusionOffMs};
+      }
     }
-  } else { // PREINFUSION_OFF
-    if (elapsed < (unsigned long)activePreinfusionOffMs) return;
-    currentShotPhase = ShotPhase::PREINFUSION_ON;
-    setPumpRelay(true);
-    phaseStartMillis = now;
   }
+  activeShotStages[activeStageCount++] = {ShotStage::Type::EXTRACTION, 0};
+}
+
+static ShotPhase phaseForStageType(ShotStage::Type t) {
+  switch (t) {
+    case ShotStage::Type::PUMP_ON: return ShotPhase::PREINFUSION_ON;
+    case ShotStage::Type::PUMP_OFF: return ShotPhase::PREINFUSION_OFF;
+    default: return ShotPhase::EXTRACTION;
+  }
+}
+
+// Advances the stage state machine - called unthrottled from controlTick()
+// while a shot is running, since pulse timing can be sub-second
+// (PREINFUSION_PULSE_MS_MIN). No-ops once in the final EXTRACTION stage (the
+// common case for most of a shot's duration) or if no shot is running.
+static void tickShotStages(unsigned long now) {
+  if (!shotInProgress) return;
+  if (currentStageIndex >= activeStageCount) return;
+  ShotStage &stage = activeShotStages[currentStageIndex];
+  if (stage.type == ShotStage::Type::EXTRACTION) return; // open-ended, nothing to advance to
+
+  if (now - stageStartMillis < stage.durationMs) return;
+
+  currentStageIndex++; // EXTRACTION is always the last stage, so this always stays in-bounds
+  ShotStage &next = activeShotStages[currentStageIndex];
+  setPumpRelay(next.type != ShotStage::Type::PUMP_OFF);
+  currentShotPhase = phaseForStageType(next.type);
+  stageStartMillis = now;
 }
 
 void startShot() {
@@ -525,14 +575,12 @@ void startShot() {
   // gentle profile's small accumulated integral is harmless to inherit.
   refreshActiveProfileIfChanged();
 
-  if (activePreinfusionEnabled && activePreinfusionPulses > 0) {
-    currentShotPhase = ShotPhase::PREINFUSION_ON;
-    preinfusionPulsesRemaining = activePreinfusionPulses;
-    phaseStartMillis = shotStartMillis;
-  } else {
-    currentShotPhase = ShotPhase::EXTRACTION;
-  }
-  setPumpRelay(true);
+  buildShotStages();
+  currentStageIndex = 0;
+  stageStartMillis = shotStartMillis;
+  ShotStage::Type firstType = activeShotStages[0].type;
+  currentShotPhase = phaseForStageType(firstType);
+  setPumpRelay(firstType != ShotStage::Type::PUMP_OFF); // first stage is never PUMP_OFF
 }
 
 void stopShot() {
@@ -540,6 +588,8 @@ void stopShot() {
   shotInProgress = false;
   setPumpRelay(false);
   currentShotPhase = ShotPhase::NONE;
+  activeStageCount = 0;
+  currentStageIndex = 0;
   unsigned long durationMs = millis() - shotStartMillis;
   // 0 = unknown, same convention as weight - covers both a genuine fault
   // (-999) and the plain "no reading yet" default (0) at the moment of stop.
@@ -621,18 +671,19 @@ void resetSchedFired(int i) {
   if (i >= 0 && i < SCHED_MAX_COUNT) schedFiredDayIndex[i] = -1;
 }
 
+static void controlLoopTask(void *pv); // defined below setup(), used by it
+
 void setup() {
   Serial.begin(115200);
   delay(1000);
   Serial.println("Gaggia PID Controller Starting...");
 
-  // Hardware watchdog - disabled again 2026-08-23 (see config.h). A live
-  // serial capture proved loopTask panics ~10-25s into boot even with the
-  // ESP_ERR_INVALID_STATE/reconfigure() fallback in place, meaning
-  // esp_task_wdt_reset() in loop() isn't actually preventing the trip -
-  // root cause not yet found. Reverted to keep the (mains-connected)
-  // machine stable while that's investigated via code reading, not more
-  // live flashes.
+  stateMutex = xSemaphoreCreateRecursiveMutex();
+
+  // Exclude the Arduino loop task (MQTT networking only, from here on) from
+  // the TWDT entirely - see config.h "Hardware watchdog" for why this is the
+  // fix for the two prior reverted attempts, not just relocating the pet.
+  disableLoopWDT();
 
   // Initialize/Configure Pins
   pinMode(PIN_SSR, OUTPUT);
@@ -711,13 +762,34 @@ void setup() {
 
   // Initialize MQTT
   setupMQTT();
+
+  // Hardware watchdog, scoped to controlLoopTask only (see config.h). The
+  // Arduino core auto-initializes its own TWDT before setup() runs, so
+  // esp_task_wdt_init() here fails with ESP_ERR_INVALID_STATE - fall back to
+  // reconfiguring the existing one rather than treating that as an error.
+  esp_task_wdt_config_t wdtConfig = {
+      .timeout_ms = CONTROL_TASK_WDT_TIMEOUT_S * 1000,
+      .idle_core_mask = 0, // only the control task is watched, not idle tasks
+      .trigger_panic = true,
+  };
+  esp_err_t wdtErr = esp_task_wdt_init(&wdtConfig);
+  if (wdtErr == ESP_ERR_INVALID_STATE) {
+    esp_task_wdt_reconfigure(&wdtConfig);
+  }
+
+  // Pinned to core 1, away from the WiFi/AsyncTCP stack's usual core 0 work,
+  // same core-separation principle GaggiMate uses for its brew-logic task.
+  xTaskCreatePinnedToCore(controlLoopTask, "control", CONTROL_TASK_STACK_SIZE,
+                           nullptr, configMAX_PRIORITIES - 2, nullptr, 1);
 }
 
-void loop() {
-  unsigned long now = millis();
-
-  // MQTT Handling
-  handleMQTT();
+// Runs on its own FreeRTOS task (controlLoopTask() below), not inline in
+// loop() - see config.h "Hardware watchdog" for why. Holds stateMutex for
+// its entire body so web.cpp's /update handler and mqtt.cpp's callback()
+// (each running on a different task) can never observe or cause a
+// half-updated mix of mode/setpoint/gains/shot-phase state.
+static void controlTick(unsigned long now) {
+  lockState();
 
   // Read Temperature
   if (now - lastTempReadTime >= TEMP_READ_INTERVAL) {
@@ -816,10 +888,10 @@ void loop() {
     stopShot();
   }
 
-  // Pre-infusion phase state machine - unthrottled (pulse timing can be
-  // sub-second), but a cheap no-op once past PREINFUSION_* or with no shot
-  // running (see tickShotPhase()).
-  tickShotPhase(now);
+  // Shot stage state machine - unthrottled (pulse timing can be sub-second),
+  // but a cheap no-op once in EXTRACTION or with no shot running (see
+  // tickShotStages()).
+  tickShotStages(now);
 
   // Scheduled warm-up (see config.h) - minute-granularity, so checking once a
   // second is more than enough and avoids a redundant time()/gmtime_r() call
@@ -929,6 +1001,29 @@ void loop() {
       digitalWrite(PIN_SSR, LOW);
   }
 
-  // Handle Web Server Requests
-  handleWebLoop();
+  unlockState();
+}
+
+// Dedicated task so temp read/PID/safety-cutoff/shot-phase timing can never
+// be starved by WiFi/web/MQTT work on other tasks - see config.h "Hardware
+// watchdog". Registers itself (only itself) with the TWDT and pets it once
+// per tick; vTaskDelayUntil keeps the period jitter-free regardless of how
+// long the tick body itself took.
+static void controlLoopTask(void *pv) {
+  esp_task_wdt_add(nullptr);
+  TickType_t lastWake = xTaskGetTickCount();
+  for (;;) {
+    controlTick(millis());
+    esp_task_wdt_reset();
+    vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(CONTROL_TASK_PERIOD_MS));
+  }
+}
+
+// Everything safety/timing-relevant now runs on controlLoopTask - this task
+// only ever does MQTT networking, which can block for seconds on a slow
+// broker/DNS without risking the watchdog (disableLoopWDT() in setup()
+// excludes this task from the TWDT entirely).
+void loop() {
+  handleMQTT();
+  delay(10);
 }

@@ -12,26 +12,57 @@
 #define FIRMWARE_BUILD_TIMESTAMP (__DATE__ " " __TIME__)
 
 // ============================================================================
-// Hardware watchdog - REMOVED again (2026-08-23), see AGENTS.md change log
+// Hardware watchdog - re-added 2026-08-23 (3rd attempt), via a DEDICATED
+// FreeRTOS task instead of feeding from loop()
 // ----------------------------------------------------------------------------
 // First added 2026-08-18, pulled hours later after repeated hangs during OTA
-// (theorized cause: WebServer's handleClient() blocks through the entire
-// multipart upload without returning to loop(), so a watchdog only petted
-// from loop() starves mid-transfer). Tried again 2026-08-23 with the pet
-// moved into the OTA upload handler itself, plus a fix for
-// esp_task_wdt_init() silently failing with ESP_ERR_INVALID_STATE (Arduino
-// already auto-initializes its own TWDT before setup() runs) by falling
-// back to esp_task_wdt_reconfigure(). Verified via USB serial capture
-// (not a live OTA guess) before trusting it further - and it STILL
-// panic-rebooted loopTask, at ~10s then ~25s across two boots, with no
-// OTA involved at all (plain WiFi connect + idle /status polling). Since
-// the reconfigure fix measurably shifted the trip time later (10s -> 25s),
-// the config is being applied, but esp_task_wdt_reset() in loop() is
-// apparently not preventing the trip - true root cause still unknown.
-// Reverted again to keep a mains-connected machine stable. If revisited:
-// add a Serial heartbeat inside loop() itself (not just at the top) to
-// prove the reset() call is actually being reached every iteration before
-// trusting the watchdog at all.
+// (WebServer's handleClient() blocks through the entire multipart upload
+// without returning to loop(), so a watchdog pet only reachable from loop()
+// starves mid-transfer). Tried again 2026-08-23 with the pet moved into the
+// OTA upload handler itself - and it STILL panic-rebooted loopTask, at ~10s
+// then ~25s across two boots, with NO OTA involved at all (plain WiFi
+// connect + idle /status polling). That proved the root cause wasn't OTA
+// specifically - it was sharing ANY task between safety-critical timing and
+// anything network-related (WebServer, WiFiManager, MQTT reconnects can all
+// block for seconds).
+//
+// Comparing against GaggiMate's architecture (AGENTS.md research,
+// 2026-08-23) confirmed the fix: GaggiMate hit this exact failure mode
+// (their own code comment describes a synchronous web-server task starving
+// core 0 and tripping their watchdog) and solved it by moving brew-critical
+// logic onto its OWN pinned FreeRTOS task, decoupled entirely from web/WiFi
+// traffic - not by relocating where the watchdog is petted.
+//
+// This build does the same: main.cpp's controlLoopTask() runs the temp
+// read/PID/safety-cutoff/shot-phase logic on its own task (pinned to core 1,
+// CONTROL_TASK_PERIOD_MS cadence via vTaskDelayUntil for jitter-free timing),
+// and is the ONLY task registered with the TWDT (esp_task_wdt_add(nullptr)
+// inside the task itself). setup() calls disableLoopWDT() so the Arduino
+// loop task - which now only runs MQTT networking - can never trip the
+// watchdog no matter how long a broker reconnect or DNS lookup takes.
+// Switching to ESPAsyncWebServer (replacing the synchronous WebServer) means
+// OTA/HTTP handling never blocks any task the watchdog is watching either.
+// If the control task itself ever hangs (a genuine bug, not a slow network
+// op), it now has nowhere to hide.
+// ============================================================================
+#define CONTROL_TASK_PERIOD_MS 50
+#define CONTROL_TASK_WDT_TIMEOUT_S 3
+#define CONTROL_TASK_STACK_SIZE 4096
+
+// ============================================================================
+// Shared-state lock
+// ----------------------------------------------------------------------------
+// Splitting control logic onto its own task (above) means web.cpp's /update
+// handler (runs on the AsyncTCP task) and mqtt.cpp's callback() (runs on the
+// default Arduino loop task) now mutate PID/mode/shot globals CONCURRENTLY
+// with controlTick() reading/writing them, instead of everything serializing
+// through one task as before. main.cpp exposes lockState()/unlockState()
+// (a recursive mutex - recursive because setOpMode() calls
+// applyActiveProfile() internally, and callers hold the lock across both) so
+// a settings save or MQTT command can never interleave with a half-finished
+// control tick. controlTick(), the /update handler, and mqtt.cpp's
+// callback() each hold it for their full body; /status and MQTT's
+// publishStatus() take it only briefly to snapshot the fields they read.
 // ============================================================================
 
 // ============================================================================

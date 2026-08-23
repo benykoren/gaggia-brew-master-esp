@@ -42,6 +42,12 @@ extern void refreshActiveProfileIfChanged();
 extern void noteActivity();
 extern void stopAutotune();
 
+// See config.h "Shared-state lock" - callback() runs on the default Arduino
+// loop task, a different task than controlTick(), so it needs the same lock
+// controlTick() and web.cpp's /update handler hold for their own bodies.
+extern void lockState();
+extern void unlockState();
+
 WiFiClient espClient;
 PubSubClient client(espClient);
 
@@ -70,11 +76,17 @@ void callback(char *topic, byte *payload, unsigned int length) {
   noteActivity(); // an MQTT command is an explicit user/automation action,
                    // same as any Web UI /update - keeps eco-sleep in sync.
 
+  // See config.h "Shared-state lock" - held for the whole handler (matching
+  // web.cpp's /update) so a mode/tuning change from MQTT can never
+  // interleave with a half-finished control tick.
+  lockState();
+
   if (t == "gaggia/set/mode") {
     stopAutotune(); // mirror web.cpp: a mode change always interrupts autotune
     if (message == "off") setOpMode(OpMode::OFF);
     else if (message == "brew") setOpMode(OpMode::BREW);
     else if (message == "steam") setOpMode(OpMode::STEAM);
+    unlockState();
     return;
   }
 
@@ -93,6 +105,8 @@ void callback(char *topic, byte *payload, unsigned int length) {
     // same behavior as web.cpp's /update handler for tuning-field edits.
     refreshActiveProfileIfChanged();
   }
+
+  unlockState();
 }
 
 static String haDevice() {
@@ -234,28 +248,44 @@ void setupMQTT() {
 void publishStatus() {
   if (mqtt_server == "" || !client.connected()) return;
 
-  bool descaleDue = (shotCount >= descaleShotThreshold);
-  if (!descaleDue && lastDescaleTime > 0) {
-    long daysSince = (long)((time(nullptr) - lastDescaleTime) / 86400L);
-    if (daysSince >= 0 && (unsigned long)daysSince >= descaleDayThreshold) descaleDue = true;
+  // Snapshot under the lock first (see config.h "Shared-state lock"), then
+  // build/publish the JSON unlocked - same pattern as web.cpp's /status.
+  lockState();
+  float snapTemp = currentTemperature;
+  double snapOutput = Output;
+  OpMode snapMode = currentMode;
+  double snapBrewTarget = brewSetpoint, snapBrewKp = brewKp, snapBrewKi = brewKi, snapBrewKd = brewKd;
+  double snapSteamTarget = steamSetpoint, snapSteamKp = steamKp, snapSteamKi = steamKi, snapSteamKd = steamKd;
+  bool snapShotInProgress = shotInProgress;
+  bool snapFault = sensorFault;
+  unsigned long snapShotCount = shotCount;
+  time_t snapLastDescaleTime = lastDescaleTime;
+  unsigned long snapDescaleShotThreshold = descaleShotThreshold;
+  unsigned long snapDescaleDayThreshold = descaleDayThreshold;
+  unlockState();
+
+  bool descaleDue = (snapShotCount >= snapDescaleShotThreshold);
+  if (!descaleDue && snapLastDescaleTime > 0) {
+    long daysSince = (long)((time(nullptr) - snapLastDescaleTime) / 86400L);
+    if (daysSince >= 0 && (unsigned long)daysSince >= snapDescaleDayThreshold) descaleDue = true;
   }
 
   String json = "{";
-  json += "\"temp\":" + String(currentTemperature);
-  json += ",\"output\":" + String(Output / 10.0); // 0-1000 window -> 0-100%
+  json += "\"temp\":" + String(snapTemp);
+  json += ",\"output\":" + String(snapOutput / 10.0); // 0-1000 window -> 0-100%
   json += ",\"opmode\":\"";
-  json += (currentMode == OpMode::BREW) ? "brew" : (currentMode == OpMode::STEAM) ? "steam" : "off";
+  json += (snapMode == OpMode::BREW) ? "brew" : (snapMode == OpMode::STEAM) ? "steam" : "off";
   json += "\"";
-  json += ",\"brew_target\":" + String(brewSetpoint);
-  json += ",\"brew_kp\":" + String(brewKp, 4);
-  json += ",\"brew_ki\":" + String(brewKi, 4);
-  json += ",\"brew_kd\":" + String(brewKd, 4);
-  json += ",\"steam_target\":" + String(steamSetpoint);
-  json += ",\"steam_kp\":" + String(steamKp, 4);
-  json += ",\"steam_ki\":" + String(steamKi, 4);
-  json += ",\"steam_kd\":" + String(steamKd, 4);
-  json += ",\"shot_in_progress\":" + String(shotInProgress ? "true" : "false");
-  json += ",\"fault\":" + String(sensorFault ? "true" : "false");
+  json += ",\"brew_target\":" + String(snapBrewTarget);
+  json += ",\"brew_kp\":" + String(snapBrewKp, 4);
+  json += ",\"brew_ki\":" + String(snapBrewKi, 4);
+  json += ",\"brew_kd\":" + String(snapBrewKd, 4);
+  json += ",\"steam_target\":" + String(snapSteamTarget);
+  json += ",\"steam_kp\":" + String(snapSteamKp, 4);
+  json += ",\"steam_ki\":" + String(snapSteamKi, 4);
+  json += ",\"steam_kd\":" + String(snapSteamKd, 4);
+  json += ",\"shot_in_progress\":" + String(snapShotInProgress ? "true" : "false");
+  json += ",\"fault\":" + String(snapFault ? "true" : "false");
   json += ",\"descale_due\":" + String(descaleDue ? "true" : "false");
   json += "}";
 
