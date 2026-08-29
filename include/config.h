@@ -237,11 +237,23 @@ enum class OpMode { OFF, BREW, STEAM };
 // Eco / auto-sleep
 // ----------------------------------------------------------------------------
 // If no explicit user action (any /update call - mode change, tuning edit,
-// wake, etc.) happens for this many minutes while BREW/STEAM is active, the
+// wake, etc.) happens for this many minutes while BREW is active, the
 // heater is force-switched to OFF to save power. 0 = disabled. Configurable
-// live from the Web UI, persisted in NVS.
+// live from the Web UI, persisted in NVS. STEAM uses its own, separate,
+// much shorter timeout below - steaming is normally a brief task, and the
+// steam boiler runs much hotter than brew, so leaving it idling for the
+// same 30 minutes as Brew isn't the right default.
 // ============================================================================
 #define ECO_TIMEOUT_MIN_DEFAULT 30
+
+// Steam-specific auto-off (2026-08-24) - same mechanism as the eco-sleep
+// timer above (checkEcoSleep() in main.cpp), just a separate, independent
+// timeout applied only while STEAM is the active mode. Switching into Steam
+// itself counts as activity (any /update call does), so in practice this
+// fires ~this-many-minutes after the last time the Web UI was touched while
+// steaming - which is normally shortly after steaming actually finished.
+// 0 = disabled, configurable live from the Web UI, persisted in NVS.
+#define STEAM_AUTO_OFF_MIN_DEFAULT 2
 
 // ============================================================================
 // PID Autotune (relay feedback / Astrom-Hagglund method)
