@@ -32,11 +32,11 @@ built**.
 
 | Item | Adds | Depends on | Needed for your current goal? | Est. cost |
 |---|---|---|---|---|
-| **4** | Pump on/off relay (25s / weight auto-stop) | — | **Yes — this is the core item** | $9-13 |
+| ~~4~~ | ~~Pump on/off relay~~ | — | **REMOVED 2026-08-29 — folded into item 8**, see item 4 section below | — |
 | **5** | BLE smart scale (36g auto-stop) | — | Yes | scale cost |
 | 6 | Water tank level sensor | — | No | $2-5 |
-| 7 | Live pressure reading | — | Only if pursuing item 8 later | $15-30 |
-| 8 | Phase-control pressure profiling | Item 7 | No | $12-20+ |
+| **7** | Live pressure reading | — | **Yes — hard prerequisite for item 8** | $15-30 |
+| **8** | Phase-control pressure profiling **+ pump on/off (folded item 4)** | Item 7 | **Yes** | $12-20+ |
 | 9 | Nextion touchscreen HMI | — | No | $15-40 |
 | 10 | Milk temperature probe | — | No | $2-3 |
 
@@ -47,13 +47,17 @@ conversation/commit history refers to these by their original labels — item
 4 was "9a," item 5 was "8," item 6 was "5," item 7 was "6," item 8 was "9b,"
 item 9 was "Display," item 10 was "4." A prior item ("7," sense-only shot
 detection via a current-transformer clamp) was **removed entirely** —
-explicitly rejected in favor of real control instead of passive sensing;
-see item 4's firmware notes for where that consideration now lives.
+explicitly rejected in favor of real control instead of passive sensing.
+**Item 4 was also removed (2026-08-29)** — folded into item 8 rather than
+built as a separate standalone relay; see the item 4 section below for the
+reasoning and the fail-off tradeoff this accepts.
 
 Current stated goal — stop the pump at **25 seconds**, or later at **36
-grams** once a BLE scale is in hand — needs only **items 4 and 5**. Items
-6, 7, 8, 9, and 10 are independent, optional, and can be picked up in any
-order later.
+grams** once a BLE scale is in hand — now goes through **items 7 and 8**
+(item 4's plain relay was dropped in favor of building item 8's TRIAC
+dimmer directly; see item 4/8 below). Item 5 (BLE scale) is still needed
+for the weight-based stop. Items 6, 9, and 10 remain independent, optional,
+and can be picked up in any order later.
 
 ---
 
@@ -77,7 +81,39 @@ workaround, but more than one item below independently wants the same tools.
 
 ## Item 4 — Pump on/off control ("control the button")
 
-**Status (revised 2026-08-16): software half built and real-shot-tested;
+**REMOVED (2026-08-29) — folded into Item 8 below, not built standalone.**
+User decided against buying/wiring a separate plain relay once it became
+clear Item 8's TRIAC dimmer subsumes plain on/off (fire at ~100% duty =
+full pass-through, 0% = full stop). The splice-point wiring and
+wire-identification procedure below still apply unchanged to Item 8's
+dimmer (same splice location, same wire to identify)
+— **Item 8 reuses this section's wiring/procedure detail rather than
+duplicating it**, substituting the dimmer module for the relay and
+skipping the NC-contact-specific parts (moot for a TRIAC). The auto-stop
+firmware plan below also carries over to Item 8 unchanged in spirit —
+same trigger logic, different physical actuator.
+
+**Explicit tradeoff accepted with this decision — do not silently
+reintroduce a plain relay to "fix" this without checking the user still
+accepts it:** the relay this item would have used was deliberately wired
+NC (Normally Closed) so the pump kept working with **zero ESP32
+involvement** if the ESP32 crashed, was unpowered, or hadn't booted yet —
+the dangerous failure mode there was judged to be the pump becoming unable
+to start on its own. A TRIAC dimmer (Item 8) has no equivalent passive
+pass-through state — it only conducts while firmware actively fires the
+gate every half-cycle. So building Item 8 without Item 4 means **the pump
+will not run at all if the ESP32 isn't running firmware** (crash,
+mid-boot, brownout, etc.), even with the Brew switch pressed — a fail-off
+dependency this project didn't previously have on the pump side. Judged
+acceptable: a stalled shot is an inconvenience, not a mains-safety hazard
+(unlike the heater).
+
+<!-- Historical content below this line is superseded by Item 8; kept only
+     for git-blame continuity of the original relay design, not as an
+     active plan. -->
+
+**Status (as originally planned, no longer being built): software half
+built and real-shot-tested;
 hardware half (the relay itself) not yet bought or wired.** **Depends on:**
 nothing. This is the core item for the current goal (stop at 25s or 36g).
 (Originally "item 9a.")
@@ -259,13 +295,14 @@ the switch itself.
 
 ## Item 5 — Bluetooth smart scale + brew-by-weight auto-stop
 
-**Status:** not started. **Depends on:** nothing (pairs with item 4 for
-auto-stop-by-weight). (Originally "item 8.")
+**Status:** not started. **Depends on:** nothing (pairs with item 8 for
+auto-stop-by-weight, now that former item 4 folded into it). (Originally
+"item 8.")
 
 **What it's for:** brew-by-weight is more repeatable than brew-by-time
 (weight is the actual outcome; time is a proxy confounded by grind/dose/
 tamp). Reading the weight isn't the same as *acting* on it — auto-stop at a
-target weight also needs item 4's pump control.
+target weight also needs item 8's pump control.
 
 **Buy:** the scale itself — **Bookoo Themis or Felicita Arc**, confirmed as
 the DIY-friendliest choice (open BLE protocols, both on GaggiMate's own
@@ -283,7 +320,7 @@ service. No GPIO/wiring at all.
 **Status:** not started. **Depends on:** nothing. (Originally "item 5.")
 
 **What it's for:** low-water warning now; becomes a real pump interlock
-once item 4 (pump on/off control) exists.
+once item 8 (pump on/off + phase control, folded former item 4) exists.
 
 **Buy:**
 
@@ -348,66 +385,82 @@ time for it separately from the electrical work.
 
 ## Item 8 — Phase-control dimmer to a pressure target (e.g. 9 bar)
 
-**Status:** deferred. **Depends on:** item 7 (pressure transducer) — hard
-prerequisite, see below. (Originally "item 9b.")
+**Status:** next active build (2026-08-29), alongside item 7. **Depends
+on:** item 7 (pressure transducer) — hard prerequisite for the
+closed-loop pressure-target half only, see below. (Originally "item 9b.")
+**Also now covers item 4's former role** (plain pump on/off) — item 4 was
+dropped as a separate build on 2026-08-29 once it was clear this item's
+dimmer subsumes on/off; see item 4 above for the fail-off tradeoff this
+accepts.
 
-**Split from an original combined "pump dimmer" item (2026-08-16)** as the
-harder half. This is a real closed-loop control problem, not just a bigger
-relay — regulating to "9 bar" requires a pressure reading to control
-against, so **item 7 is a hard prerequisite here**.
+**Two things, one build:**
+1. **Plain pump on/off** (former item 4's whole scope) — time-based
+   auto-stop (25s, no other hardware needed) or weight-based auto-stop
+   (once item 5's BLE scale exists), driving the dimmer at ~100% duty
+   (full pass-through) or 0% (full stop). No phase-angle timing needed for
+   this half, and no item 7 dependency either.
+2. **Programmable pressure/flow profiles** (this item's original point) —
+   a gentle low-pressure pre-infusion soak before ramping to a target
+   (e.g. 9 bar), and/or a declining-pressure curve near the end of a shot,
+   matching both Gaggiuino's and GaggiMate's profiling architecture
+   (`AGENTS.md` §7). **This half hard-requires item 7** — regulating to a
+   bar target needs a pressure reading to control against — and adds a
+   PID-style control loop (reuse `br3ttb/PID`) with measured pressure as
+   input and phase-angle/power as output, the same "measure → PID → drive
+   output" shape already built for temperature.
 
-### What this gets you beyond item 4
-
-Programmable pressure/flow profiles — a gentle low-pressure pre-infusion
-soak before ramping to a target (e.g. 9 bar), and/or a declining-pressure
-curve near the end of a shot — matching both Gaggiuino's and GaggiMate's
-profiling architecture (`AGENTS.md` §7). This replaces item 4's relay with
-a TRIAC dimmer capable of partial power, and adds a PID-style control loop
-using the pressure transducer as feedback (the same "measure → PID → drive
-output" shape already built for temperature).
+**Bring-up order:** build and verify (1) first — it's the same splice-point
+wiring and procedure documented under item 4 above, substituting the
+dimmer module for the relay — then layer (2) on top once item 7 is wired
+and reading correctly.
 
 ### Buy
 
 | Part | Spec | Why | Cost |
 |---|---|---|---|
-| AC dimmer module | Zero-cross detection + TRIAC, opto-isolated, **3.3V-logic compatible** (e.g. RobotDyn AC Light Dimmer Module or equivalent) | Same mains position as item 4's relay, but capable of partial power via phase-angle firing | $10-15 |
-| *(Everything else — fuse, wire, connectors)* | Same as item 4 | Reused, not duplicated | — |
+| AC dimmer module | Zero-cross detection + TRIAC, opto-isolated, **3.3V-logic compatible** (e.g. RobotDyn AC Light Dimmer Module or equivalent) | Same mains position former item 4's relay would have used, but capable of partial power via phase-angle firing | $10-15 |
+| *(Everything else — fuse, wire, connectors)* | Same as item 4's original buy list above | No separate relay to also buy — this one module covers both roles | — |
 
-If item 4 is already built, this is a **swap**: same splice point at the
-pump's terminals, relay out, dimmer module in. The wiring decision and
-splice-at-the-pump reasoning from item 4 apply unchanged — only the
-NC-contact detail is moot here, since the dimmer module replaces the relay
-entirely.
+**Wiring:** same splice point and wire-identification procedure as item 4
+above (splice at the pump's own two terminals, not the switch's terminal
+block; use the non-contact AC voltage tester to confirm which terminal is
+switched-Line before wiring anything) — relay out, dimmer module in. The
+NC-contact detail from item 4 is moot here (see the tradeoff note above).
 
 **GPIO:** two free digital pins instead of item 4's one — zero-cross output
 (interrupt input) and TRIAC gate control (output), replacing the single
-`PIN_PUMP` output.
+`PIN_PUMP` output former item 4 would have used.
 
 ### Firmware considerations
 
-- **Requires item 7 (pressure transducer) already wired and reading
-  correctly** — this is the feedback signal the control loop closes on.
-  Without it, "control to 9 bar" has nothing to measure against.
+- **On/off half (bring-up milestone, no item 7 needed):** reuse the
+  already-built `shotInProgress`/`shotAutoStopSec` (time) and future
+  BLE-scale-weight (item 5) logic, just retargeted to drive the dimmer at
+  ~100% or 0% duty instead of a relay pin.
+- **Pressure-target half requires item 7 (pressure transducer) already
+  wired and reading correctly** — this is the feedback signal the control
+  loop closes on. Without it, "control to 9 bar" has nothing to measure
+  against.
 - **Phase-angle firing timing must not use `delayMicroseconds()` in a
   simple interrupt handler** — WiFi/BT radio activity can jitter the timing
   enough to visibly flicker/mistime phase-control dimming. Use a hardware
   timer to schedule the gate-fire pulse from the zero-cross interrupt
   instead.
-- A pressure-target control loop is conceptually the same shape as the
-  existing temperature PID (`br3ttb/PID`, already a project dependency) —
-  measured pressure as input, phase-angle/power as output, target bar as
-  setpoint. Likely reuses the same library rather than needing a new one.
 - **Do not buy a separate flow sensor** — per the competitive research in
   `AGENTS.md` §7, both Gaggiuino and GaggiMate estimate flow from pressure +
   pump behavior rather than metering it directly.
 
 ### Procedure
 
-Same bench-first sequence as item 4 (steps 1-8), substituting the dimmer
-module for the relay. After first live power-up confirms plain full-power
-pass-through works exactly like item 4, only then start closed-loop tuning
-against the pressure transducer — expect this to take real iteration, the
-same way brew-temperature PID tuning did (`AGENTS.md` §10 change log).
+Same bench-first sequence as item 4's procedure above (steps 1-8),
+substituting the dimmer module for the relay. **First live power-up:**
+confirm firing at a fixed ~100% duty reproduces plain pass-through, exactly
+like an unmodified machine. **Second milestone:** verify time/weight
+auto-stop works by dropping to 0% duty mid-shot (this alone delivers
+everything item 4 would have). **Only after both of those**, start
+closed-loop pressure-target tuning against the transducer (item 7) —
+expect this to take real iteration, the same way brew-temperature PID
+tuning did (`AGENTS.md` §10 change log).
 
 ---
 

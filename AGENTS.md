@@ -552,8 +552,8 @@ change/confirm the plan:
    2026-08-16**: a configurable auto-stop (`shotAutoStopSec`, Web UI:
    Settings -> Shot Timer, 0 = disabled) ends the timer/log/gain-profile
    automatically at a set duration - no more manual "Stop Shot" tap needed.
-   Starting is still a manual "Start Shot" tap; see item 4 below for why
-   that isn't automatic yet.
+   Starting is still a manual "Start Shot" tap; see item 8 below (which
+   folded in former item 4's role) for why that isn't automatic yet.
 2. **Shot history log** - duration + peak temp per shot now; extends
    naturally once pressure/weight data exist later. Both competitors treat
    this as core.
@@ -567,57 +567,42 @@ below are in [`HARDWARE_ROADMAP.md`](HARDWARE_ROADMAP.md) - this section is
 the *why* and the high-level shape; that file is the *what/how*. A prior
 item ("7," a sense-only current-transformer clamp for automatic shot
 detection) was **removed entirely (2026-08-16)** - user explicitly rejected
-passive sensing in favor of real control; see item 4 below for where that
-consideration now lives. Numbering continues from the shipped items 1-3
+passive sensing in favor of real control; see former item 4 below for where
+that consideration moved. Numbering continues from the shipped items 1-3
 above rather than restarting, and keeps the gap left by item 7's removal
-rather than renumbering everything again.
+(and, since 2026-08-29, item 4's - see below) rather than renumbering
+everything again.
 
-4. **Pump on/off control ("control the button").** **Status (revised
-   2026-08-16): the software half is built and tested; the hardware half
-   (the physical relay) is not.** Firmware already has - and real-shot-
-   tested -  a `shotInProgress`-driven Brew gain-scheduling profile
-   (`brewActiveKp/Ki/Kd`, aggressive, live-tunable) plus a shot-start
-   feedforward boost (see the "brew-active gains" entry in config.h),
-   confirmed on real hardware to cut brew-time sag from ~11-13C down to
-   ~6C - at which point output was pinned at the heater's physical wattage
-   ceiling, so further gain tuning stopped helping (a genuinely conclusive
-   result, not a dead end). A configurable shot auto-stop timer
-   (`shotAutoStopSec`, Web UI: Settings -> Shot Timer) also now ends the
-   *firmware's* shot bookkeeping (timer/history/gain-profile revert)
-   automatically - **but still does not cut the pump itself**, since that
-   relay doesn't exist yet. Today, "auto-stop" only means the Web UI's
-   Start Shot must still be tapped manually to begin one.
-   **Decided design once the relay is built:** the physical Brew switch
-   keeps starting the pump exactly as today; the ESP32 sits between the
-   switch and the pump (spliced at the pump's own terminals, not the
-   switch's terminal block, to avoid reopening the unverified panel-wiring
-   problem from Section 7) so firmware can cut it early. **Hardware: a
-   plain electromechanical relay module, not an SSR** - the pump switches
-   once per shot, so relay contact-life/cycle-count is a non-issue, and
-   SSR's silent/no-wear advantages don't matter here the way they do for
-   the constantly-cycling heater; a relay is also cheaper and more
-   available. No zero-cross detection, no phase-angle timing either way,
-   firmware-trivial (`digitalWrite`, like `PIN_SSR`). **Uses the relay's NC
-   (Normally Closed) contact, not NO** - de-energized/pass-through is the
-   default, so the switch controls the pump with zero ESP32 involvement
-   unless firmware actively energizes the relay to interrupt it; this is
-   the mirror image of the heater's "always boot off" rule, and
-   deliberately so - the dangerous failure mode for the pump is being
-   unable to start without the ESP32's cooperation, not the reverse.
-   **Optional refinement discussed 2026-08-16, not yet decided:** an
-   AC-presence/zero-cross detection module at the *same* splice point could
-   let the ESP32 detect the switch being flipped automatically, removing
-   the manual Start Shot tap entirely (and making the auto-stop timer above
-   finally control the real pump, not just firmware bookkeeping) - a
-   different technique from the current-transformer clamp already rejected
-   as item "7" (this senses voltage presence at the relay's own wiring,
-   not current elsewhere on the pump's wire), so it isn't reopening that
-   same decision, just a related one not yet made.
-   Full reasoning in `HARDWARE_ROADMAP.md` item 4. **Why:** this is the
-   **core item, judged the current top priority** - turns auto-stop by a
-   configured **time** (no other hardware) or **weight** (with item 5) into
-   real closed-loop features, without needing item 8's much harder
-   profiling work first.
+4. **REMOVED (2026-08-29) — pump on/off control folded into item 8, not
+   built standalone.** Was planned as a standalone plain electromechanical
+   relay (NC contact, spliced at the pump's own terminals, see the historical
+   detail preserved in `HARDWARE_ROADMAP.md` item 4) purely for on/off
+   time/weight auto-stop, no phase control. **User decided to skip building
+   this separately** - item 8's TRIAC dimmer is going in directly instead,
+   and driving it at ~100% duty (full conduction) or not firing it at all
+   (0%) reproduces exactly the on/off behavior this item would have given,
+   so there's no reason to also buy and wire a standalone relay first. The
+   splice-point wiring, wire-identification procedure, and
+   `shotInProgress`-driven auto-stop firmware described here now live under
+   item 8 in both docs.
+   **Explicit tradeoff accepted with this decision - future agents, do not
+   silently "fix" this without checking the user still accepts it:** the
+   relay this item would have used was deliberately wired NC so the pump
+   keeps working with **zero ESP32 involvement** if the ESP32 crashes, is
+   unpowered, or hasn't booted yet - mirroring the heater's fail-*off* rule
+   in spirit, but inverted, because here the dangerous failure mode was
+   judged to be the pump becoming *unable to start* without the ESP32's
+   cooperation. A TRIAC dimmer has no equivalent passive pass-through state
+   - it only conducts while firmware is actively firing the gate every
+   half-cycle. So with item 8 alone, **the pump will not run at all if the
+   ESP32 isn't running firmware** (crash, mid-boot, brownout, etc.), even
+   with the Brew switch pressed - a fail-*off* dependency this project
+   didn't previously have on the pump side. Judged acceptable: a stalled
+   shot is an inconvenience, not a mains-safety hazard (unlike the heater).
+   The already-built firmware (`brewActiveKp/Ki/Kd` gain-scheduling profile,
+   shot-start feedforward boost, `shotAutoStopSec` auto-stop bookkeeping) is
+   unaffected - it just now drives item 8's dimmer instead of a dedicated
+   relay.
 
 5. **Bluetooth smart scale + brew-by-weight auto-stop.**
    **Hardware:** buy the scale itself - **Bookoo Themis or Felicita Arc**
@@ -628,10 +613,10 @@ rather than renumbering everything again.
    built into the S3.
    **Why:** brew-by-weight is confirmed more repeatable than brew-by-time
    (weight is the actual outcome; time is a proxy confounded by grind/dose/
-   tamp). Pairs directly with item 4 - **second priority**, needed for this
-   project's weight-based auto-stop goal. Reading a weight is not the same
-   as *acting* on it - actually cutting the pump at a target weight still
-   needs item 4's active pump control.
+   tamp). Pairs directly with item 8 (which folded in former item 4's role,
+   see above) - needed for this project's weight-based auto-stop goal.
+   Reading a weight is not the same as *acting* on it - actually cutting the
+   pump at a target weight still needs item 8's active pump control.
 
 6. **Water tank level sensor.**
    **Hardware:** one magnetic float switch (~$2-5), one free GPIO (digital
@@ -643,7 +628,7 @@ rather than renumbering everything again.
    seated - the wire stays fixed to the chassis, only the contact tips
    separate. Full reasoning in `HARDWARE_ROADMAP.md` item 6.
    **Why:** low-water warning now; becomes a real pump interlock once
-   item 4 (pump on/off control) exists.
+   item 8 (pump on/off + phase control, folded former item 4's role) exists.
 
 7. **Real-time pressure transducer + live pressure graph.**
    **Hardware:** one analog pressure transducer, **0-1.2 to 1.6MPa
@@ -655,24 +640,33 @@ rather than renumbering everything again.
    **Why:** the prerequisite for any real pressure profiling in item 8, and
    useful as a pure monitoring/graph feature even before that exists.
 
-8. **Phase-control dimmer to a pressure target (e.g. 9 bar).**
+8. **Phase-control dimmer to a pressure target (e.g. 9 bar) - now also
+   the project's pump on/off control, folding in former item 4 (2026-08-29,
+   see above for the fail-off tradeoff this accepts).**
    **Hardware:** a zero-cross detection + TRIAC module (e.g. RobotDyn AC
-   dimmer, ~$10-15), swapped in at the same splice point as item 4 - **the
-   same category of seriousness as the original SSR/heater build**,
-   bench-test on low voltage first, verify zero-cross/firing logic
-   thoroughly before ever connecting the pump's real AC line, insulate
-   every mains joint. No dedicated flow sensor needed (see competitive
-   research above - both competitors estimate flow from pressure + pump
-   behavior instead).
-   **Hard prerequisite: item 7 (pressure transducer)** - you cannot
-   regulate to a bar target without a pressure reading to control against.
+   dimmer, ~$10-15), spliced at the pump's own terminals (not the switch's
+   terminal block - same unambiguous-splice-point reasoning documented for
+   former item 4 and the heater's clean-bypass build) - **the same category
+   of seriousness as the original SSR/heater build**, bench-test on low
+   voltage first, verify zero-cross/firing logic thoroughly before ever
+   connecting the pump's real AC line, insulate every mains joint. No
+   dedicated flow sensor needed (see competitive research above - both
+   competitors estimate flow from pressure + pump behavior instead).
+   **Hard prerequisite: item 7 (pressure transducer)** for the closed-loop
+   pressure-target half - you cannot regulate to a bar target without a
+   pressure reading to control against. The on/off half (time/weight
+   auto-stop, driving the dimmer at ~100%/0% duty) does **not** need item 7
+   and is the planned first bring-up milestone, before closed-loop tuning.
    **Why:** enables a phase-based profile system (pump power/pressure/flow
    target + time/volume/pressure stop conditions per phase, matching both
    competitor projects' architecture) - real pre-infusion and
    declining-pressure-at-shot-end, not a flat 9-bar target, per the
-   pressure-profiling research above. **Deferred** - the harder half of
-   what was originally one combined "pump dimmer" item, split from item 4
-   on 2026-08-16.
+   pressure-profiling research above - while also directly delivering the
+   time/weight auto-stop that was originally item 4's whole purpose, with
+   one piece of hardware instead of two. Originally the harder half of one
+   combined "pump dimmer" item, split from item 4 on 2026-08-16, then
+   re-merged in effect (build-wise) on 2026-08-29 when item 4 was dropped as
+   a separate build.
 
    **Migrating to [GaggiMate](https://github.com/jniebuhr/gaggimate) instead
    of building this: ruled out (2026-08-16).** Checked their actual source,
@@ -810,6 +804,44 @@ rather than renumbering everything again.
   can tell which mode timeout actually fired, instead of a generic label
   that would otherwise be wrong now that Brew and Steam have very
   differently-sized timeouts.
+
+### 2026-08-29 — Claude Code (Sonnet 5) — Roadmap: item 4 (pump relay) dropped, folded into item 8; items 7/8 confirmed as next build
+- **User decided to pursue items 7 (pressure transducer) and 8 (phase-control
+  dimmer) without building item 4 (plain pump on/off relay) first.** Checked
+  the actual dependency graph in `HARDWARE_ROADMAP.md`: item 7 depends on
+  nothing, item 8's only hard prerequisite is item 7 - item 4 was never a
+  real blocker for either, it just happened to share item 8's splice point
+  (the pump's own terminals) and its `shotInProgress`-driven auto-stop
+  firmware.
+- **User then asked to drop item 4 entirely** rather than keep it on the
+  roadmap as a separate future build, since item 8's TRIAC dimmer subsumes
+  plain on/off (fire at ~100% duty = full pass-through, 0% = full stop) -
+  no reason to also buy/wire a standalone relay. Removed item 4 from
+  Section 8's numbered roadmap (kept as a **REMOVED** entry with a pointer,
+  matching the precedent already set for the earlier removed current-
+  transformer-clamp item) and migrated its unique content (splice-point
+  wiring rationale, auto-stop firmware plan) into item 8, in both this file
+  and `HARDWARE_ROADMAP.md`. Numbering intentionally NOT restarted - same
+  precedent as before.
+- **Flagged and explicitly logged a real behavioral tradeoff this accepts**:
+  item 4's relay was deliberately NC-wired so the pump keeps working with
+  zero ESP32 involvement if the ESP32 crashes/is unpowered/hasn't booted -
+  the dangerous failure mode there was judged to be the pump becoming
+  unable to start on its own. A TRIAC dimmer has no passive pass-through
+  state; it only conducts while firmware actively fires the gate every
+  half-cycle. So building item 8 without ever having item 4 means **the
+  pump will not run at all if the ESP32 isn't running firmware**, even with
+  the Brew switch pressed - a new fail-*off* dependency on the pump side
+  that didn't exist before. User accepted this (inconvenience, not a
+  mains-safety hazard like the heater) - future agents should not silently
+  "fix" this by reintroducing a plain relay without checking the user still
+  accepts the tradeoff.
+- Updated `HARDWARE_ROADMAP.md`'s summary table and item 4/7/8 sections to
+  match (item 4 marked REMOVED with a pointer to item 8; item 8 now
+  documents the splice-point/wire-ID procedure and the on/off bring-up
+  milestone that precedes closed-loop pressure tuning).
+- Documentation only in this entry - no firmware or wiring changes yet.
+  Physical build hasn't started; item 7 (pressure transducer) is next.
 
 ### 2026-08-23 — Claude Code (Sonnet 5) — Dual-core task split (reversing the earlier decline) + async web server + watchdog; ShotStage state machine; Web UI patterns; profiles.cpp migrated to JSON
 
