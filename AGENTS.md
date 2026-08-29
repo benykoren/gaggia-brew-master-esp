@@ -783,6 +783,34 @@ rather than renumbering everything again.
 
 ## 10. Change Log
 
+### 2026-08-29 — Claude Code (Sonnet 5) — Steam auto-off timer; sleep-banner dismiss decoupled from Wake Up
+- **New independent Steam auto-off timeout** (`steamAutoOffMin`, default 2
+  min, `0` = disabled, config `STEAM_AUTO_OFF_MIN_DEFAULT`) - reuses the
+  existing eco-sleep mechanism (`checkEcoSleep()`, `lastActivityTime`) but
+  picks the timeout based on the active mode: Steam gets its own, much
+  shorter default than Brew existing 30-minute eco-sleep, since steaming
+  is normally brief and the steam boiler runs hotter. Configurable live
+  from the Web UI (Settings -> Power & Eco, new field alongside the
+  existing Brew auto-sleep one), included in `/status` and
+  `/settings_export`. Verified live via OTA: switched to Steam, confirmed
+  the shorter timeout fires and force-switches to Off.
+- **Fixed a UX complaint found while testing the above**: the sleep banner
+  (Asleep...) could only be dismissed by pressing Wake Up - which also
+  resumed heating, forcing a choice between seeing this notification forever
+  and turning the heater back on just to clear it. Added a separate Dismiss
+  (x) button that hides the banner client-side only (no request sent, no
+  mode change); a `sleepBannerDismissed` flag resets the moment the device
+  actually wakes, so a genuinely new sleep event still shows the banner.
+- **Clarified the steam-specific message** (user feedback: wanted steam
+  off and heater off as two explicit confirmations, not one combined
+  phrase) - banner now reads Steam off / Heater off - idle
+  timeout for the Steam case (Brew eco-sleep wording unchanged); the
+  Serial log for the Steam case is now two explicit lines instead of one.
+- Also exposed `modeBeforeSleep` via `/status` (`asleep_from`) so the Web UI
+  can tell which mode timeout actually fired, instead of a generic label
+  that would otherwise be wrong now that Brew and Steam have very
+  differently-sized timeouts.
+
 ### 2026-08-23 — Claude Code (Sonnet 5) — Dual-core task split (reversing the earlier decline) + async web server + watchdog; ShotStage state machine; Web UI patterns; profiles.cpp migrated to JSON
 
 - **Reverses the "dual-core pinning considered and declined" decision below**,

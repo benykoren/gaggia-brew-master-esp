@@ -128,24 +128,37 @@ void setOpMode(OpMode newMode) {
 // lastActivityTime advances only on explicit user actions (any /update call
 // from the Web UI - mode change, tuning edit, wake) - NOT on passive /status
 // polling, so a browser tab left open silently doesn't prevent sleep.
+// Brew and Steam use independent timeouts (see config.h) - Steam's is much
+// shorter by default, since steaming is normally brief and the steam
+// boiler runs hotter than Brew's.
 // ============================================================================
 unsigned long lastActivityTime = 0;
 unsigned long ecoTimeoutMin = ECO_TIMEOUT_MIN_DEFAULT; // 0 = disabled, persisted
+unsigned long steamAutoOffMin = STEAM_AUTO_OFF_MIN_DEFAULT; // 0 = disabled, persisted
 bool autoSleeping = false;
 OpMode modeBeforeSleep = OpMode::OFF;
 
 void noteActivity() { lastActivityTime = millis(); }
 
 static void checkEcoSleep(unsigned long now) {
-  if (ecoTimeoutMin == 0) return;         // disabled
   if (currentMode == OpMode::OFF) return; // nothing to sleep
   if (autoSleeping) return;               // already asleep
-  unsigned long timeoutMs = ecoTimeoutMin * 60000UL;
+
+  OpMode modeNow = currentMode; // capture before setOpMode() below changes it
+  unsigned long timeoutMin = (modeNow == OpMode::STEAM) ? steamAutoOffMin : ecoTimeoutMin;
+  if (timeoutMin == 0) return; // disabled for this mode
+
+  unsigned long timeoutMs = timeoutMin * 60000UL;
   if (now - lastActivityTime >= timeoutMs) {
-    modeBeforeSleep = currentMode;
+    modeBeforeSleep = modeNow;
     autoSleeping = true;
     setOpMode(OpMode::OFF);
-    Serial.println("Eco sleep: no Web UI activity, heater forced OFF");
+    if (modeNow == OpMode::STEAM) {
+      Serial.println("Steam auto-off: no Web UI activity - Steam mode -> Off");
+      Serial.println("Steam auto-off: heater forced OFF");
+    } else {
+      Serial.println("Eco sleep: no Web UI activity, heater forced OFF");
+    }
   }
 }
 
@@ -714,6 +727,7 @@ void setup() {
   steamKd = preferences.getDouble("steam_kd", STEAM_KD_DEFAULT);
   steamMaxSafety = preferences.getDouble("steam_max_safety", STEAM_MAX_SAFETY_DEFAULT);
   ecoTimeoutMin = preferences.getULong("eco_min", ECO_TIMEOUT_MIN_DEFAULT);
+  steamAutoOffMin = preferences.getULong("steam_off_min", STEAM_AUTO_OFF_MIN_DEFAULT);
   shotAutoStopSec = preferences.getULong("shot_auto_stop", SHOT_AUTO_STOP_SEC_DEFAULT);
   shotCount = preferences.getULong("shot_count", 0);
   lastDescaleTime = (time_t)preferences.getULong("last_descale", 0);

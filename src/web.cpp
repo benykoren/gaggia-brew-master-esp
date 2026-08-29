@@ -30,7 +30,9 @@ extern void setOpMode(OpMode mode);
 extern void refreshActiveProfileIfChanged();
 
 extern unsigned long ecoTimeoutMin;
+extern unsigned long steamAutoOffMin;
 extern bool autoSleeping;
+extern OpMode modeBeforeSleep;
 extern void noteActivity();
 extern void wakeFromSleep();
 
@@ -388,8 +390,9 @@ const char *index_html = R"rawliteral(
     <div class="alerts">
       <div id="fault_banner" class="banner banner-error">&#9888; Sensor fault &mdash; check wiring</div>
       <div id="sleep_banner" class="banner banner-info">
-        <span>&#9866; Asleep (eco timeout) &mdash; heater off</span>
+        <span id="sleep_banner_text">&#9866; Asleep (eco timeout) &mdash; heater off</span>
         <button onclick="wake()" class="btn-chip">Wake Up</button>
+        <button onclick="dismissSleepBanner()" class="btn-chip-sm" aria-label="Dismiss">&times;</button>
       </div>
       <div id="descale_banner_top" class="banner banner-warn">&#9888; Descale recommended &mdash; see History tab</div>
     </div>
@@ -614,12 +617,16 @@ const char *index_html = R"rawliteral(
         <div class="tab-section-title">Power &amp; Eco</div>
         <form action="/update" method="GET">
           <div class="field">
-            <label for="input_eco_min">Auto-sleep after (minutes, 0 = disabled)</label>
+            <label for="input_eco_min">Brew auto-sleep after (minutes, 0 = disabled)</label>
             <input type="number" step="1" min="0" name="eco_timeout_min" id="input_eco_min" value="">
+          </div>
+          <div class="field">
+            <label for="input_steam_off_min">Steam auto-off after (minutes, 0 = disabled)</label>
+            <input type="number" step="1" min="0" name="steam_auto_off_min" id="input_steam_off_min" value="">
           </div>
           <button type="submit" class="submit">Save</button>
         </form>
-        <p class="hint" style="margin-top:var(--sp-3)">Heater force-OFF after this long with no Web UI activity (mode/tuning changes). Does not count passive status polling.</p>
+        <p class="hint" style="margin-top:var(--sp-3)">Heater force-OFF after this long with no Web UI activity (mode/tuning changes) - separate timeouts for Brew and Steam, since Steam is normally brief and runs hotter. Neither counts passive status polling.</p>
       </div>
 
       <div class="card">
@@ -1116,6 +1123,7 @@ setInterval(function () {
       setVal("input_mqtt_user", json.mqtt_user || "");
       setVal("input_mqtt_pass", json.mqtt_pass || "");
       setVal("input_eco_min", json.eco_timeout_min);
+      setVal("input_steam_off_min", json.steam_auto_off_min);
       setVal("input_shot_auto_stop", json.shot_auto_stop_sec);
 
       // Shot sub-label reflects the actual configured auto-stop, not a
@@ -1157,8 +1165,19 @@ setInterval(function () {
       document.getElementById("input_sched_tz_min").value = browserTzOffsetMin;
       syncSchedTz(json.sched_tz_min);
 
-      // Eco / auto-sleep banner
-      document.getElementById("sleep_banner").style.display = json.auto_sleeping ? "flex" : "none";
+      // Eco / auto-sleep banner - label matches whichever mode's timeout
+      // actually fired (Brew's eco timeout vs Steam's much-shorter auto-off).
+      // Dismissing it (dismissSleepBanner()) is separate from waking the
+      // heater back up - sleepBannerDismissed resets the moment the device
+      // isn't asleep any more, so a genuinely new sleep event still shows.
+      if (!json.auto_sleeping) sleepBannerDismissed = false;
+      document.getElementById("sleep_banner").style.display =
+        (json.auto_sleeping && !sleepBannerDismissed) ? "flex" : "none";
+      if (json.auto_sleeping) {
+        document.getElementById("sleep_banner_text").innerHTML = json.asleep_from === "steam"
+          ? "&#9866; Steam off &middot; Heater off &mdash; idle timeout"
+          : "&#9866; Asleep (eco timeout) &mdash; heater off";
+      }
 
       // Autotune status
       var atBtn = document.getElementById("btn_autotune");
@@ -1230,6 +1249,15 @@ function wake() {
   var xhttp = new XMLHttpRequest();
   xhttp.open("GET", "/update?wake=1", true);
   xhttp.send();
+}
+
+// Dismissing the sleep banner just hides it - unlike Wake Up, it does NOT
+// resume heating. Client-side only (no request sent); see the /status poll
+// handler for where this flag gets reset once a new sleep event starts.
+var sleepBannerDismissed = false;
+function dismissSleepBanner() {
+  sleepBannerDismissed = true;
+  document.getElementById("sleep_banner").style.display = "none";
 }
 
 function startAutotune() {
@@ -1521,7 +1549,9 @@ static void handleStatus(AsyncWebServerRequest *request) {
   double snapSteamMaxSafety = steamMaxSafety;
   bool snapFault = sensorFault;
   unsigned long snapEcoTimeoutMin = ecoTimeoutMin;
+  unsigned long snapSteamAutoOffMin = steamAutoOffMin;
   bool snapAutoSleeping = autoSleeping;
+  OpMode snapModeBeforeSleep = modeBeforeSleep;
   unsigned long snapShotAutoStopSec = shotAutoStopSec;
   AutotuneState snapAutotuneState = autotuneState;
   String snapAutotuneMessage = autotuneMessage;
@@ -1601,7 +1631,15 @@ static void handleStatus(AsyncWebServerRequest *request) {
   json += ",\"server_time\":" + String((long long)nowEpoch);
 
   json += ",\"eco_timeout_min\":" + String(snapEcoTimeoutMin);
+  json += ",\"steam_auto_off_min\":" + String(snapSteamAutoOffMin);
   json += ",\"auto_sleeping\":" + String(snapAutoSleeping ? "true" : "false");
+  // Which mode's timeout put it to sleep - lets the Web UI banner say "Steam
+  // auto-off" vs "Eco timeout" correctly, instead of a generic label that
+  // would be misleading now that the two have different (and very
+  // different-sized) configured minutes.
+  json += ",\"asleep_from\":\"";
+  json += (snapModeBeforeSleep == OpMode::STEAM) ? "steam" : "brew";
+  json += "\"";
   json += ",\"shot_auto_stop_sec\":" + String(snapShotAutoStopSec);
 
   json += ",\"autotune_state\":\"";
@@ -1779,6 +1817,10 @@ static void handleUpdate(AsyncWebServerRequest *request) {
   if (hasArg("eco_timeout_min")) {
     ecoTimeoutMin = arg("eco_timeout_min").toInt();
     preferences.putULong("eco_min", ecoTimeoutMin);
+  }
+  if (hasArg("steam_auto_off_min")) {
+    steamAutoOffMin = arg("steam_auto_off_min").toInt();
+    preferences.putULong("steam_off_min", steamAutoOffMin);
   }
   if (hasArg("wake") && arg("wake") == "1") {
     wakeFromSleep();
@@ -2065,6 +2107,7 @@ void setupWeb() {
     q += "&steam_max_safety=" + String(steamMaxSafety, 1);
     q += "&shot_auto_stop_sec=" + String(shotAutoStopSec);
     q += "&eco_timeout_min=" + String(ecoTimeoutMin);
+    q += "&steam_auto_off_min=" + String(steamAutoOffMin);
     q += "&descale_shot_threshold=" + String(descaleShotThreshold);
     q += "&descale_day_threshold=" + String(descaleDayThreshold);
     // Note: named shot profiles live in their own LittleFS file (profiles.cpp,
