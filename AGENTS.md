@@ -56,6 +56,20 @@ README.
 | Heater switch | **Fotek SSR-DA** (DC control → AC load) + heatsink | Switches the boiler heater |
 | PSU | **External USB wall-wart** (5V), routed into the case | Powers the ESP32; HLK-PM01 module dropped from the build 2026-08-14 |
 | Wiring | Wago 221 (mains), silicone wire (18AWG power / 22AWG signal), Dupont, PTFE tape | |
+| Boiler heating element | Stainless, **1000W**, 230V (Gaggia P/N `11001002`) | Factory spec, see OEM manuals below |
+| Boiler thermostats (factory) | Brew **95°C** / Steam **127°C**, both Gaggia `US-622AXTDNO` | T2 (steam, 127°C) is the one reused as the mains-wiring overheat cutoff — see Section 7 |
+| Pump | ULKA **EP5/S GW**, 230V-50Hz (Gaggia P/N `12000140`) | Vibration pump, factory spec |
+| Boiler safety valve | **16 bar** discharge rating (factory) | Relevant ceiling for roadmap item 7's pressure transducer range |
+
+**Official OEM reference documents** (added 2026-08-30, user-supplied — this
+project's exact machine, "New Espresso 06 / Pure & Color"): electrical
+schematic, hydraulic/water-circuit schematic, parts catalog, and user manual,
+all in [`docs/oem-manuals/`](docs/oem-manuals/README.md). That directory's
+README indexes each file and lists the facts already folded into this doc —
+**check there before treating any thermostat/pump/heater spec here as
+unconfirmed**, and pull up the actual PDF for anything needing the original
+diagram (e.g. the full electrical schematic's circuit paths, not just the
+legend).
 
 ---
 
@@ -139,11 +153,20 @@ The temp module also needs **3.3V** and **GND** from the DevKit (module is
   `steamMaxSafety` itself is now **configurable live from the Web UI**
   (Steam tuning card, persisted, clamped server-side to
   `[STEAM_MAX_SAFETY_MIN, STEAM_MAX_SAFETY_MAX]` = [100, 150]°C so a typo
-  can't set a dangerous ceiling) — but the right *value* still depends on
-  the still-open question in Section 7 step 4 (does the machine have an
-  independent high-limit safety fuse, separate from the thermostats? what's
-  the *actual* steam thermostat's rated trip point?).
-  Treat any steam-mode test as attended/supervised until that's resolved.
+  can't set a dangerous ceiling).
+  **Update (2026-08-30):** the previously-open question "what's the actual
+  steam thermostat's rated trip point?" is now answered from the OEM parts
+  catalog (`docs/oem-manuals/parts-catalog-ER0270.pdf`, see
+  [`docs/oem-manuals/README.md`](docs/oem-manuals/README.md)) — the factory
+  steam thermostat (T2, reused in Section 7's mains circuit as the overheat
+  cutoff) is rated **127°C**, and the brew thermostat is rated **95°C**. So
+  the current `STEAM_MAX_SAFETY_DEFAULT=125°C` firmware ceiling sits 2°C
+  *below* T2's factory trip point — a thin but real margin (firmware cuts
+  power first; T2 is the mechanical backstop if it doesn't). This is real
+  data now, not a guess, but the 2°C margin itself hasn't been separately
+  judged safe/generous enough — **still treat steam-mode tests as
+  attended/supervised**, and don't raise `STEAM_MAX_SAFETY` toward or past
+  127°C without deliberately re-examining that margin.
 - **Important unconfirmed assumption baked into this design:** the SSR is
   the sole heating actuator in every mode. Since the machine's original
   switch/thermostat wiring is untouched, whether "Steam" in the Web UI
@@ -374,10 +397,10 @@ SSR terminal 3 (+) -- ESP32 GPIO4          SSR terminal 4 (-) -- ESP32 GND
   ambiguity problem specifically because T2 is a discrete, physically
   identifiable component — its own two terminals are visible on the part
   itself, independent of whatever the rest of the bundle does.
-- T2's exact rated trip temperature is still unknown (nice to confirm if
-  visible on the part, but not blocking — it's presumably in the normal
-  steam-thermostat range, i.e. comfortably above both brew and the current
-  placeholder `STEAM_MAX_SAFETY`).
+- **T2's exact rated trip temperature: confirmed 127°C** (2026-08-30, from
+  the OEM parts catalog — see `docs/oem-manuals/README.md` and the Section 4
+  update on the same date). Brew thermostat (T1) is 95°C. Both are Gaggia
+  `US-622AXTDNO`.
 - Wire spec unchanged from Section 3/5: 18AWG silicone + Wago 221 on the
   mains side, 22AWG + Dupont on the control side.
 - **Untouched by this change:** the pump, the Brew/Steam switches, and the
@@ -407,6 +430,20 @@ SSR terminal 3 (+) -- ESP32 GPIO4          SSR terminal 4 (-) -- ESP32 GND
 > the panel wiring, recorded as-is for continuity — **not confirmed**, and
 > specifically flagged by the user as having at least one likely error (see
 > below).
+
+> **2026-08-30 update:** the official Gaggia electrical schematic (SAE0486,
+> `docs/oem-manuals/electrical-schematic-SAE0486.pdf`) is now in the repo and
+> **partially corroborates this** — its legend confirms a brew switch
+> ("Interruttore Caffè") wired to the pump, matching the "Brew Switch...
+> routed downwards, likely the pump" line below. That said, it's the
+> **factory reference schematic for the model line**, not a photo of this
+> specific unit's current panel wiring (which may have been serviced or
+> modified since), and this doc hasn't yet transcribed its full circuit
+> paths (only the component legend) to actually settle the two open
+> questions below (Steam Switch position relative to T2; Steam LED
+> series-vs-parallel). Read the PDF directly before relying on it for
+> either. **Still not a reason to reopen the mains-wiring plan above** — the
+> clean-bypass design doesn't depend on this either way.
 
 **As described (two separate messages, not yet reconciled with full
 confidence):**
@@ -639,6 +676,13 @@ everything again.
    this project).
    **Why:** the prerequisite for any real pressure profiling in item 8, and
    useful as a pure monitoring/graph feature even before that exists.
+   **Confirmed 2026-08-30**: this machine's actual factory safety valve is
+   rated **16 bar** (`docs/oem-manuals/hydraulic-schematic-SAI0103.pdf`,
+   "SCARICO VALVOLA DI SICUREZZA 16 bar") — the top of the chosen 12-16 bar
+   transducer range sits right at that ceiling, not past it, which is worth
+   keeping in mind when picking the exact sensor model (don't round up past
+   16 bar "for headroom" without accounting for the safety valve already
+   being the hard ceiling).
 
 8. **Phase-control dimmer to a pressure target (e.g. 9 bar) - now also
    the project's pump on/off control, folding in former item 4 (2026-08-29,
@@ -776,6 +820,40 @@ everything again.
 ---
 
 ## 10. Change Log
+
+### 2026-08-30 — Claude Code (Sonnet 5) — Added official Gaggia OEM manuals (electrical/hydraulic schematics, parts catalog, user manual); resolved steam-thermostat trip point
+- **User supplied 4 official Gaggia documents for this exact machine**
+  ("New Espresso 06 / Pure & Color", the same model family as Section 1's
+  "Gaggia Espresso Color"): the electrical schematic (SAE0486, 2006), the
+  hydraulic/water-circuit schematic (SAI0103, 2007), the parts catalog
+  (ER0270, 2007), and the user manual (2007). Added all four to the repo
+  under `docs/oem-manuals/`, with a `README.md` there indexing each file and
+  the facts already pulled out of them — read that before this file's
+  hardware specs go stale again.
+- **Resolved a previously-open question**: Section 4 asked "what's the
+  actual steam thermostat's rated trip point?" before trusting the
+  `STEAM_MAX_SAFETY` placeholder. The parts catalog answers it directly —
+  factory steam thermostat (T2, the same part Section 7's mains-wiring plan
+  reuses as the overheat cutoff) is rated **127°C**; the brew thermostat is
+  **95°C**. Also pulled the heating element (1000W), pump (ULKA EP5/S GW
+  230V-50Hz), and safety-valve rating (16 bar) into Section 2's hardware
+  table and roadmap item 7.
+- **Updated Section 4** to record that the current `STEAM_MAX_SAFETY_DEFAULT
+  = 125°C` sits only 2°C below T2's now-confirmed 127°C trip point — real
+  data now, but the thinness of that margin hasn't itself been separately
+  judged sufficient, so steam-mode testing is still called out as
+  attended/supervised, and raising the ceiling toward/past 127°C needs a
+  deliberate look at that margin first.
+- **Partially corroborated, but did not resolve,** Section 7's historical
+  "panel wiring investigation" (unverified secondhand description of the
+  original switch/thermostat/LED wiring) — the official schematic's legend
+  confirms a brew-switch-to-pump connection matching that writeup, but is
+  the factory reference diagram for the model line, not a photo of this
+  unit's actual current wiring, and its full circuit paths haven't been
+  transcribed here yet (only the component legend). Did not touch the
+  mains-wiring plan itself — the clean-bypass design still doesn't depend on
+  resolving any of this.
+- Documentation only — no firmware or wiring changes in this entry.
 
 ### 2026-08-29 — Claude Code (Sonnet 5) — Steam auto-off timer; sleep-banner dismiss decoupled from Wake Up
 - **New independent Steam auto-off timeout** (`steamAutoOffMin`, default 2
