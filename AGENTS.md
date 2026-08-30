@@ -64,12 +64,14 @@ README.
 **Official OEM reference documents** (added 2026-08-30, user-supplied — this
 project's exact machine, "New Espresso 06 / Pure & Color"): electrical
 schematic, hydraulic/water-circuit schematic, parts catalog, and user manual,
-all in [`docs/oem-manuals/`](docs/oem-manuals/README.md). That directory's
-README indexes each file and lists the facts already folded into this doc —
-**check there before treating any thermostat/pump/heater spec here as
-unconfirmed**, and pull up the actual PDF for anything needing the original
-diagram (e.g. the full electrical schematic's circuit paths, not just the
-legend).
+all in [`docs/oem-manuals/`](docs/oem-manuals/README.md). That README also
+has a **plain-text/Mermaid transcription of both schematics** (the actual
+circuit topology, not just the legend) so an agent without PDF access can
+still read them — **check there before treating any thermostat/pump/heater
+spec here as unconfirmed**, and only open the actual PDF if you need to
+verify a detail the transcription itself flags as lower-confidence (it's an
+AI's best-effort reading, not a substitute for the original on anything
+mains-voltage).
 
 ---
 
@@ -820,6 +822,34 @@ everything again.
 ---
 
 ## 10. Change Log
+
+### 2026-08-30 — Claude Code (Sonnet 5) — Transcribed the OEM electrical/hydraulic schematics into plain-text/Mermaid form
+- **User asked for the wiring/water schemes to be readable by any agent**,
+  not just available as a PDF (which most agents can't open at all, and
+  even this session's PDF tooling needed a fallback for one of the four
+  files). Re-examined both schematic PDFs directly (visually, not just via
+  extracted text) and transcribed each into `docs/oem-manuals/README.md` as
+  a Mermaid diagram + plain-English walkthrough, with a legend table for
+  the electrical one.
+- **Electrical (SAE0486)**: high confidence on the main-switch/power-lamp
+  loop, the brew/steam-thermostat + ready-lamp + heater series loop (and
+  why the "ready" lamp going *dark* is the actual ready signal for this
+  machine class), and the brew-button-to-pump branch. Explicitly flagged
+  lower confidence on the steam button's exact bypass wiring around the
+  brew thermostat — the functional effect is well-corroborated, the literal
+  wire path is not fully certain from the drawing alone.
+- **Hydraulic (SAI0103)**: transcribed with high confidence (clearer
+  diagram, unambiguous flow arrows) — tank → pump → passive 3-way tee →
+  boiler, with the 16-bar safety valve's discharge tube rejoining at that
+  same tee, and a separate boiler → steam-valve → wand branch.
+- **Deliberately did not upgrade confidence on Section 7's historical panel-
+  wiring ambiguity** — this transcription is of the factory schematic for
+  the model line, still not a trace of this specific unit's actual current
+  wiring, and still irrelevant to the already-built clean-bypass mains
+  circuit. Added explicit caveats in the transcription itself so a future
+  agent doesn't treat the lower-confidence branches as settled fact.
+- Cross-linked from Section 2's OEM-manuals note. Documentation only — no
+  firmware or wiring changes.
 
 ### 2026-08-30 — Claude Code (Sonnet 5) — Added official Gaggia OEM manuals (electrical/hydraulic schematics, parts catalog, user manual); resolved steam-thermostat trip point
 - **User supplied 4 official Gaggia documents for this exact machine**
