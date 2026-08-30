@@ -61,7 +61,8 @@ two by number):
 | 10 | Brew button | Interruttore caffè |
 
 **Circuit** (L and N are the incoming mains rails, sourced through inlet
-socket 2):
+socket 2 — confirmed at high zoom: it's a physical 3-pin connector labeled
+**L / Earth / N**, fed directly by the incoming power cord):
 
 ```mermaid
 flowchart TD
@@ -69,15 +70,17 @@ flowchart TD
     N(("N — mains neutral"))
 
     L --> SW3["Main ON/OFF switch"]
-    SW3 --> LMP9["Power-on lamp"]
+    SW3 --> N
+
+    L --> LMP9["Power-on lamp"]
     LMP9 --> N
 
     L --> T4["Brew thermostat, 95°C"]
+    L --> LMP8["Ready lamp"]
     L -. "bypasses brew thermostat<br/>when pressed" .-> SW7["Steam button"]
     T4 --> J((" "))
+    LMP8 --> J
     SW7 -.-> J
-    J -- parallel tap --> LMP8["Ready lamp"]
-    LMP8 --> N
     J --> T6["Steam thermostat, 127°C"]
     T6 --> R5["Heating element, 1000W"]
     R5 --> N
@@ -88,53 +91,88 @@ flowchart TD
 ```
 
 **Walkthrough:**
-1. **Power-indicator branch (high confidence):** main switch → power-on
-   lamp, straight across L→N. Lit whenever the machine is switched on,
-   independent of everything else — this branch is a pure indicator, no
-   heating load, so a simple series lamp is electrically unremarkable here.
-2. **Heating branch (high confidence on the overall shape, lower on the
-   steam-button's exact tap point — see Validation notes):** brew
-   thermostat → a junction, from which two things run in **parallel**: the
-   ready lamp straight to N, and the steam thermostat → heating element →
-   N. That parallel split (not a series lamp) is required by simple
-   current-capacity physics — a neon pilot lamp's dropping resistor limits
-   it to a couple of mA, nowhere near enough to also carry a 1000W heater's
-   current if it were in series. The steam button most likely bypasses the
-   brew thermostat when pressed, letting the junction stay powered past
-   95°C so heating continues up toward the steam thermostat's 127°C cutoff
-   — that functional effect is well-corroborated (matches every other
-   single-boiler machine of this design and the "ready lamp goes dark once
-   at temperature" behavior these machines are known for), but the literal
-   bypass wire path is the one piece of this diagram I'd still verify
-   against the PDF before relying on it for physical work.
-3. **Pump branch (high confidence):** brew button → pump → N. Matches both
-   the topographic half of this same drawing (a "blue" wire run to the
-   pump) and the user manual's own description of its brew/hot-water button
-   driving the pump.
+1. **Main switch and power lamp are two independent branches, not one
+   series pair (medium confidence — flagged as odd, see Validation
+   notes):** zoomed in expecting to find the switch and lamp in series
+   (the obvious design), but the drawing clearly shows two separate wires
+   off L, each running straight to N with nothing else in the branch —
+   switch alone, lamp alone. Wired as literally drawn, the switch branch
+   has no load in series with it, which is electrically strange for a
+   "master switch." Possible explanations: it's a reference/test switch
+   not meant to be read as a master power switch (the legend's OCR gave a
+   garbled "INTERRUTTORE RFIT ON/OFF" — possibly "RIF." /reference/, which
+   would fit), or there's a mechanical/multi-pole detail this single-line
+   schematic doesn't capture. Left unresolved rather than guessed at.
+2. **Heating branch (high confidence, refined from the previous pass):**
+   the brew thermostat *and* the ready lamp **both tap L independently**
+   and rejoin at the same junction, which then continues through the steam
+   thermostat and heating element to N — the lamp runs in parallel with
+   the thermostat itself (not "after" it, as the previous version of this
+   section had it). Electrically this means: while the brew thermostat is
+   closed (actively heating, below 95°C) the junction sits at L on both
+   sides of the lamp, so it stays **dark**; once the thermostat opens
+   (95°C reached) the junction can only be reached through the lamp's
+   high-resistance path, so nearly all the voltage drops across the lamp
+   and it **lights** — i.e. "lit = ready," the more intuitive reading,
+   corrected from the previous version's "lit while heating" guess. The
+   steam button taps L directly into the same junction too — now clearly
+   visible as its own dot in the high-resolution render — confirming the
+   bypass topology at high confidence (upgraded from the previous pass's
+   "verify against the PDF" hedge): pressing it holds the junction at L
+   regardless of the brew thermostat, letting heating continue toward the
+   steam thermostat's 127°C cutoff.
+3. **Pump branch (high confidence, unchanged):** brew button → pump → N.
+   Matches both the topographic half of this same drawing (a "blue" wire
+   run to the pump) and the user manual's own description of its brew/
+   hot-water button driving the pump.
 
-### Validation notes (2026-08-30 re-check)
+### Validation notes
 
-Two corrections found on a deliberate re-check, done because this is
-mains-voltage reference material:
-- **Inlet socket, not a pump connector.** The first pass placed component 2
-  in series with the pump's supply wire, based only on its position near
-  the bottom of the drawing. Cross-checking the parts catalog
+**2026-08-30, second pass (high-resolution re-check):** rendered the PDF at
+6x (~430 DPI) with PyMuPDF and cropped into each junction individually,
+the same technique that caught the hydraulic-diagram errors. This refined
+(rather than overturned) the electrical reading:
+- **Ready lamp actually taps L directly, in parallel with the brew
+  thermostat itself** — not "downstream of it" as the first pass had it.
+  Both feed the same junction, which then continues through the steam
+  thermostat and heater to N. Re-derived the lamp's behavior from this
+  corrected topology: **lit = ready** (thermostat open), dark while
+  actively heating — the opposite of the first pass's guess, and the more
+  intuitive reading besides.
+- **The steam button's bypass wiring — previously flagged as unverifiable
+  — is now confirmed at high confidence.** The high-resolution render
+  shows the steam button's wire clearly joining the same junction as the
+  brew thermostat and ready lamp, settling what the first pass could only
+  guess at functionally.
+- **Confirmed component 2 with certainty**, closing out the first
+  correction: it's a physical 3-pin connector labeled **L / Earth / N** in
+  the topographic diagram, wired directly to the incoming power-cord
+  drawing right next to it. No remaining doubt this is the mains inlet
+  socket, not a pump-specific part.
+- **New open question found, not resolved:** the main ON/OFF switch and
+  the power-on lamp are drawn as **two independent branches**, each wired
+  straight across L→N with nothing else in series — not the series pair
+  the first pass assumed. Read literally, the switch branch has no load,
+  which is electrically odd for a "master switch." Documented as
+  unresolved in the walkthrough above rather than guessed at — this is
+  exactly the kind of thing worth a human checking against the physical
+  switch/lamp assembly rather than trusting either AI reading.
+
+**2026-08-30, first pass:** two corrections found on the initial re-check,
+done because this is mains-voltage reference material:
+- **Inlet socket, not a pump connector.** Originally placed component 2 in
+  series with the pump's supply wire, based only on its position near the
+  bottom of the drawing. Cross-checking the parts catalog
   (`parts-catalog-ER0270.pdf`, TAV.2 item 47: "SPINA AUTOBLOC.TRIPOL." —
-  "self-locking **three-pole** plug") shows it's actually the machine's
+  "self-locking **three-pole** plug") showed it's actually the machine's
   mains power-cord inlet (3 poles = live/neutral/earth; a pump lead would
-  only need 2). Corrected — it no longer appears in the pump branch.
-- **Ready lamp is a parallel tap, not a series element.** The first pass
-  drew the ready lamp in series between the two thermostats and the
-  heating element. That can't be right: a neon pilot lamp's series
-  resistor limits current to a couple of mA, which can't also carry a
-  1000W element's load. Corrected to a parallel tap after the brew
-  thermostat — same observed lit/dark behavior, physically consistent
-  wiring.
-- **Not independently verifiable from this drawing alone:** the exact wire
-  path of the steam button's bypass around the brew thermostat. The
-  *functional* result (steam button extends heating past 95°C toward
-  127°C) is corroborated by this machine class's well-documented behavior;
-  the literal routing is a best-effort reading of the drawing's layout.
+  only need 2) — now directly confirmed by the second pass above.
+  Corrected — it no longer appears in the pump branch.
+- **Ready lamp is a parallel tap, not a series element.** Originally drawn
+  in series between the two thermostats and the heating element — not
+  possible, a neon pilot lamp's series resistor limits current to a couple
+  of mA, nowhere near a 1000W element's load. Corrected to a parallel tap
+  (position refined further by the second pass above).
 
 ## Hydraulic circuit — transcription (SAI0103)
 

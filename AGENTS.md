@@ -825,6 +825,36 @@ everything again.
 
 ## 10. Change Log
 
+### 2026-08-30 — Claude Code (Sonnet 5) — Re-checked the electrical transcription at high resolution too
+- **After the hydraulic re-check found real errors, applied the same
+  high-resolution technique to the electrical schematic** (`AGENTS.md`
+  Section 2's OEM-manuals note) rather than trusting the earlier
+  normal-resolution reading. Rendered `electrical-schematic-SAE0486.pdf`
+  at 6x/~430 DPI and cropped into the ladder diagram's junctions
+  individually.
+- **One real refinement**: the ready lamp actually taps L directly, in
+  parallel with the brew thermostat itself (not "downstream of it" as
+  written before) — both feed the same junction before continuing through
+  the steam thermostat and heater to N. Re-derived from this: the lamp is
+  **lit when ready** (thermostat open), dark while heating — the opposite
+  of the previous guess.
+- **One confidence upgrade**: the steam button's bypass wiring, previously
+  flagged as unverifiable from the drawing, is now clearly visible joining
+  the same junction — confirmed, not just functionally inferred.
+- **One confirmation closed out with certainty**: component 2 is visibly a
+  3-pin connector labeled L/Earth/N in the topographic diagram, fed
+  directly by the incoming power cord — removes any remaining doubt this
+  is the mains inlet, settling the previous day's correction for good.
+- **One new open question, deliberately left unresolved rather than
+  guessed at**: the main ON/OFF switch and the power-on lamp are drawn as
+  two independent L→N branches with nothing else in series on the switch
+  branch — electrically odd for a "master switch," and not something this
+  drawing alone can explain. Documented in `docs/oem-manuals/README.md`
+  as unresolved; a future agent (or the user, against the physical
+  switch/lamp assembly) should settle it before treating either possible
+  explanation as fact.
+- Documentation only — no firmware or wiring changes.
+
 ### 2026-08-30 — Claude Code (Sonnet 5) — Rewrote the hydraulic-circuit transcription; it was substantially wrong
 - **User caught a real error**: "the hydro chart is completely wrong... from
   the tank its 2 water outputs." Correct catch — the first transcription
