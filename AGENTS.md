@@ -489,6 +489,24 @@ the whole ambiguity instead of resolving it. Only revisit this if a future
 agent/user decides to reuse the panel wiring after all (e.g. to restore the
 Steam LED's function, or to make Thermostat 2 do real work again).
 
+**Update (2026-08-30) — both open questions above are now resolved,
+informational only.** The official service diagram (Gaggia SAE0486) is now
+in the repo, transcribed in
+[`docs/oem-manuals/README.md`](docs/oem-manuals/README.md) — its electrical
+walkthrough confirms the Steam Switch (7) *bypasses* the Brew Thermostat
+(4) and reroutes through the Steam Thermostat (6, 127°C) rather than simply
+gating something downstream of it (question 1), and that the Ready Lamp (8)
+is a parallel tap, not a series element carrying real load current
+(question 2). This doesn't change the heater build — the clean-bypass
+circuit above is already built and working, and that transcription's own
+"What this does and doesn't settle" section is explicit that it does *not*
+confirm this specific unit's physical wire colors.
+**That one remaining gap (which physical wire is which) is what the user's
+own hand-tracing separately confirmed** for the pump/Brew-switch wiring
+(White = switched, to the Brew Switch; Blue = unswitched, to the Main
+Switch) while wiring item 4's relay — see `HARDWARE_ROADMAP.md` item 4 for
+that detail and how it's used.
+
 ---
 
 ## 8. Roadmap / future work
@@ -824,6 +842,108 @@ everything again.
 ---
 
 ## 10. Change Log
+
+### 2026-08-30 — Claude Code (Sonnet 5) — Pump relay brownout diagnosed on real hardware; item 4 re-dropped in favor of item 8's dimmer
+- **Real-hardware failure found before the mains-side splice was ever
+  done**: with the item 4 relay's control side wired and bench-tested
+  (previous entry below), starting/auto-stopping a shot reliably crashed
+  the board - Web UI and even `ping` became unreachable ("destination host
+  unreachable" from the router, not just a slow response), recoverable only
+  by a full power cycle, never on its own.
+- **Root-caused via systematic debugging, not guessed at**: a background
+  serial capture (`tools/serial_capture.py`, run as a self-terminating
+  background job per the established safe pattern - see Section 10's
+  2026-07-31 entries for why never to hold a foreground monitor open) caught
+  the actual moment of failure - normal operation continued for ~17s after
+  `Shot auto-stop: 27 s reached`, then the capture tool itself died with a
+  Windows `ClearCommError`/`PermissionError` opening COM6, the same
+  USB-CDC-drops-on-reset symptom this project has hit before. Confirmed
+  live via curl/ping at the same moment the user reported the crash.
+- **Hypothesis**: the relay coil shares the ESP32's 5V rail with the WiFi
+  radio. `stopShot()` energizes the relay and leaves it energized
+  indefinitely (by design - that's what "interrupt" means for an NC relay),
+  adding a sustained ~70-90mA draw on top of WiFi's own current spikes,
+  eventually sagging the shared rail enough to brown out the chip - timing
+  is effectively random since it depends on when a WiFi burst coincides
+  with the added load, which explains the ~17s delay rather than an instant
+  crash at the exact energize instant.
+- **Confirmed by a clean one-variable isolation test**: with the relay's
+  `DC+` wire disconnected from the ESP32 (coil physically unable to draw
+  any current, everything else identical), the exact same repro steps
+  (start shot, let it auto-stop, leave it sitting) did **not** crash the
+  board. Root cause confirmed, not just inferred from timing.
+- **Fix options discussed**: a decoupling capacitor (100-470µF, ≥16V)
+  across the relay's DC+/DC- terminals, or powering the coil from a fully
+  separate 5V source (a second USB charger, or the on-hand HLK-PM01 -
+  flagged that the HLK-PM01 reopens the exact mains-adjacent-bare-PCB
+  tradeoff this project backed away from on 2026-08-14, so recommended
+  against it unless the simpler options aren't available). **User had
+  neither part on hand.**
+- **User's decision: don't fix the relay's power sharing - switch to item
+  8's AC dimmer module instead**, since its opto-isolated control input
+  (no physical coil) draws only a few mA, the same category of control
+  signal the heater's SSR already uses successfully on this exact power
+  setup (GPIO4 straight to the SSR, no separate VCC, zero crashes since
+  2026-08-15). This re-drops item 4 back into item 8 - see `HARDWARE_ROADMAP.md`
+  item 4 for the full history and the fail-open/fail-off tradeoff this
+  re-accepts (same one flagged on 2026-08-29, now back in effect: the pump
+  won't run at all if the ESP32 isn't running firmware, since neither an
+  SSR nor a TRIAC dimmer has a passive pass-through state the way the NC
+  relay did).
+- **Not done yet**: the dimmer's actual hardware wiring and firmware (needs
+  two GPIOs - zero-cross detect input plus gate-fire output - and a
+  different control scheme than `setPumpRelay()`'s simple digitalWrite).
+  The relay module's control-side wiring is now unused; nothing on the
+  mains side was ever connected, so there's nothing physical to undo there.
+
+### 2026-08-30 — Claude Code (Sonnet 5) — Item 4 (pump relay) revived and control side wired; NC semantics fixed
+- **Reverses the 2026-08-29 "folded into item 8" decision** — user bought the
+  relay module (SONGLE SRD-05VDC-SL-C, opto-isolated, DC+/DC-/IN1 control
+  side, NO/COM/NC output, jumper-selectable trigger level) and chose to
+  build item 4 standalone, ahead of items 7/8, rather than wait for the
+  TRIAC dimmer. Design settled: **NC contact**, spliced into the pump's own
+  switched wire — the physical Brew switch remains the sole "start"
+  authority (left permanently on in normal use), the ESP can pulse/interrupt
+  within that window (pre-infusion pulsing, time/weight auto-stop), and the
+  switch still works as a manual kill if the ESP crashes. Explicit tradeoff
+  accepted (same shape as the original item 4 write-up): de-energized is the
+  boot/idle default, which means pass-through — if the switch is left on and
+  the ESP crashes/hasn't booted, the pump defaults to running, not stopped.
+- **Found a real inconsistency before wiring anything to mains**: the
+  pre-infusion `ShotStage` firmware built 2026-08-23 already toggled
+  `PIN_PUMP`, but with NO/fail-off semantics (energize = pump on) — the
+  opposite of item 4's NC/fail-open design. Fixed in `main.cpp`:
+  `setPumpRelay()`'s callers in `tickShotStages()`, `startShot()`, and
+  `stopShot()` inverted to true NC semantics (energize = interrupt/stop,
+  de-energize = pass-through/on); boot-time default and comments in
+  `main.cpp`/`config.h` updated to explain the fail-open reasoning instead
+  of the old fail-off one.
+- **Control side wired and bench-tested**: ESP32 5V/GND/GPIO5 → relay
+  DC+/DC-/IN1, trigger jumper set to H (matches `PIN_PUMP_ACTIVE_LEVEL =
+  HIGH`). Fix built and pushed live via OTA (`curl .../update_fw` — first
+  attempt hit the same "upload succeeds, HTTP response lost, board reboots
+  into the new firmware anyway" pattern this project has hit before with
+  OTA; confirmed via `fw_build` in `/status` rather than trusting curl's
+  exit code). Mains-side splice at the pump's own terminals (COM/NC) not
+  done yet.
+- **Resolved the one open wiring-verification step** (which of the pump's
+  two terminals is the switched one) without needing the AC voltage tester
+  from the buy list: user cross-referenced their own hand-traced topographic
+  wiring against the machine's official service diagram (Gaggia SAE0486,
+  now transcribed in `docs/oem-manuals/README.md` from a same-day, separate
+  PR). Confirmed: **pump's White wire is switched** (from Brew Switch,
+  component 10) — splice this one through the relay; **Blue wire is
+  unswitched** (straight from Main Switch, component 3) — leave untouched.
+  Also used this to close out a long-standing gap that OEM doc's own
+  transcription explicitly flagged as unresolved (which physical wire is
+  which) — see that doc and `AGENTS.md` §7's "Update" note.
+- Updated `HARDWARE_ROADMAP.md` item 4 (un-REMOVED, wiring diagram updated
+  with real wire colors and the SAE0486 cross-reference table, procedure
+  steps 1-2 marked done) and `AGENTS.md` §7 (pointer to the now-resolved
+  panel-wiring questions).
+- **Not done yet**: mains-side splice (fuse, Relay COM/NC to the pump's
+  White wire), first live power-up test, verifying the switch-left-on/
+  ESP-controls-shot workflow end-to-end on the real machine.
 
 ### 2026-08-30 — Claude Code (Sonnet 5) — Re-checked the electrical transcription at high resolution too
 - **After the hydraulic re-check found real errors, applied the same

@@ -507,10 +507,14 @@ void applyProfile(int idx) {
 // from the active stage purely for external reporting (/status, MQTT) -
 // nothing outside this file needs to know stages exist.
 //
-// PIN_PUMP is NOT YET WIRED (HARDWARE_ROADMAP.md item 4) - setPumpRelay()
-// safely toggles an unconnected GPIO until then; built now so the timing
-// logic doesn't need revisiting once the relay exists, same "software ahead
-// of hardware" pattern already proven for shot auto-stop.
+// PIN_PUMP drives an NC relay spliced into the Brew switch's own switched
+// wire (HARDWARE_ROADMAP.md item 4, revived 2026-08-30). Control side
+// (GPIO5/VCC/GND) is wired; the mains-side splice at the pump's own
+// terminals (COM/NC) is not done yet. De-energized = NC contact closed =
+// pass-through (the switch alone controls the pump, zero ESP32 dependency -
+// the deliberate fail-open default). Energized = contact open = interrupt.
+// setPumpRelay(true) means "energize/interrupt", NOT "pump on" - callers
+// below intentionally invert the ShotStage sense from that raw meaning.
 // ============================================================================
 ShotPhase currentShotPhase = ShotPhase::NONE;
 
@@ -572,7 +576,7 @@ static void tickShotStages(unsigned long now) {
 
   currentStageIndex++; // EXTRACTION is always the last stage, so this always stays in-bounds
   ShotStage &next = activeShotStages[currentStageIndex];
-  setPumpRelay(next.type != ShotStage::Type::PUMP_OFF);
+  setPumpRelay(next.type == ShotStage::Type::PUMP_OFF); // energize (interrupt) only during a PUMP_OFF pulse
   currentShotPhase = phaseForStageType(next.type);
   stageStartMillis = now;
 }
@@ -593,13 +597,13 @@ void startShot() {
   stageStartMillis = shotStartMillis;
   ShotStage::Type firstType = activeShotStages[0].type;
   currentShotPhase = phaseForStageType(firstType);
-  setPumpRelay(firstType != ShotStage::Type::PUMP_OFF); // first stage is never PUMP_OFF
+  setPumpRelay(firstType == ShotStage::Type::PUMP_OFF); // first stage is never PUMP_OFF, so this stays de-energized/pass-through
 }
 
 void stopShot() {
   if (!shotInProgress) return;
   shotInProgress = false;
-  setPumpRelay(false);
+  setPumpRelay(true); // energize to interrupt - forces the pump off even if the switch is still held
   currentShotPhase = ShotPhase::NONE;
   activeStageCount = 0;
   currentStageIndex = 0;
@@ -701,9 +705,12 @@ void setup() {
   // Initialize/Configure Pins
   pinMode(PIN_SSR, OUTPUT);
   digitalWrite(PIN_SSR, LOW);
-  // PIN_PUMP not yet wired (HARDWARE_ROADMAP.md item 4) - initialized
-  // de-energized regardless, same "always boot to the safe state" rule as
-  // PIN_SSR, so it's ready the moment the relay is actually installed.
+  // PIN_PUMP (HARDWARE_ROADMAP.md item 4, NC relay) boots de-energized -
+  // unlike PIN_SSR's "always boot off" rule, de-energized here means the NC
+  // contact is CLOSED (pass-through): the pump just follows the physical
+  // Brew switch, with zero dependency on firmware having booted at all. This
+  // is the deliberate fail-open default for this specific actuator - see
+  // HARDWARE_ROADMAP.md item 4 for the reasoning.
   pinMode(PIN_PUMP, OUTPUT);
   digitalWrite(PIN_PUMP, PIN_PUMP_ACTIVE_LEVEL == HIGH ? LOW : HIGH);
 

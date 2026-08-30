@@ -81,42 +81,59 @@ workaround, but more than one item below independently wants the same tools.
 
 ## Item 4 — Pump on/off control ("control the button")
 
-**REMOVED (2026-08-29) — folded into Item 8 below, not built standalone.**
-User decided against buying/wiring a separate plain relay once it became
-clear Item 8's TRIAC dimmer subsumes plain on/off (fire at ~100% duty =
-full pass-through, 0% = full stop). The splice-point wiring and
-wire-identification procedure below still apply unchanged to Item 8's
-dimmer (same splice location, same wire to identify)
-— **Item 8 reuses this section's wiring/procedure detail rather than
-duplicating it**, substituting the dimmer module for the relay and
-skipping the NC-contact-specific parts (moot for a TRIAC). The auto-stop
-firmware plan below also carries over to Item 8 unchanged in spirit —
-same trigger logic, different physical actuator.
+**RE-DROPPED (2026-08-30, same day as its revival) — folded back into
+Item 8, this time for a confirmed hardware reason, not just a cost
+tradeoff.** The revived NC-relay build (control side wired, bench-tested,
+`setPumpRelay()` corrected to NC semantics) hit a real, reproduced hardware
+fault before the mains-side splice was ever done: energizing the relay
+coil shares the ESP32's 5V rail with the WiFi radio, and holding it
+energized (which "stop" does, indefinitely, by design) sagged that rail
+enough to brown out the chip — confirmed by a clean isolation test
+(disconnecting the relay's DC+ made the crash stop happening under the
+exact same repro steps that reliably caused it). Fixable (a decoupling
+capacitor or a second, independent 5V supply for the coil - see `AGENTS.md`
+§10, 2026-08-30 pump-relay-brownout entry, for the full diagnosis), but the
+user chose instead to move to Item 8's AC dimmer module, whose opto-isolated
+control input draws only a few mA (no physical coil) instead of the
+relay's ~70-90mA continuous draw - the same category of control signal the
+heater's SSR already uses successfully on this exact power setup.
 
-**Explicit tradeoff accepted with this decision — do not silently
-reintroduce a plain relay to "fix" this without checking the user still
-accepts it:** the relay this item would have used was deliberately wired
-NC (Normally Closed) so the pump kept working with **zero ESP32
-involvement** if the ESP32 crashed, was unpowered, or hadn't booted yet —
-the dangerous failure mode there was judged to be the pump becoming unable
-to start on its own. A TRIAC dimmer (Item 8) has no equivalent passive
-pass-through state — it only conducts while firmware actively fires the
-gate every half-cycle. So building Item 8 without Item 4 means **the pump
-will not run at all if the ESP32 isn't running firmware** (crash,
-mid-boot, brownout, etc.), even with the Brew switch pressed — a fail-off
-dependency this project didn't previously have on the pump side. Judged
-acceptable: a stalled shot is an inconvenience, not a mains-safety hazard
-(unlike the heater).
+**Explicit tradeoff re-accepted with this decision**: same one flagged when
+Item 4 was first folded into Item 8 on 2026-08-29 - an SSR/TRIAC-driven
+actuator has no passive pass-through state, so **the pump won't run at all
+if the ESP32 isn't running firmware** (crash, mid-boot, brownout, etc.),
+even with the Brew switch held on. This is back in effect; the NC relay's
+"switch always works independent of the ESP32" property is given up in
+exchange for not sharing a current-hungry coil with the WiFi radio's power
+rail. Judged acceptable for the same reason as before: a stalled shot is an
+inconvenience, not a mains-safety hazard.
 
-<!-- Historical content below this line is superseded by Item 8; kept only
-     for git-blame continuity of the original relay design, not as an
-     active plan. -->
+**Hardware note:** the relay module's control-side wiring (GPIO5/5V/GND) is
+disconnected/unused going forward - nothing on the mains side was ever
+wired, so there's nothing to undo there. `PIN_PUMP`/`setPumpRelay()`/
+`ShotStage` in firmware need reworking for the dimmer's zero-cross-detect +
+gate-fire control scheme (two GPIOs, not one) - see Item 8 below.
 
-**Status (as originally planned, no longer being built): software half
-built and real-shot-tested;
-hardware half (the relay itself) not yet bought or wired.** **Depends on:**
-nothing. This is the core item for the current goal (stop at 25s or 36g).
-(Originally "item 9a.")
+<details>
+<summary>Full history (both folds and the revival in between)</summary>
+
+- **2026-08-29**: first folded into Item 8 - user decided against buying/
+  wiring a separate plain relay once it seemed Item 8's TRIAC dimmer
+  subsumed plain on/off (fire at ~100% duty = full pass-through, 0% = full
+  stop).
+- **2026-08-30, earlier the same day**: revived - user bought the relay
+  module and built it standalone (NC/fail-open design, control side wired),
+  reasoning that Item 8 would still need its own TRIAC dimmer for phase
+  control later regardless.
+- **2026-08-30, later the same day**: re-dropped, for the hardware reason
+  above - this is not a repeat of the original cost/complexity reasoning,
+  it's a newly discovered electrical constraint.
+</details>
+
+**Status (as originally planned): software half built and real-shot-tested;
+hardware half now underway** (control side wired above; mains splice next).
+**Depends on:** nothing. This is the core item for the current goal (stop at
+25s or 36g). (Originally "item 9a.")
 
 The Brew gain-scheduling profile (`brewActiveKp/Ki/Kd`) and shot-start
 feedforward described below are already live-tunable in the Web UI and
@@ -197,17 +214,20 @@ assuming any particular `digitalWrite` level energizes it.
 
 Two design choices here, both already resolved:
 
-**1. Splice point: at the pump's own terminals, not the switch.** This
-project already hit the "unverifiable panel wiring" problem once, for the
-heater (`AGENTS.md` §7): the switch/thermostat bundle disappears underneath
-the panel with no visual or multimeter access, so the heater was built as a
-clean bypass avoiding the bundle entirely. This item doesn't need the same
-bypass, because **the pump itself is a standalone, physically identifiable
-component** — exactly like the heater element and Thermostat 2 were. Splice
-the relay into the wire right at the pump's own terminals, not by opening
-up the switch's terminal block. There's never a need to trace or resolve
-what's happening inside the ambiguous bundle — only the two wires already
-landing on the pump itself matter, and those are unambiguous by definition.
+**1. Splice point: anywhere along the pump's own dedicated White wire —
+built at the Brew switch end, not the pump end.** The original reasoning
+here was to avoid the "unverifiable panel wiring" problem already hit once
+for the heater (`AGENTS.md` §7) by splicing at the pump's own terminals
+instead of opening up the switch's terminal block, since the pump is a
+standalone, physically identifiable component and the switch's bundle
+wasn't. That ambiguity is now resolved (see "Confirmed wiring" below) — the
+White wire is a single, dedicated, unshared run between the Brew switch
+(component 10) and the pump, confirmed via the official diagram, so
+splicing it at either end is electrically identical. **Built at the switch
+end** (2026-08-30) for physical accessibility. The one thing that matters
+wherever you splice: the Brew switch has *two* wires landing on it (Brown
+in, from the Main switch; White out, to the pump) — cut the White one, not
+the Brown one.
 
 **2. Contact type: NC (Normally Closed), not NO.** The goal is "the switch
 starts it, the ESP32 can stop it" — that requires the relay to pass power
@@ -224,29 +244,41 @@ failure mode would be the *opposite*: a design that made the pump unable to
 start at all without the ESP32's cooperation. NC avoids that.
 
 ```
-Existing Brew Switch (completely unmodified, still starts the pump as before)
-  └─ existing wire, intercepted at the pump's own terminal ─┐
-                                                              ├─ [inline fuse] ─ Relay COM
-                                                          Relay NC ── Pump terminal A (was: switch wire directly)
-                                              Pump terminal B ── unchanged (whatever it's currently wired to)
+Existing Brew Switch (component 10, "Interruttore caffè" - unmodified
+otherwise, still the sole thing that starts the pump)
+  White-out terminal, intercepted here ─┐
+                                          ├─ [inline fuse] ─ Relay COM
+                                      Relay NC ── White wire (unchanged past this point, runs to the pump as before)
+                        Pump's Blue terminal ── unchanged (direct from Main switch, component 3)
 
-Relay IN ── ESP32 GPIO (output, HIGH = energize = open = stop)
-Relay GND ── ESP32 GND
-Relay VCC ── ESP32 3V3/5V (per module spec)
+Relay IN1 ── ESP32 GPIO5 (PIN_PUMP, output, HIGH = energize = open = stop)
+Relay DC- ── ESP32 GND
+Relay DC+ ── ESP32 5V
 ```
 
 `COM` is the common/input side (fed from the fuse); `NC` is the
 pass-through output side (to the pump) when the relay is de-energized.
 
-**One thing to verify before final wiring:** at the pump's own two
-terminals, confirm which one is the switched wire (only live when the Brew
-switch is on) versus the other (commonly a shared Neutral, unaffected by
-the switch) — only the switched one needs to route through the relay; the
-other stays exactly as-is. This is what the non-contact AC voltage tester
-from the tools section above is for: with the machine on mains and the pump
-disconnected at its terminals, check which freed wire goes live only when
-the switch is pressed. No continuity tracing, no multimeter, no opening up
-the switch itself.
+**Confirmed (2026-08-30): which pump wire is switched.** Cross-referenced
+the user's own hand-traced (topographic) wiring against the machine's
+official service diagram (Gaggia SAE0486, transcribed in
+[`docs/oem-manuals/README.md`](docs/oem-manuals/README.md)):
+
+| # | Component (Italian / English) | Relevant connections |
+|---|---|---|
+| 1 | Pompa / Pump | Blue → Main switch (3); **White → Brew switch (10)** |
+| 2 | Spina autobloccante / IEC power socket | Blue, Brown → Main switch (3); Green/Yellow → boiler ground |
+| 3 | Interruttore ON/OFF / Main switch | Blue → Pump (1) + Boiler; Brown → Thermostat (4) + Brew switch (10) |
+| 4 | Termostato caffè / Brew thermostat | (heater circuit, unrelated to this item) |
+| 6 | Termostato vapore / Steam thermostat | reused as the heater's overheat cutoff — see `AGENTS.md` §7 |
+| 10 | Interruttore caffè / Brew switch | Brown (from Main switch) in; **White (pump-control wire) out to Pump** |
+
+So: **the pump's White wire is the switched leg** (only live when the Brew
+switch is on) — splice this one through the relay. **The Blue wire is the
+unswitched leg** (straight from the Main switch, same rail that also feeds
+the boiler) — leave it completely untouched. This resolves the original
+plan's open verification step; no non-contact AC tester or powered-up check
+needed, it's known directly from the diagram.
 
 ### Firmware
 
@@ -267,18 +299,25 @@ the switch itself.
 
 ### Procedure (bench-first, same discipline as the heater build)
 
-1. **Bench test the relay module alone** on the ESP32's control side (3.3V/
-   5V logic in, confirm trigger polarity — see above — and that it audibly
-   clicks/switches) before it's anywhere near the pump.
-2. **Verify the switched-vs-Neutral wire at the pump's terminals** (see
-   above) using the non-contact AC voltage tester.
+1. **Bench test the relay module alone** on the ESP32's control side (5V
+   logic in via VCC/GND/IN1, trigger jumper set to H to match
+   `PIN_PUMP_ACTIVE_LEVEL=HIGH`, confirm it audibly clicks / its LED lights
+   on GPIO5 HIGH) before it's anywhere near the pump. **Done 2026-08-30** —
+   control side wired, `setPumpRelay()`/`ShotStage` logic corrected to NC
+   semantics and pushed live via OTA.
+2. ~~Verify the switched-vs-Neutral wire at the pump's terminals~~ —
+   **confirmed 2026-08-30** (see "Confirmed wiring" above): White = switched
+   (to Brew switch), Blue = unswitched (to Main switch). No AC tester needed.
 3. **Unplug the machine from mains.** Don't touch anything inside until
    confirmed unplugged.
-4. Disconnect the pump's existing switched wire at the pump's own terminal
-   only (not at the switch). Wire it → fuse → Relay COM; Relay NC → pump
-   terminal. Leave the pump's other terminal exactly as it already was.
-5. Wire the control side: 22AWG, Relay IN → ESP32 GPIO, GND → GND, VCC →
-   3V3/5V per the module's spec.
+4. At the **Brew switch**, disconnect the **White** wire (the output
+   terminal, to the pump) — not the Brown wire (input from the Main
+   switch). New wire from that now-empty switch terminal → fuse → Relay
+   COM; Relay NC → the White wire you just freed (its far end still runs
+   to the pump unchanged — nothing at the pump itself needs touching).
+   Leave the pump's **Blue** wire exactly as it already was.
+5. Control side (done 2026-08-30): DC+ → ESP32 5V, DC- → ESP32 GND, IN1 →
+   ESP32 GPIO5, trigger jumper set to H.
 6. Heat-shrink/insulate every exposed mains terminal and Wago joint.
 7. Full visual inspection: no exposed conductors, nothing pinched or under
    strain, nothing touching the metal chassis.

@@ -401,3 +401,9 @@ position number actually points on the physical part.
   project's mains-wiring plan deliberately doesn't depend on that panel
   wiring anyway (clean-bypass design), so this is informational, not a
   reason to revisit that decision on its own.
+  - **Update (2026-08-30):** the pump/Brew-switch half of this gap is now
+    closed — the user separately hand-traced the actual unit's topographic
+    wiring while wiring item 4 (pump relay) and confirmed White = the
+    switched wire (to the Brew Switch, component 10), Blue = unswitched
+    (straight to the Main Switch, component 3). See `AGENTS.md` §7's
+    "Update" note and `HARDWARE_ROADMAP.md` item 4 for how that's used.
