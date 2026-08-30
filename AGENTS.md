@@ -825,6 +825,38 @@ everything again.
 
 ## 10. Change Log
 
+### 2026-08-30 — Claude Code (Sonnet 5) — Rewrote the hydraulic-circuit transcription; it was substantially wrong
+- **User caught a real error**: "the hydro chart is completely wrong... from
+  the tank its 2 water outputs." Correct catch — the first transcription
+  pass had genuinely missed a tank outlet and mis-traced the plumbing
+  around the pump/3-way tee.
+- **Re-did the analysis properly this time** instead of reading the PDF at
+  normal size again: installed PyMuPDF, rendered `hydraulic-schematic-
+  SAI0103.pdf` at 6x (~430 DPI), and cropped into each junction
+  individually (tank outlets, pump ports, the 3-way tee, the tank-to-
+  boiler run) to actually see connection points instead of guessing from a
+  full-page view.
+- **What was actually wrong before**: the tank's second outlet was missed
+  entirely; the 3-way tee was placed on the pump's discharge side when
+  it's actually on the **suction** side (merging the tank's second outlet
+  with the boiler safety-valve's discharge back into the pump inlet); the
+  pump's real discharge path (up to the boiler) was never traced at all.
+- **Corrected model** (in `docs/oem-manuals/README.md`): tank outlet A
+  feeds the pump inlet directly; tank outlet B feeds a 3-way tee that also
+  takes the safety-valve discharge, and the tee's third port rejoins the
+  same pump inlet; the pump's actual discharge feeds the boiler; the
+  steam-wand side is a separate sub-circuit (steam valve → wand, plus a
+  second tube tag labeled "ASPI" that's most likely the Pannarello's air-
+  intake line, not part of the water circuit at all).
+- **Added the tubing-size table the user asked for** — every tube's bore,
+  OD, length, material, and quantity, pulled from the PDF's own parts
+  table (this existed in the parts-catalog transcription already but
+  hadn't been attached to the hydraulic diagram itself).
+- Logged the specific errors in a "Validation notes" section rather than
+  silently replacing the wrong version, matching how the electrical
+  section's earlier corrections were handled.
+- Documentation only — no firmware or plumbing changes.
+
 ### 2026-08-30 — Claude Code (Sonnet 5) — Translated schematic transcriptions to English; corrected two errors found on re-check; added full parts-catalog transcription
 - **User asked for the transcriptions in English and asked for them to be
   validated.** Re-examined the electrical schematic image a third time,

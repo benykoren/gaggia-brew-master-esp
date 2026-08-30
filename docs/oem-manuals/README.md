@@ -138,35 +138,96 @@ mains-voltage reference material:
 
 ## Hydraulic circuit — transcription (SAI0103)
 
-> Same caveat as above, minus the mains-voltage stakes — this is water
-> plumbing, but still verify against the PDF before doing real plumbing
-> work. This one has clear flow arrows in the original, so confidence is
-> high throughout; the re-check above didn't turn up any correction here.
+> **This section was rewritten 2026-08-30 after the user flagged the first
+> version as wrong** ("from the tank it's 2 water outputs"). That flag was
+> correct — the first pass missed a real tank outlet and mis-traced several
+> connections. This version was rebuilt by rendering the PDF at high
+> resolution (6x, ~430 DPI) and cropping into each junction individually
+> rather than reading the page at normal size — see **Validation notes**
+> below for exactly what changed and what's still not 100% certain.
+
+**Tubing legend** (every tube in the diagram, with its real size — this is
+what was missing before):
+
+| Tag | Part No. | Bore × OD | Length | Material | Qty |
+|-----|----------|-----------|--------|----------|-----|
+| 1 | AG3170 | 5×9mm | 120mm | Silicone | 2 (both instances shown below) |
+| 2 | 11001207 | 4.2×8.2mm | 150mm | Reinforced silicone, pink | 1 |
+| 3 | 11001206 | 4.2×8.2mm | 200mm | Reinforced silicone, pink | 1 |
+| 4 | DM1206/015 | 5×9mm | 70mm | Silicone | 1 |
+| 5 | PA1062 | 5×9mm | 350mm | Silicone ("ASPI" — see note) | 1 |
+
+**Circuit:**
 
 ```mermaid
-flowchart LR
-    TANK["Tank"] -- "suction tube" --> PUMP["Pump"]
-    PUMP -- outlet --> TWAY["3-way tee<br/>(passive)"]
-    TWAY -- "70mm tube" --> SAFETY["Safety-valve<br/>discharge (16 bar)"]
-    TWAY -- "supply tube" --> BOILER["Boiler"]
-    BOILER --> STEAMTAP["Steam valve"]
-    STEAMTAP --> WAND["Steam wand<br/>/ Pannarello"]
+flowchart TD
+    TANKA["Tank — outlet A"] -- "tube 1 (120mm)" --> PUMPIN["Pump suction inlet"]
+    TANKB["Tank — outlet B"] -- "tube (unlabeled run)" --> TWAY["3-way tee (passive)"]
+    SAFETY["Boiler safety valve<br/>discharge (16 bar)"] -- "tube 4 (70mm)" --> TWAY
+    TWAY -- "tube 1 (120mm, 2nd)" --> PUMPIN
+    PUMPIN --> PUMP["Pump"]
+    PUMP -- "discharge, tube 2 (150mm)" --> BOILER["Boiler — water inlet"]
+    RVAP["Rubinetto vapore<br/>(steam valve, on boiler)"] -- "tube 3 (200mm) — steam" --> WAND["Steam wand / Pannarello"]
+    RVAP -- "tube 5 (350mm) — air intake, probable" --> WAND
 ```
 
 **Walkthrough:**
-- Tank supplies the pump's suction side through a single silicone tube.
-- The pump's outlet feeds a **passive 3-way tee** (not an active valve) —
-  it just joins three tube runs at one point: the pump outlet, the line
-  running up to the boiler's fill port, and a short tube back down from
-  wherever the boiler's 16-bar safety valve discharges. So if the safety
-  valve ever trips, that relief path re-joins the plumbing near the pump/
-  tank area rather than spraying loose inside the case.
-- Separately, the boiler has its own steam-side valve feeding the steam
-  wand/Pannarello — this branch has nothing to do with the tank/pump
-  supply side.
-- Tubing sizes/lengths per run are in the parts table on the PDF's own
-  page (silicone tube, 4.2-9mm bore depending on run) if you need exact
-  replacement stock.
+1. **The tank has two separate bottom outlets** (confirmed by zooming into
+   the drawing — both are visible as distinct stub fittings on the tank's
+   bottom edge, not one outlet drawn twice):
+   - **Outlet A** feeds the pump's suction inlet **directly** through a
+     120mm tube (tag 1) — short, unambiguous, a clean single connection.
+   - **Outlet B** runs down and over to the **3-way tee** ("Raccordo 3
+     vie"), which also receives the boiler's 16-bar safety valve's
+     discharge (tag 4, 70mm) on a second port. The tee's third port feeds
+     back **up to the same pump suction inlet** through a second 120mm
+     tube (also tag 1 — the parts table's qty=2 is exactly these two
+     uses). So the pump's suction is fed by outlet A directly *and*
+     outlet B indirectly (merged with any safety-valve discharge) at the
+     same inlet point.
+2. **The pump's discharge (pressurized) side** feeds up toward the boiler's
+   own water inlet — this is the pump actually doing its job (drawing from
+   the tank, pushing to the boiler), which was missing from the first
+   version entirely.
+3. **The steam side is a separate, distinct sub-circuit**, not fed by the
+   tank/pump path at all: the boiler's own steam valve ("Rubinetto vapore")
+   feeds the steam wand/Pannarello through tube 3 (200mm). A second tube
+   (tag 5, 350mm) runs alongside it to the same wand assembly — given it's
+   explicitly labeled "ASPI" (**aspirazione**) in the parts table, and the
+   wand is a Pannarello-style frother (parts catalog item 45), this is most
+   likely the **frother's air-intake tube** (Pannarellos froth by drawing
+   in air via venturi effect alongside the steam, not by carrying water) —
+   not a water-suction line at all. This reading fits the tube's label and
+   destination well, but isn't independently confirmable from the drawing
+   alone.
+
+### Validation notes (2026-08-30 rewrite)
+
+The **first version of this section was substantially wrong** — logged
+here rather than silently replaced, since the corrections change the whole
+shape of the diagram, not just one detail:
+- **Missed that the tank has two outlets entirely.** The first pass only
+  traced one path out of the tank (to the pump) and treated a second,
+  separate line as if it were a continuation of the same run toward the
+  boiler. Re-cropping the tank's bottom edge at high zoom showed two
+  distinct stub fittings, not one.
+- **Never identified the pump's discharge path at all** — the first
+  version went straight from "pump" to "3-way tee" as if the tee sat on
+  the pump's output side. It's actually on the **suction** side (merging
+  tank outlet B with the safety valve's discharge back into the pump's
+  inlet); the pump's actual discharge runs a completely different path up
+  toward the boiler, which the first version never traced.
+- **Mislabeled the 3-way tee as sitting between the pump and the boiler.**
+  It doesn't — per the above, it's a suction-side junction, not a
+  discharge-side one.
+- **Never previously listed tube sizes at all** — the "Tubing legend"
+  table above (added at the user's request) didn't exist in the first
+  version.
+- **Still a reasoned inference, not a certainty:** tube 5's exact function
+  (air-intake for the Pannarello). It's well-supported by the "ASPI" label
+  and the Pannarello destination, but this drawing alone doesn't spell out
+  "aria" (air) anywhere, so treat it as the best available reading, not a
+  confirmed fact.
 
 ## Parts catalog — full listing (ER0270)
 
