@@ -126,6 +126,80 @@ flowchart TD
    run to the pump) and the user manual's own description of its brew/
    hot-water button driving the pump.
 
+### Topographic wiring — physical harness colors
+
+> The functional circuit above is settled; this section instead transcribes
+> the **other half of the same drawing** — the physical wire-color layout
+> (bottom half of `electrical-schematic-SAE0486.pdf`) — translated to
+> English. Added 2026-08-30 after the user supplied a copy of this exact
+> diagram and asked for it to be transcribed to match. Rendered at 8x
+> (~575 DPI) with PyMuPDF and cropped into each connector/terminal
+> individually, same method as the schematic re-checks above.
+
+**Color legend:**
+
+| Italian | English |
+|---------|---------|
+| bianco | White |
+| blu | Blue |
+| marrone | Brown |
+| grigio | Grey |
+| nero | Black |
+| rosso | Red |
+| arancio | Orange |
+
+**Traced connections (high confidence — each is a direct wire run traced
+between two labeled terminals at high zoom):**
+
+| Wire color | From | To |
+|---|---|---|
+| White | Pump (1) | Brew button (10) — the switched leg |
+| Blue | Pump (1) | Same Blue rail as the heating element's (5) terminal, and the mains inlet (2)/main switch (3) wiring below — i.e. the unswitched leg |
+| Blue | Mains inlet (2), **L** pin | Main switch (3), pin **3** |
+| Blue | Mains inlet (2), **N** pin | Main switch (3), pin **2** |
+| Brown | Main switch (3), pin **1** | Brew thermostat (4) |
+| Grey | Main switch (3), pin **4** | Steam thermostat (6) |
+| Red | Steam thermostat (6) | Steam button (7) |
+
+**Walkthrough:**
+1. **Pump wiring matches the field-confirmed fact already in `AGENTS.md`
+   §7 and `HARDWARE_ROADMAP.md` item 4** (White = switched, to the brew
+   button; Blue = unswitched): this transcription is the origin of that
+   fact, now traced directly from the diagram rather than relayed from a
+   photo.
+2. **Main switch (3) is physically a 4-terminal part, not the simple
+   2-terminal switch the single-line schematic implies.** It's drawn as a
+   round connector/switch body with pins 1/2/3/4 in a 2×2 pattern: pins 2
+   and 3 wire straight to the mains inlet's N and L, pins 1 and 4 wire
+   onward to the brew and steam thermostats. **This is a plausible
+   explanation for the open question flagged in the schematic walkthrough
+   above** (switch 3 drawn as a branch with "no load in series," odd for a
+   master switch) — a 4-terminal part fits the parts catalog's separate
+   **"On-off bipolar switch"** (`parts-catalog-ER0270.pdf` TAV.2 pos. 46,
+   P/N `5332004000`, physically listed right next to the mains inlet
+   pos.47 and pump pos.49/50 — the same cluster this topographic diagram
+   draws), rather than the catalog's other, unrelated **"Unipolar
+   switch"** (TAV.1 pos.20). If it's a true bipolar switch, it breaks
+   *both* rails downstream, which would make the single-line schematic's
+   simplification (one switch symbol, no load drawn) more sensible than
+   it first appeared. **Not confirmed** — the diagram is a black box as
+   far as which internal pole pairs with which; a human checking the
+   physical switch is what would actually settle this.
+3. **Steam side confirmed independently:** switch(3) pin 4 → Grey →
+   steam thermostat (6) → Red → steam button (7) is a clean, unambiguous
+   run at high zoom, consistent with the schematic's steam-button-bypass
+   finding.
+4. **Not fully re-traced (lower confidence, not load-bearing for anything
+   in this project):** the Black/Brown run along the bottom edge feeding
+   the brew button (10) and steam button (7), and the Orange wire off the
+   ready lamp (8) — both visually route toward the same components the
+   schematic already places correctly (the L-rail fan-out to both buttons,
+   and the ready lamp's tap into the thermostat junction), so nothing here
+   contradicts the validated schematic, but the exact terminal-level
+   pairing for 7/8/9/10 wasn't pinned down with the same certainty as the
+   rest of this table. Flagging rather than guessing, per this document's
+   own rule for mains-voltage material.
+
 ### Validation notes
 
 **2026-08-30, second pass (high-resolution re-check):** rendered the PDF at
@@ -195,49 +269,48 @@ what was missing before):
 | 4 | DM1206/015 | 5×9mm | 70mm | Silicone | 1 |
 | 5 | PA1062 | 5×9mm | 350mm | Silicone ("ASPI" — see note) | 1 |
 
-**Circuit:**
+**Circuit (corrected 2026-08-30, fifth pass — confirmed directly by the
+user tracing the actual page live, port by port. This is the highest-
+confidence version; see Validation notes for what changed from the fourth
+pass):**
 
 ```mermaid
 flowchart TD
-    TANKA["Tank — outlet A"] -- "tube 1 (120mm)" --> PUMPIN["Pump suction inlet"]
-    TANKB["Tank — outlet B"] -- "tube (unlabeled run)" --> TWAY["3-way tee (passive)"]
-    SAFETY["Boiler safety valve<br/>discharge (16 bar)"] -- "tube 4 (70mm)" --> TWAY
-    TWAY -- "tube 1 (120mm, 2nd)" --> PUMPIN
+    TANK["Tank (two ports:<br/>outlet + return-in)"] -- "tube 5 (350mm) ASPI" --> T1["Tee 1 (suction)"]
+    T1 -- "tube 1 (120mm)" --> PUMPIN["Pump suction inlet"]
     PUMPIN --> PUMP["Pump"]
-    PUMP -- "discharge, tube 2 (150mm)" --> BOILER["Boiler — water inlet"]
-    RVAP["Rubinetto vapore<br/>(steam valve, on boiler)"] -- "tube 3 (200mm) — steam" --> WAND["Steam wand / Pannarello"]
-    RVAP -- "tube 5 (350mm) — air intake, probable" --> WAND
+    PUMP -- "discharge" --> T2["Tee 2 (discharge,<br/>check valve)"]
+    T2 -- "tube 2 + 3 (150+200mm)" --> BOILER["Boiler — water inlet"]
+    T2 -. "separate connecting pipe<br/>(tubes 2/3 shared run)" .-> T1
+    SAFETY["Boiler safety valve (16 bar)"] -- "tube 4 (70mm) +<br/>independent run" --> TANK
+    BOILER --- RVAP["Rubinetto vapore<br/>(steam valve, on boiler)"]
+    RVAP -- "Tubo vapore (flexible hose,<br/>not one of tags 1-5)" --> WAND["Steam wand / Pannarello"]
 ```
 
 **Walkthrough:**
-1. **The tank has two separate bottom outlets** (confirmed by zooming into
-   the drawing — both are visible as distinct stub fittings on the tank's
-   bottom edge, not one outlet drawn twice):
-   - **Outlet A** feeds the pump's suction inlet **directly** through a
-     120mm tube (tag 1) — short, unambiguous, a clean single connection.
-   - **Outlet B** runs down and over to the **3-way tee** ("Raccordo 3
-     vie"), which also receives the boiler's 16-bar safety valve's
-     discharge (tag 4, 70mm) on a second port. The tee's third port feeds
-     back **up to the same pump suction inlet** through a second 120mm
-     tube (also tag 1 — the parts table's qty=2 is exactly these two
-     uses). So the pump's suction is fed by outlet A directly *and*
-     outlet B indirectly (merged with any safety-valve discharge) at the
-     same inlet point.
-2. **The pump's discharge (pressurized) side** feeds up toward the boiler's
-   own water inlet — this is the pump actually doing its job (drawing from
-   the tank, pushing to the boiler), which was missing from the first
-   version entirely.
-3. **The steam side is a separate, distinct sub-circuit**, not fed by the
-   tank/pump path at all: the boiler's own steam valve ("Rubinetto vapore")
-   feeds the steam wand/Pannarello through tube 3 (200mm). A second tube
-   (tag 5, 350mm) runs alongside it to the same wand assembly — given it's
-   explicitly labeled "ASPI" (**aspirazione**) in the parts table, and the
-   wand is a Pannarello-style frother (parts catalog item 45), this is most
-   likely the **frother's air-intake tube** (Pannarellos froth by drawing
-   in air via venturi effect alongside the steam, not by carrying water) —
-   not a water-suction line at all. This reading fits the tube's label and
-   destination well, but isn't independently confirmable from the drawing
-   alone.
+1. **Two separate connecting pipes, not one, and not zero** — this took
+   three attempts to get right (see Validation notes): the third pass had
+   both the Tee2-Tee1 link *and* the safety valve sharing one junction; the
+   fourth pass over-corrected and dropped the Tee2-Tee1 link entirely,
+   attaching the safety valve straight to the tank instead. The user's
+   final direct trace confirmed **both connections exist independently**:
+   - **Tee 2 &harr; Tee 1**: a separate pipe links the two tees directly to
+     each other (sharing tubes 2/3's run), alongside their main jobs (Tee 1
+     merging the tank's supply into the pump's suction; Tee 2 splitting the
+     pump's discharge toward the boiler).
+   - **Boiler safety valve &rarr; Tank**: a second, fully independent line,
+     touching neither tee, running from the valve straight to a **second
+     port on the tank** (tag 4's 70mm stub is the short local connector at
+     the valve end of this run).
+2. **This settles where item 7's pressure-transducer T-fitting goes**: the
+   **Tee 2 &rarr; boiler segment specifically** is the only branch that
+   carries the pump's actual delivered pressure without also reflecting
+   the Tee2-Tee1 connecting pipe or the safety-return line.
+3. **The steam side remains a separate, distinct sub-circuit**, not fed by
+   the tank/pump/return path at all and not made of any of tags 1-5: the
+   boiler's own steam valve ("Rubinetto vapore") feeds the steam wand/
+   Pannarello through its own flexible hose ("Tubo vapore"), a wand-
+   assembly component, not one of the five silicone tubes in this table.
 
 ### Validation notes (2026-08-30 rewrite)
 
@@ -266,6 +339,50 @@ shape of the diagram, not just one detail:
   and the Pannarello destination, but this drawing alone doesn't spell out
   "aria" (air) anywhere, so treat it as the best available reading, not a
   confirmed fact.
+
+**2026-08-30, second correction — verified directly against the actual page
+image, not a description of it:** the guess above (tube 5 = Pannarello
+air-intake) was wrong. Tube 5 (350mm, "ASPI") is drawn on the tank-to-pump
+side of the circuit, not anywhere near the steam wand — it's the tank's
+suction run to the suction-side tee, exactly what "aspirazione" (suction)
+would suggest once its actual position is visible. The steam wand is fed
+by its own flexible hose off the "Rubinetto vapore," not by any of tags
+1-5.
+
+**2026-08-30, third correction — the second pass still had the discharge
+side wrong.** It assumed tubes 2+3 ran directly from the pump's outlet to
+the boiler with nothing in between. Confirmed directly by the user tracing
+the live page port-by-port: there are **two tees, not one**. A second tee
+sits right at the pump's discharge (with a check valve), splitting toward
+the boiler *and* tying into the same 16-bar safety-valve return line that
+also joins the suction-side tee — so tags 2/3 are mostly the **return
+line**, not a clean pump-to-boiler run, and the actual pump-to-boiler feed
+is the short segment between this new discharge tee and the boiler itself.
+This matters concretely for item 7: the pressure-transducer T-fitting has
+to go on that specific boiler-bound segment *after* the check-valve
+junction, not at the junction itself or anywhere on the return line — both
+of which would read the relief path's behavior instead of the pump's
+actual delivered pressure.
+
+**2026-08-30, fourth correction — the third pass's shared junction was
+wrong.** It had the safety-valve return line tying into the pump's
+discharge tee (Tee 2) via a check valve before continuing on to the
+suction tee (Tee 1). Corrected by the user's direct trace: **the
+safety-valve line is fully independent** — it runs straight from the
+boiler's safety valve to a second port on the tank, touching neither tee.
+
+**2026-08-30, fifth correction — the fourth pass over-corrected.** In
+fixing the shared-junction error, it dropped the Tee2-Tee1 connecting pipe
+entirely, as if the two tees no longer had anything linking them.
+Confirmed wrong by the user's final direct trace: **both connections
+exist, independently** — Tee 2 and Tee 1 are linked by their own separate
+pipe (sharing tubes 2/3's run), *and* the safety valve's line to the tank
+is a completely separate, third physical run. Three corrections in from
+the same "two tees" discovery, but this is the version confirmed
+port-by-port with nothing left unaccounted for. None of this changes item
+7's answer — the transducer still goes on the Tee 2 → boiler segment
+specifically, since that's the one branch none of these connecting pipes
+touch.
 
 ## Parts catalog — full listing (ER0270)
 
