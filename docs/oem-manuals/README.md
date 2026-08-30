@@ -29,100 +29,131 @@ From the parts catalog (TAV. 2 — CALDAIA):
 From the hydraulic schematic (SAI0103):
 - **Safety valve discharge rating: 16 bar** ("SCARICO VALVOLA DI SICUREZZA 16 bar").
 
-## Electrical circuit — best-effort transcription (SAE0486)
+## Electrical circuit — transcription (SAE0486)
 
 > **Read this before touching anything mains-voltage.** This is an AI's
-> best-effort visual reading of a hand/CAD-drawn schematic, transcribed into
-> text so an agent without PDF access can still work from it — it is
-> **not a substitute for the original drawing**. Confidence varies by branch
-> (marked below). This project's actual mains build (`AGENTS.md` Section 7)
-> is a from-scratch clean-bypass circuit that does **not** depend on any of
-> this legacy panel topology being correct — nothing here should be used to
-> justify reviving the old panel wiring without first re-verifying against
-> the PDF (`electrical-schematic-SAE0486.pdf`) or the physical machine.
+> visual reading of a hand/CAD-drawn schematic, cross-checked against the
+> parts catalog and basic component physics (see **Validation notes**
+> below) and transcribed into text so an agent without PDF access can still
+> work from it — it is **not a substitute for the original drawing**.
+> Confidence varies by branch (marked below). This project's actual mains
+> build (`AGENTS.md` Section 7) is a from-scratch clean-bypass circuit that
+> does **not** depend on any of this legacy panel topology being correct —
+> nothing here should be used to justify reviving the old panel wiring
+> without first re-verifying against the PDF
+> (`electrical-schematic-SAE0486.pdf`) or the physical machine.
 
-**Legend** (schematic's own numbering — do not confuse with the *user
-manual's* separate FIG.01 numbering, which numbers the same kind of parts
-differently):
+**Legend** (numbering is the schematic's own — the *user manual*'s separate
+FIG.01 numbers the same kind of parts differently, don't cross-reference the
+two by number):
 
-| # | Italian | English |
-|---|---------|---------|
-| 1 | Pompa | Pump |
-| 2 | Spina autobloccante | Self-locking connector (in the pump's supply wire) |
-| 3 | Interruttore ON/OFF | Main on/off switch |
-| 4 | Termostato caffè | Brew thermostat (95°C) |
-| 5 | Resistenza | Heating element |
-| 6 | Termostato vapore | Steam thermostat (127°C) |
-| 7 | Interruttore vapore | Steam button |
-| 8 | Spia pronto macchina | "Ready" lamp |
-| 9 | ON/OFF spia | Power-on lamp |
-| 10 | Interruttore caffè | Brew button |
+| # | Component | Original Italian label |
+|---|-----------|-------------------------|
+| 1 | Pump | Pompa |
+| 2 | Mains power-cord inlet socket (3-pole) | Spina autobloccante |
+| 3 | Main ON/OFF switch | Interruttore ON/OFF |
+| 4 | Brew thermostat, 95°C | Termostato caffè |
+| 5 | Heating element | Resistenza |
+| 6 | Steam thermostat, 127°C | Termostato vapore |
+| 7 | Steam button | Interruttore vapore |
+| 8 | "Ready" lamp | Spia pronto macchina |
+| 9 | Power-on lamp | ON/OFF spia |
+| 10 | Brew button | Interruttore caffè |
 
-**As-read circuit** (both rails, L and N, are the incoming mains supply):
+**Circuit** (L and N are the incoming mains rails, sourced through inlet
+socket 2):
 
 ```mermaid
 flowchart TD
-    L(("L (mains live)"))
-    N(("N (mains neutral)"))
+    L(("L — mains live"))
+    N(("N — mains neutral"))
 
-    L --> SW3["3 · Main ON/OFF switch"]
-    SW3 --> LMP9["9 · Power-on lamp"]
+    L --> SW3["Main ON/OFF switch"]
+    SW3 --> LMP9["Power-on lamp"]
     LMP9 --> N
 
-    L --> T4["4 · Brew thermostat (95°C)"]
-    L -.-> SW7["7 · Steam button<br/>(bypasses T4 when pressed)"]
-    T4 --> LMP8["8 · Ready lamp"]
-    SW7 -.-> LMP8
-    LMP8 --> T6["6 · Steam thermostat (127°C)"]
-    T6 --> R5["5 · Heating element"]
+    L --> T4["Brew thermostat, 95°C"]
+    L -. "bypasses brew thermostat<br/>when pressed" .-> SW7["Steam button"]
+    T4 --> J((" "))
+    SW7 -.-> J
+    J -- parallel tap --> LMP8["Ready lamp"]
+    LMP8 --> N
+    J --> T6["Steam thermostat, 127°C"]
+    T6 --> R5["Heating element, 1000W"]
     R5 --> N
 
-    L --> SW10["10 · Brew button"]
-    SW10 --> PLUG2["2 · Connector"]
-    PLUG2 --> PUMP1["1 · Pump"]
+    L --> SW10["Brew button"]
+    SW10 --> PUMP1["Pump"]
     PUMP1 --> N
 ```
 
-**Plain-English walkthrough:**
-1. **Power branch (high confidence):** main switch (3) in series with the
-   power-on lamp (9), straight across L→N. Lights whenever the machine is
-   switched on — independent of everything else.
-2. **Heating branch (high confidence on the series chain, lower on the
-   steam-button's exact tap point):** brew thermostat (4) → ready lamp (8) →
-   steam thermostat (6) → heating element (5) → N. The lamp being in series
-   with both thermostats and the heater matches this machine class's known
-   "ready" behavior: the lamp is **lit while actively heating** and **goes
-   dark once a thermostat opens** (i.e., "off" is the actual ready signal,
-   not "on" — counterintuitive but standard for this era of Gaggia). The
-   steam button (7) most likely bypasses/shorts thermostat 4 when pressed,
-   letting the loop keep heating past 95°C up toward thermostat 6's 127°C
-   cutoff — that's the well-corroborated *functional* effect (matches every
-   other single-boiler Gaggia of this design), but the literal wire path
-   for that bypass is the one piece of this diagram I'd verify against the
-   PDF before relying on it for physical work.
-3. **Pump branch (high confidence):** brew button (10) → connector (2) →
-   pump (1) → N. Matches both the topographic half of this same drawing
-   (wire runs to the pump in "blu") and the user manual's own description
-   of its brew/hot-water button driving the pump.
+**Walkthrough:**
+1. **Power-indicator branch (high confidence):** main switch → power-on
+   lamp, straight across L→N. Lit whenever the machine is switched on,
+   independent of everything else — this branch is a pure indicator, no
+   heating load, so a simple series lamp is electrically unremarkable here.
+2. **Heating branch (high confidence on the overall shape, lower on the
+   steam-button's exact tap point — see Validation notes):** brew
+   thermostat → a junction, from which two things run in **parallel**: the
+   ready lamp straight to N, and the steam thermostat → heating element →
+   N. That parallel split (not a series lamp) is required by simple
+   current-capacity physics — a neon pilot lamp's dropping resistor limits
+   it to a couple of mA, nowhere near enough to also carry a 1000W heater's
+   current if it were in series. The steam button most likely bypasses the
+   brew thermostat when pressed, letting the junction stay powered past
+   95°C so heating continues up toward the steam thermostat's 127°C cutoff
+   — that functional effect is well-corroborated (matches every other
+   single-boiler machine of this design and the "ready lamp goes dark once
+   at temperature" behavior these machines are known for), but the literal
+   bypass wire path is the one piece of this diagram I'd still verify
+   against the PDF before relying on it for physical work.
+3. **Pump branch (high confidence):** brew button → pump → N. Matches both
+   the topographic half of this same drawing (a "blue" wire run to the
+   pump) and the user manual's own description of its brew/hot-water button
+   driving the pump.
 
-## Hydraulic circuit — best-effort transcription (SAI0103)
+### Validation notes (2026-08-30 re-check)
+
+Two corrections found on a deliberate re-check, done because this is
+mains-voltage reference material:
+- **Inlet socket, not a pump connector.** The first pass placed component 2
+  in series with the pump's supply wire, based only on its position near
+  the bottom of the drawing. Cross-checking the parts catalog
+  (`parts-catalog-ER0270.pdf`, TAV.2 item 47: "SPINA AUTOBLOC.TRIPOL." —
+  "self-locking **three-pole** plug") shows it's actually the machine's
+  mains power-cord inlet (3 poles = live/neutral/earth; a pump lead would
+  only need 2). Corrected — it no longer appears in the pump branch.
+- **Ready lamp is a parallel tap, not a series element.** The first pass
+  drew the ready lamp in series between the two thermostats and the
+  heating element. That can't be right: a neon pilot lamp's series
+  resistor limits current to a couple of mA, which can't also carry a
+  1000W element's load. Corrected to a parallel tap after the brew
+  thermostat — same observed lit/dark behavior, physically consistent
+  wiring.
+- **Not independently verifiable from this drawing alone:** the exact wire
+  path of the steam button's bypass around the brew thermostat. The
+  *functional* result (steam button extends heating past 95°C toward
+  127°C) is corroborated by this machine class's well-documented behavior;
+  the literal routing is a best-effort reading of the drawing's layout.
+
+## Hydraulic circuit — transcription (SAI0103)
 
 > Same caveat as above, minus the mains-voltage stakes — this is water
 > plumbing, but still verify against the PDF before doing real plumbing
-> work.
+> work. This one has clear flow arrows in the original, so confidence is
+> high throughout; the re-check above didn't turn up any correction here.
 
 ```mermaid
 flowchart LR
-    TANK["Serbatoio<br/>(tank)"] -- "tube 1, suction" --> PUMP["Pompa<br/>(vibration pump)"]
-    PUMP -- outlet --> TWAY["Raccordo 3 vie<br/>(passive 3-way tee)"]
-    TWAY -- "tube 4 (70mm)" --> SAFETY["Scarico valvola<br/>di sicurezza (16 bar)"]
-    TWAY -- "tubes 2/5/3" --> BOILER["Caldaia<br/>(boiler)"]
-    BOILER --> STEAMTAP["Rubinetto vapore<br/>(steam valve)"]
-    STEAMTAP --> WAND["Tubo vapore<br/>(steam wand / Pannarello)"]
+    TANK["Tank"] -- "suction tube" --> PUMP["Pump"]
+    PUMP -- outlet --> TWAY["3-way tee<br/>(passive)"]
+    TWAY -- "70mm tube" --> SAFETY["Safety-valve<br/>discharge (16 bar)"]
+    TWAY -- "supply tube" --> BOILER["Boiler"]
+    BOILER --> STEAMTAP["Steam valve"]
+    STEAMTAP --> WAND["Steam wand<br/>/ Pannarello"]
 ```
 
-**Plain-English walkthrough (high confidence — this diagram has clear flow
-arrows, unlike the electrical one):**
+**Walkthrough:**
 - Tank supplies the pump's suction side through a single silicone tube.
 - The pump's outlet feeds a **passive 3-way tee** (not an active valve) —
   it just joins three tube runs at one point: the pump outlet, the line
@@ -130,12 +161,133 @@ arrows, unlike the electrical one):**
   wherever the boiler's 16-bar safety valve discharges. So if the safety
   valve ever trips, that relief path re-joins the plumbing near the pump/
   tank area rather than spraying loose inside the case.
-- Separately, the boiler has its own steam-side valve ("Rubinetto vapore")
-  feeding the steam wand/Pannarello — this branch has nothing to do with
-  the tank/pump supply side.
+- Separately, the boiler has its own steam-side valve feeding the steam
+  wand/Pannarello — this branch has nothing to do with the tank/pump
+  supply side.
 - Tubing sizes/lengths per run are in the parts table on the PDF's own
   page (silicone tube, 4.2-9mm bore depending on run) if you need exact
   replacement stock.
+
+## Parts catalog — full listing (ER0270)
+
+Transcribed directly from the catalog's own English column (it's bilingual
+in the source; Italian dropped here since the source already gives English
+descriptions). Positions match the numbered exploded-view diagrams in
+`parts-catalog-ER0270.pdf` — open that PDF if you need to see where a
+position number actually points on the physical part.
+
+### TAV. 1 — Bodywork assembly
+
+| Pos | Part No. | Description |
+|-----|----------|--------------|
+| 01 | 4337026000 | Upper inside package |
+| 02 | 4337027000 | Upper external package |
+| 03 | 4337028000 | Package box |
+| 04 | 4337031000 | Instructions booklet |
+| 05 | WGA2PR/1 | Separator |
+| 06 | NF08/002 | 1-cup filter, 5.5/6.5g |
+| 07 | NF08/005 | 2-cup filter, 12/14g |
+| 08 | 11005535 | Filter for pod |
+| 09 | 11007038 | "Perfect crema" filter, Ø0.6mm |
+| 10 | WGADM1017 | Measuring scoop |
+| 11 | 4337004000 | Drip grid |
+| 12 | 4337007000 / 11006932 | Drip tray — black (Pure) / red metallic (Color) |
+| 13 | WGAFG0245 | Foot |
+| 14 | 11005482 | Cap for bottom of bodywork |
+| 15 | 11006683 / 11006933 | Body — black (Pure) / red metallic (Color) |
+| 16 | CF0292/SCH (+GB/CH/AUS/USA variants), 11005633 | Power cord (country-specific plug variants) |
+| 17 | 12000782 | Green pilot lamp, 120V-230V |
+| 18 | 4337018000 | Switch button (black) |
+| 19 | 4337019000 | Keys/buttons support |
+| 20 | 5337002000 | Unipolar switch |
+| 21 | 8337008000 | Keyboard cover assembly, black |
+| 22 | 8337005000 | Steam knob assembly |
+| 23 | 4337014000 / 11006935 | Machine cover — black (Pure) / black assembly (Color) |
+| 24 | 11005142 | Tank assembly |
+| 25 | 4337012000 | Tank handle |
+| 26 | 144650800 | Water tank filter |
+| 27 | 140328461 | O-ring, metric 0190-10, EPDM |
+| 28 | 140324362 | O-ring, metric 0060-30, silicone |
+| 29 | 126764718 | Spring for water-container valve |
+| 30 | 147660562 | Water-valve container piston, grey |
+| 31 | 11007400 | Water-valve container piston, black |
+| 32 | 4337010000 | Tank cover |
+| 33 | DM0814 | Spring for timer knob |
+| 34 | 11006030 | Filter basket (plastic) |
+| 35 | 18G1514 | Filter-retaining spring |
+| 36 | 6301002000 | Filter holder cup |
+| 37 | 4332037000 | Filter holder knob |
+| 38 | WGADM1319 | Special screw, 6x16 |
+| 39 | 4332038000 | Filter-holder knob cap |
+| 40 | 4301006000 | 2-way spout |
+| 41 | 4337024000 / 11008908 | Wiring harness assembly (standard / UL variant) |
+| 42 | DI7981P4.2X16Z | Self-tapping galvanized screw, plastic |
+
+### TAV. 2 — Boiler assembly
+
+| Pos | Part No. | Description |
+|-----|----------|--------------|
+| 01 | 11001002 / 11004509 | Heating element, stainless boiler, 1000W — 230V / 120V |
+| 02 | U023.022 | Screw TCEI M6.0x30 |
+| 03 | 11001465 | Brass nut for stainless boiler |
+| 04 | 149361400 | Transparent silicone tube 5x9, 65SH (roll) |
+| 05 | DI7981P3.5X9.5Z | Self-tapping galvanized screw, plastic |
+| 06 | 12000361 | Oetiker clamp, D=9 |
+| 07 | 140323062 | O-ring 2043, silicone |
+| 08 | 11001000 | Brass nozzle, stainless boiler |
+| 09 | 12000160 | **Thermostat, 95°C, model US-622AXTDNO — brew** |
+| 10 | 11000998 | Brass faucet connector, stainless boiler |
+| 11 | 16000380 | Silicone tube 5x8.9 (roll) |
+| 12 | 11001462 | Stainless upper boiler casing |
+| 13 | 12000161 | **Thermostat, 127°C, model US-622AXTDNO — steam** |
+| 14 | 140320662 | O-ring 106, silicone |
+| 15 | 11000994 | Thermostat-retaining spring |
+| 16 | 128310304 | Washer, burnished |
+| 17 | 129821402 | Screw TCB M3x4 |
+| 18 | 12000087 | O-ring, metric 0850-30, silicone |
+| 19 | 123390109 | Brass nut, 1/8 gas |
+| 20 | 11004588 | Stainless lower boiler casing/base assembly |
+| 21 | EF0012 | Seal for valve |
+| 22 | EF0013 | Spring for boiler valve |
+| 23 | 11000996 | Brass valve-holder screw |
+| 24 | 11005079 / 11009073 | Filter-holder retaining ring — 230V / 120V |
+| 25 | 0701.031.150 | Seal cover, grey |
+| 26 | 129535721 | Screw TSP 3.5x9.5, stainless |
+| 27 | 145842900 | Water-container valve seal (Gaco, dim.14) |
+| 28 | 0701.014.150 | Seal container, grey |
+| 29 | 140320461 | O-ring, metric 0080-20, Termoil |
+| 30 | 11007402 | Seal cover, black |
+| 31 | 11007403 | Water-container valve seal, silicone (Gaco, dim.14) |
+| 32 | 11007401 | Seal container, black |
+| 33 | DI7981P4.2X16Z | Self-tapping galvanized screw, plastic |
+| 34 | 4337008000 | Components plate |
+| 35 | UN5931-5X12I | Screw 5x12, stainless |
+| 36 | 11001471 | Percolator/shower disc, Ø49.5 |
+| 37 | DI7987-5X8I | Screw TSP M5x8, stainless |
+| 38 | 11004543 | Filter-holder seal |
+| 39 | 4337005000 | Power-inlet support bracket |
+| 40 | 4332055000 | Support for spherical union |
+| 41 | 4332049000 | Spherical union (Grivory) |
+| 42 | DM0041/088 | O-ring gasket 2025, EPDM |
+| 43 | 4332050000 | Coupling for spherical union |
+| 44 | AM0011/01 | Steam tube, lower, chromed |
+| 45 | 8301006000 | Frother/Pannarello assembly |
+| 46 | 5332004000 | On-off bipolar switch |
+| 47 | DM1563/GW / NE13.013 | **Mains power-cord inlet — self-locking 3-pole plug (230V) / IEC C13 cup socket (120V)** |
+| 48 | 4337009000 / 11006934 | Power-input mask — black (Pure) / red metallic (Color) |
+| 49 | WGADY0003 | Pump support, Ulka |
+| 50 | 12000140 / 12000142 | **Pump, Ulka EP5/S GW (230V-50Hz) / EAP5/S (120V-60Hz)** |
+| 51 | 147920300 | Tee connector, D=8 |
+| 52 | 11001007 | Boiler valve assembly, black |
+| 53 | DM1596 | Pump suction inlet fitting |
+| 54 | 9011.144 | Fork for D.4 tube |
+| 55 | 11007270 | Faucet/cock body (self-priming valve) |
+| 56 | 11001003 | Faucet shaft, brass |
+| 57 | WGAEF0061 | Sphere, Viton 85SH, D=5 |
+| 58 | EF0099 | Self-priming valve discharge fitting |
+| 59 | EF0111 | Gasket, Teflon |
+| 60 | WGADM0041/031 | O-ring 2018, Viton 70SH |
+| 61 | PA1062 | Pump suction pipe |
 
 ## What this does and doesn't settle
 

@@ -65,12 +65,14 @@ README.
 project's exact machine, "New Espresso 06 / Pure & Color"): electrical
 schematic, hydraulic/water-circuit schematic, parts catalog, and user manual,
 all in [`docs/oem-manuals/`](docs/oem-manuals/README.md). That README also
-has a **plain-text/Mermaid transcription of both schematics** (the actual
-circuit topology, not just the legend) so an agent without PDF access can
-still read them — **check there before treating any thermostat/pump/heater
-spec here as unconfirmed**, and only open the actual PDF if you need to
-verify a detail the transcription itself flags as lower-confidence (it's an
-AI's best-effort reading, not a substitute for the original on anything
+has a **plain-English/Mermaid transcription of both schematics** (the actual
+circuit topology, not just the legend) plus the **full parts catalog**
+transcribed as tables, so an agent without PDF access can still read all of
+it — **check there before treating any thermostat/pump/heater spec here as
+unconfirmed**, and only open the actual PDF if you need to verify a detail
+the transcription itself flags as lower-confidence (it's an AI's best-effort
+reading, cross-checked once already — see the README's "Validation notes" —
+but still not a substitute for the original on anything
 mains-voltage).
 
 ---
@@ -822,6 +824,43 @@ everything again.
 ---
 
 ## 10. Change Log
+
+### 2026-08-30 — Claude Code (Sonnet 5) — Translated schematic transcriptions to English; corrected two errors found on re-check; added full parts-catalog transcription
+- **User asked for the transcriptions in English and asked for them to be
+  validated.** Re-examined the electrical schematic image a third time,
+  specifically hunting for mistakes rather than just re-confirming the
+  first pass, and found two real ones (both now fixed in
+  `docs/oem-manuals/README.md`):
+  - **Component 2 ("spina autobloccante") was wrongly placed in series with
+    the pump.** Cross-checking the parts catalog (TAV.2 item 47: "self-
+    locking **three-pole** plug") shows it's the machine's mains power-cord
+    inlet socket (3 poles = live/neutral/earth — a 2-wire pump lead
+    wouldn't need three), not a pump-specific connector. Removed from the
+    pump branch.
+  - **The "ready" lamp (8) was wrongly drawn in series** between the two
+    thermostats and the 1000W heating element. A neon pilot lamp's own
+    dropping resistor limits it to a couple of mA — physically incapable of
+    also carrying a 1000W element's current in series. Corrected to a
+    parallel tap after the brew thermostat (same lit/dark behavior,
+    physically consistent wiring this time).
+  - Left correctly flagged as still-uncertain: the steam button's literal
+    bypass wire path around the brew thermostat (the *functional* effect is
+    well-corroborated; the exact routing isn't independently verifiable
+    from this drawing alone).
+  - Added a "Validation notes" subsection to the README documenting this
+    re-check process and both corrections, rather than silently fixing them
+    - this is mains-voltage-adjacent reference material and the corrections
+    are worth a future agent knowing happened.
+- **Rewrote both transcriptions (and their legend/labels) in English**,
+  keeping the original Italian term only in the legend table for
+  traceability back to the source PDF's own labels.
+- **Added a full English transcription of the parts catalog** (both
+  TAV.1 Bodywork and TAV.2 Boiler exploded-view tables, ~100 line items)
+  to `docs/oem-manuals/README.md`, sourced from the catalog's own English
+  description column - so part numbers/descriptions are readable without
+  opening the PDF at all, not just the previously-extracted highlights
+  (thermostats/heater/pump/safety-valve).
+- Documentation only - no firmware or wiring changes.
 
 ### 2026-08-30 — Claude Code (Sonnet 5) — Transcribed the OEM electrical/hydraulic schematics into plain-text/Mermaid form
 - **User asked for the wiring/water schemes to be readable by any agent**,
