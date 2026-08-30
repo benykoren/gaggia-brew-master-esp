@@ -97,14 +97,15 @@
 // ============================================================================
 #define PIN_SSR 4
 
-// Pump relay (HARDWARE_ROADMAP.md item 4) - NOT YET WIRED. Software (phase
-// state machine, pre-infusion timing) is built ahead of the hardware, same
-// pattern already used for shot auto-stop before item 4 existed at all.
-// GPIO5 is free (next available after PIN_SSR=4, PIN_SENSOR_RX/TX=18/17) -
-// confirm/change once the relay is actually wired in. PIN_PUMP_ACTIVE_LEVEL
-// is a one-line flip for whichever polarity the specific relay module turns
-// out to need - HARDWARE_ROADMAP.md item 4 explicitly warns many
-// opto-isolated modules energize on LOW, not HIGH; don't assume.
+// Pump relay (HARDWARE_ROADMAP.md item 4, revived 2026-08-30 - see AGENTS.md
+// change log) - NC relay module, control side (GPIO5/VCC/GND) wired; the
+// mains-side splice at the pump's own terminals (COM/NC) is not done yet.
+// GPIO5 was free (next available after PIN_SSR=4, PIN_SENSOR_RX/TX=18/17).
+// PIN_PUMP_ACTIVE_LEVEL=HIGH matches the relay module's trigger jumper (set
+// to H) - bench-test this (relay should click on GPIO5 HIGH with nothing
+// connected to COM/NO/NC) before ever wiring it to the pump. "Active"/
+// energized means the NC contact is OPEN (interrupting the pump), not "pump
+// on" - see setPumpRelay() in main.cpp.
 #define PIN_PUMP 5
 #define PIN_PUMP_ACTIVE_LEVEL HIGH
 
@@ -365,10 +366,10 @@ enum class AutotuneState { IDLE, RUNNING, DONE_OK, DONE_FAIL };
 // puck-saturation benefit of true low-pressure pre-infusion using only an
 // on/off relay (no dimmer/pressure transducer needed - those remain a
 // separate, harder item). Per-profile, not global - each saved profile
-// carries its own pre-infusion pattern (or none). Software-only until
-// PIN_PUMP is actually wired; the phase state machine and timing are built
-// now so nothing needs revisiting once the relay arrives, same "software
-// ahead of hardware" pattern already proven for shot auto-stop.
+// carries its own pre-infusion pattern (or none). Has no effect on the real
+// pump until the mains-side splice (item 4) is done; the phase state machine
+// and timing were built ahead of the hardware, same "software ahead of
+// hardware" pattern already proven for shot auto-stop.
 #define PREINFUSION_PULSES_DEFAULT 4
 #define PREINFUSION_PULSES_MAX 10
 #define PREINFUSION_ON_MS_DEFAULT 1000
