@@ -542,6 +542,7 @@ double pressureKp = PUMP_PRESSURE_KP_DEFAULT, pressureKi = PUMP_PRESSURE_KI_DEFA
 PID pressurePID(&pressureInput, &pressureOutput, &pressureSetpoint, pressureKp, pressureKi,
                 pressureKd, DIRECT);
 static bool pressureClosedLoopActive = false;
+static float plainDutyPercent = 0.0f;
 
 float currentPressure = 0.0;
 bool pressureFault = false;
@@ -589,7 +590,8 @@ static void applyShotStagePumpOutput(const ShotStage &stage) {
   } else {
     pressureClosedLoopActive = false;
     pressurePID.SetMode(MANUAL);
-    dimmerSetPowerPercent(stage.type == ShotStage::Type::PUMP_OFF ? 0.0f : 100.0f);
+    plainDutyPercent = (stage.type == ShotStage::Type::PUMP_OFF) ? 0.0f : 100.0f;
+    dimmerSetPowerPercent(plainDutyPercent);
   }
 }
 
@@ -1030,6 +1032,8 @@ static void controlTick(unsigned long now) {
     pressureInput = currentPressure;
     pressurePID.Compute();
     dimmerSetPowerPercent((float)pressureOutput);
+  } else {
+    dimmerSetPowerPercent(plainDutyPercent);
   }
 
   // Safety ceiling always wins, independent of PID/profile output - same
