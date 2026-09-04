@@ -21,6 +21,19 @@ extern float tempHistory[];
 extern int tempHistoryHead;
 extern int tempHistoryCount;
 
+extern float currentPressure;
+extern bool pressureFault;
+extern bool activePressureEnabled;
+extern double activePressureRampBar;
+extern unsigned long activePressureRampMs;
+extern bool activePressureDeclineEnabled;
+extern double activePressureDeclineBar;
+extern unsigned long activePressureDeclineMs;
+extern double pressureKp, pressureKi, pressureKd;
+extern float pressureHistory[];
+extern int pressureHistoryHead;
+extern int pressureHistoryCount;
+
 extern OpMode currentMode;
 extern double brewSetpoint, brewKp, brewKi, brewKd;
 extern double brewActiveKp, brewActiveKi, brewActiveKd;
@@ -1580,6 +1593,21 @@ static void handleStatus(AsyncWebServerRequest *request) {
     int idx = (snapHistoryHead - snapHistoryCount + i + TEMP_HISTORY_LEN * 2) % TEMP_HISTORY_LEN;
     snapHistory[i] = tempHistory[idx];
   }
+  bool snapPressureFault = pressureFault;
+  float snapPressure = currentPressure;
+  bool snapPressEnabled = activePressureEnabled;
+  double snapPressRampBar = activePressureRampBar;
+  unsigned long snapPressRampMs = activePressureRampMs;
+  bool snapPressDeclineEnabled = activePressureDeclineEnabled;
+  double snapPressDeclineBar = activePressureDeclineBar;
+  unsigned long snapPressDeclineMs = activePressureDeclineMs;
+  double snapPressKp = pressureKp, snapPressKi = pressureKi, snapPressKd = pressureKd;
+  int snapPressHistoryCount = pressureHistoryCount, snapPressHistoryHead = pressureHistoryHead;
+  float snapPressHistory[TEMP_HISTORY_LEN];
+  for (int i = 0; i < snapPressHistoryCount; i++) {
+    int idx = (snapPressHistoryHead - snapPressHistoryCount + i + TEMP_HISTORY_LEN * 2) % TEMP_HISTORY_LEN;
+    snapPressHistory[i] = pressureHistory[idx];
+  }
   unlockState();
 
   String json = "{";
@@ -1674,10 +1702,22 @@ static void handleStatus(AsyncWebServerRequest *request) {
   json += ",\"pi_pulses\":" + String(snapPiPulses);
   json += ",\"pi_on_ms\":" + String(snapPiOnMs);
   json += ",\"pi_off_ms\":" + String(snapPiOffMs);
+  json += ",\"pressure\":" + String(snapPressure, 2);
+  json += ",\"pressure_fault\":" + String(snapPressureFault ? "true" : "false");
+  json += ",\"press_enabled\":" + String(snapPressEnabled ? "true" : "false");
+  json += ",\"press_ramp_bar\":" + String(snapPressRampBar);
+  json += ",\"press_ramp_ms\":" + String(snapPressRampMs);
+  json += ",\"press_decline_enabled\":" + String(snapPressDeclineEnabled ? "true" : "false");
+  json += ",\"press_decline_bar\":" + String(snapPressDeclineBar);
+  json += ",\"press_decline_ms\":" + String(snapPressDeclineMs);
+  json += ",\"press_kp\":" + String(snapPressKp, 4);
+  json += ",\"press_ki\":" + String(snapPressKi, 4);
+  json += ",\"press_kd\":" + String(snapPressKd, 4);
   json += ",\"shot_phase\":\"";
   switch (snapShotPhase) {
     case ShotPhase::PREINFUSION_ON:
     case ShotPhase::PREINFUSION_OFF: json += "preinfusion"; break;
+    case ShotPhase::PRESSURE: json += "pressure"; break;
     case ShotPhase::EXTRACTION: json += "extraction"; break;
     default: json += "none"; break;
   }
@@ -1697,6 +1737,12 @@ static void handleStatus(AsyncWebServerRequest *request) {
   for (int i = 0; i < snapHistoryCount; i++) {
     if (i > 0) json += ",";
     json += String(snapHistory[i], 1);
+  }
+  json += "]";
+  json += ",\"pressure_history\":[";
+  for (int i = 0; i < snapPressHistoryCount; i++) {
+    if (i > 0) json += ",";
+    json += String(snapPressHistory[i], 2);
   }
   json += "]";
 
