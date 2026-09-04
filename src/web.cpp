@@ -10,6 +10,7 @@
 #include <Update.h>
 #include <time.h>
 
+#include "dimmer.h"
 #include "profiles.h"
 #include "shot_log.h"
 
@@ -564,12 +565,12 @@ const char *index_html = R"rawliteral(
           <label class="check-row"><input type="checkbox" id="input_profile_press_enabled"> Pressure profile</label>
           <p class="hint" style="margin-top:var(--sp-2)">Closed-loop pressure ramp, held for a duration, then an optional decline near the end of the shot. Needs the transducer + dimmer wired (HARDWARE_ROADMAP.md items 7/8).</p>
           <div class="field-row-3" style="margin-top:var(--sp-3)">
-            <div class="field"><label for="input_profile_press_ramp_bar">Ramp target (bar)</label><input type="number" step="0.1" id="input_profile_press_ramp_bar" value="9"></div>
+            <div class="field"><label for="input_profile_press_ramp_bar">Ramp target (bar)</label><input type="number" step="0.1" min="0" max="11.9" id="input_profile_press_ramp_bar" value="9"></div>
             <div class="field"><label for="input_profile_press_ramp_sec">Ramp/hold (sec)</label><input type="number" step="1" min="1" id="input_profile_press_ramp_sec" value="20"></div>
           </div>
           <label class="check-row"><input type="checkbox" id="input_profile_press_decline_enabled"> Declining finish</label>
           <div class="field-row-3" style="margin-top:var(--sp-3)">
-            <div class="field"><label for="input_profile_press_decline_bar">Decline target (bar)</label><input type="number" step="0.1" id="input_profile_press_decline_bar" value="6"></div>
+            <div class="field"><label for="input_profile_press_decline_bar">Decline target (bar)</label><input type="number" step="0.1" min="0" max="11.9" id="input_profile_press_decline_bar" value="6"></div>
             <div class="field"><label for="input_profile_press_decline_sec">Decline (sec)</label><input type="number" step="1" min="1" id="input_profile_press_decline_sec" value="8"></div>
           </div>
           <div class="chart-card">
@@ -1678,6 +1679,13 @@ static void handleStatus(AsyncWebServerRequest *request) {
   double snapPressDeclineBar = activePressureDeclineBar;
   unsigned long snapPressDeclineMs = activePressureDeclineMs;
   double snapPressKp = pressureKp, snapPressKi = pressureKi, snapPressKd = pressureKd;
+  // Pump telemetry - lets a bench operator (Milestones A-C) distinguish
+  // "pump idle" / "pump at 100% duty" / "PID commanding some percent" /
+  // "safety ceiling just tripped it to 0%", most importantly the last one
+  // now that Fix 1 makes an unwired-sensor fault the likeliest Milestone A
+  // confusion point.
+  float snapPumpPower = dimmerGetPowerPercent();
+  bool snapPressureCeilingTripped = (pressureFault || currentPressure > PUMP_MAX_SAFETY_BAR);
   int snapPressHistoryCount = pressureHistoryCount, snapPressHistoryHead = pressureHistoryHead;
   float snapPressHistory[TEMP_HISTORY_LEN];
   for (int i = 0; i < snapPressHistoryCount; i++) {
@@ -1780,6 +1788,8 @@ static void handleStatus(AsyncWebServerRequest *request) {
   json += ",\"pi_off_ms\":" + String(snapPiOffMs);
   json += ",\"pressure\":" + String(snapPressure, 2);
   json += ",\"pressure_fault\":" + String(snapPressureFault ? "true" : "false");
+  json += ",\"pump_power\":" + String(snapPumpPower, 1);
+  json += ",\"pressure_ceiling_tripped\":" + String(snapPressureCeilingTripped ? "true" : "false");
   json += ",\"press_enabled\":" + String(snapPressEnabled ? "true" : "false");
   json += ",\"press_ramp_bar\":" + String(snapPressRampBar);
   json += ",\"press_ramp_ms\":" + String(snapPressRampMs);
@@ -2040,15 +2050,23 @@ static void handleUpdate(AsyncWebServerRequest *request) {
     int offMs = hasArg("profile_pi_off_ms")
         ? constrain(arg("profile_pi_off_ms").toInt(), PREINFUSION_PULSE_MS_MIN, PREINFUSION_PULSE_MS_MAX) : PREINFUSION_OFF_MS_DEFAULT;
     bool pressureEnabled = hasArg("profile_press_enabled") && arg("profile_press_enabled") == "1";
+    // Clamped the same way the neighboring fields above are (see
+    // steam_max_safety's comment elsewhere in this file) - a typo in this
+    // field shouldn't be able to command the PID to push toward a
+    // dangerously high ceiling.
     double pressureRampBar = hasArg("profile_press_ramp_bar")
-        ? arg("profile_press_ramp_bar").toDouble() : PRESSURE_RAMP_BAR_DEFAULT;
+        ? constrain(arg("profile_press_ramp_bar").toDouble(), 0.0, PUMP_MAX_SAFETY_BAR - 1.0)
+        : PRESSURE_RAMP_BAR_DEFAULT;
     unsigned long pressureRampMs = hasArg("profile_press_ramp_ms")
-        ? (unsigned long)arg("profile_press_ramp_ms").toInt() : PRESSURE_RAMP_MS_DEFAULT;
+        ? (unsigned long)constrain((long)arg("profile_press_ramp_ms").toInt(), 0L, 120000L)
+        : PRESSURE_RAMP_MS_DEFAULT;
     bool pressureDeclineEnabled = hasArg("profile_press_decline_enabled") && arg("profile_press_decline_enabled") == "1";
     double pressureDeclineBar = hasArg("profile_press_decline_bar")
-        ? arg("profile_press_decline_bar").toDouble() : PRESSURE_DECLINE_BAR_DEFAULT;
+        ? constrain(arg("profile_press_decline_bar").toDouble(), 0.0, PUMP_MAX_SAFETY_BAR - 1.0)
+        : PRESSURE_DECLINE_BAR_DEFAULT;
     unsigned long pressureDeclineMs = hasArg("profile_press_decline_ms")
-        ? (unsigned long)arg("profile_press_decline_ms").toInt() : PRESSURE_DECLINE_MS_DEFAULT;
+        ? (unsigned long)constrain((long)arg("profile_press_decline_ms").toInt(), 0L, 120000L)
+        : PRESSURE_DECLINE_MS_DEFAULT;
     int saved = profileSave(idx, name, temp, autoStop, piEnabled, pulses, onMs, offMs,
                              pressureEnabled, pressureRampBar, pressureRampMs,
                              pressureDeclineEnabled, pressureDeclineBar, pressureDeclineMs);

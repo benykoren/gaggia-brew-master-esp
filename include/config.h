@@ -136,6 +136,10 @@
 #define PRESSURE_FAULT_MIN_SAMPLES 5
 #define PRESSURE_FAULT_RATE_THRESHOLD 0.5f
 
+// Same smoothing idea as TEMP_EMA_ALPHA - cuts ADC noise reaching the PID
+// and the safety-ceiling comparison.
+#define PRESSURE_EMA_ALPHA 0.3f
+
 // Hard safety ceiling - comfortably under the machine's 16-bar safety valve
 // rating (docs/oem-manuals/hydraulic-schematic-SAI0103.pdf), above the
 // ~9 bar working target. Forces the dimmer to 0% immediately if exceeded or
@@ -375,14 +379,13 @@ enum class AutotuneState { IDLE, RUNNING, DONE_OK, DONE_FAIL };
 // persisted in NVS. Default sits in the middle of the 25-30s SCA-referenced
 // extraction window already shown in the Web UI.
 //
-// IMPORTANT - this is a software-only auto-stop right now: it ends the
-// firmware's own shot bookkeeping (timer, history log entry, reverting the
-// Brew gain profile from active back to gentle - see the brew-active gains
-// above) - it does NOT physically stop the pump. There's no hardware yet
-// that can cut the pump's own power (see AGENTS.md/HARDWARE_ROADMAP.md item
-// 4, not yet built) - water keeps flowing until the machine's own Brew
-// switch is released by hand, same as always. Don't confuse "the shot timer
-// stopped" with "the machine stopped brewing" until item 4 exists.
+// This ends the firmware's own shot bookkeeping (timer, history log entry,
+// reverting the Brew gain profile from active back to gentle - see the
+// brew-active gains above) AND physically stops the pump: stopShot() (in
+// main.cpp) drives the dimmer to 0% via dimmerSetPowerPercent(0.0f)
+// (HARDWARE_ROADMAP.md item 8). The old NC pump relay (item 4) that this
+// comment used to warn about has since been removed - see AGENTS.md change
+// log, 2026-09-04.
 #define SHOT_AUTO_STOP_SEC_DEFAULT 27
 #define SHOT_AUTO_STOP_SEC_MIN 5
 #define SHOT_AUTO_STOP_SEC_MAX 90
@@ -419,16 +422,15 @@ enum class AutotuneState { IDLE, RUNNING, DONE_OK, DONE_FAIL };
 #define PROFILE_NAME_MAX_LEN 20
 #define PROFILE_LOG_PATH "/profiles.csv"
 
-// Pre-infusion (2026-08-16) - see AGENTS.md/HARDWARE_ROADMAP.md item 4 for
-// the full reasoning. Pulses the pump relay on/off a few times before
-// switching to continuous power for the rest of the shot, approximating the
-// puck-saturation benefit of true low-pressure pre-infusion using only an
-// on/off relay (no dimmer/pressure transducer needed - those remain a
-// separate, harder item). Per-profile, not global - each saved profile
-// carries its own pre-infusion pattern (or none). Has no effect on the real
-// pump until the mains-side splice (item 4) is done; the phase state machine
-// and timing were built ahead of the hardware, same "software ahead of
-// hardware" pattern already proven for shot auto-stop.
+// Pre-infusion (2026-08-16, originally built ahead of hardware against the
+// old NC pump relay - item 4 - see AGENTS.md/HARDWARE_ROADMAP.md; that relay
+// was removed 2026-09-04 after an unresolved brownout bug). Pulses the pump
+// on/off a few times before switching to continuous power for the rest of
+// the shot, approximating the puck-saturation benefit of true low-pressure
+// pre-infusion. Now physically driven by the dimmer (item 8) via
+// dimmerSetPowerPercent(), same as the rest of pump control. Per-profile,
+// not global - each saved profile carries its own pre-infusion pattern (or
+// none).
 #define PREINFUSION_PULSES_DEFAULT 4
 #define PREINFUSION_PULSES_MAX 10
 #define PREINFUSION_ON_MS_DEFAULT 1000

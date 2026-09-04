@@ -47,7 +47,10 @@ static void IRAM_ATTR onZeroCross(void *arg) {
 void dimmerInit() {
   pinMode(PIN_DIMMER_GATE, OUTPUT);
   digitalWrite(PIN_DIMMER_GATE, LOW);
-  pinMode(PIN_DIMMER_ZC, INPUT);
+  // Opto-isolated zero-cross detector outputs are commonly open-collector -
+  // pull up so a floating/idle line reads a deterministic HIGH instead of
+  // risking spurious interrupt triggers from a floating input.
+  pinMode(PIN_DIMMER_ZC, INPUT_PULLUP);
 
   esp_timer_create_args_t timerArgs = {};
   timerArgs.callback = &fireGate;
@@ -62,6 +65,14 @@ void dimmerSetPowerPercent(float percent) {
   if (percent < 0.0f) percent = 0.0f;
   if (percent > 100.0f) percent = 100.0f;
   targetPercent = percent;
+  if (percent <= 0.0f) {
+    // A safety cutoff to 0% must not still be followed by one
+    // already-scheduled gate pulse up to ~10ms later from a timer armed
+    // just before the cutoff was requested - cancel it outright. Return
+    // code ignored, same as onZeroCross()'s own esp_timer_stop() call
+    // above: it's a no-op if the timer isn't currently armed.
+    esp_timer_stop(fireTimer);
+  }
 }
 
 float dimmerGetPowerPercent() { return targetPercent; }

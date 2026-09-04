@@ -601,7 +601,14 @@ static void applyShotStagePumpOutput(const ShotStage &stage) {
       // Bumpless start: seed Output from wherever the dimmer already sits
       // (e.g. 100% coming out of a PUMP_ON pre-infusion pulse) instead of
       // snapping to 0 - same bumpless-reset principle used for temperature.
+      // Also seed Input from the current reading rather than leaving it
+      // stale (0.0 on the very first shot after boot) - PID_v1's
+      // Initialize() seeds its internal lastInput from whatever Input
+      // currently holds when SetMode(AUTOMATIC) runs, and a stale Input
+      // would produce a spurious derivative kick the first time Kd is
+      // tuned nonzero.
       pressureOutput = dimmerGetPowerPercent();
+      pressureInput = currentPressure;
       pressurePID.SetMode(MANUAL);
       pressurePID.SetMode(AUTOMATIC);
     }
@@ -630,15 +637,21 @@ static void buildShotStages() {
     }
   }
 
+  // Belt-and-braces clamp: these can also arrive straight from NVS (e.g. a
+  // stray value written outside the Web UI's own clamp in web.cpp's
+  // handleUpdate()), bypassing that clamp entirely - clamp again here so a
+  // bad value can never reach the PID as a setpoint.
   float lastPressureTarget = 0.0f;
   if (activePressureEnabled) {
+    float rampBar = min((float)activePressureRampBar, (float)(PUMP_MAX_SAFETY_BAR - 1.0));
     activeShotStages[activeStageCount++] = {ShotStage::Type::PRESSURE_TARGET,
-                                             activePressureRampMs, (float)activePressureRampBar};
-    lastPressureTarget = (float)activePressureRampBar;
+                                             activePressureRampMs, rampBar};
+    lastPressureTarget = rampBar;
     if (activePressureDeclineEnabled) {
+      float declineBar = min((float)activePressureDeclineBar, (float)(PUMP_MAX_SAFETY_BAR - 1.0));
       activeShotStages[activeStageCount++] = {ShotStage::Type::PRESSURE_TARGET,
-                                               activePressureDeclineMs, (float)activePressureDeclineBar};
-      lastPressureTarget = (float)activePressureDeclineBar;
+                                               activePressureDeclineMs, declineBar};
+      lastPressureTarget = declineBar;
     }
   }
 
@@ -1017,7 +1030,17 @@ static void controlTick(unsigned long now) {
     pressureFault = updateFaultWindow(pBadWindow, PRESSURE_FAULT_WINDOW, pBadIndex, pBadFilled,
                                        pBadCount, PRESSURE_FAULT_MIN_SAMPLES,
                                        PRESSURE_FAULT_RATE_THRESHOLD, pBadRead);
-    if (!pressureFault && !pBadRead) currentPressure = bar;
+    if (!pressureFault && !pBadRead) {
+      // Exponential moving average - same smoothing idea as the temperature
+      // sensor's TEMP_EMA_ALPHA blend above, cuts ADC noise reaching the PID
+      // and the safety-ceiling comparison. Skip blending right after boot
+      // (no meaningful history yet).
+      if (currentPressure <= 0.0f) {
+        currentPressure = bar;
+      } else {
+        currentPressure = PRESSURE_EMA_ALPHA * bar + (1.0f - PRESSURE_EMA_ALPHA) * currentPressure;
+      }
+    }
   }
 
   // Temperature history sampling (independent of the 250ms read cadence) -
@@ -1036,11 +1059,13 @@ static void controlTick(unsigned long now) {
     }
   }
 
-  // Shot auto-stop - see config.h/SHOT_AUTO_STOP_SEC_DEFAULT for the full
-  // caveat: this ends the firmware's OWN shot bookkeeping (timer, history
-  // log, Brew gain profile revert) at the configured duration, timed from
-  // the manual Start Shot tap. It does not physically stop the pump - no
-  // hardware exists yet to do that (see HARDWARE_ROADMAP.md item 4).
+  // Shot auto-stop - see config.h/SHOT_AUTO_STOP_SEC_DEFAULT: this ends the
+  // firmware's OWN shot bookkeeping (timer, history log, Brew gain profile
+  // revert) at the configured duration, timed from the manual Start Shot
+  // tap. This also physically stops the pump via stopShot()'s
+  // dimmerSetPowerPercent(0.0f) call (HARDWARE_ROADMAP.md item 8) - unlike
+  // the old relay-based design, there's no separate "firmware bookkeeping
+  // only" caveat any more.
   if (shotInProgress && shotAutoStopSec > 0 &&
       now - shotStartMillis >= shotAutoStopSec * 1000UL) {
     Serial.printf("Shot auto-stop: %lu s reached\n", shotAutoStopSec);
@@ -1074,9 +1099,26 @@ static void controlTick(unsigned long now) {
   }
 
   // Safety ceiling always wins, independent of PID/profile output - same
-  // rule as activeMaxSafety for temperature.
-  if (pressureFault || currentPressure > PUMP_MAX_SAFETY_BAR) {
+  // rule as activeMaxSafety for temperature. The fault half is gated on
+  // pressureClosedLoopActive: plain-duty stages (the only kind that exist
+  // until a pressure profile is enabled) never depended on the pressure
+  // sensor at all before this feature existed, so an unwired/faulted sensor
+  // shouldn't be able to force the pump off during, e.g., Milestone A's
+  // dimmer bench test before the transducer is even wired in. A genuine
+  // over-ceiling reading always wins regardless of sensor "in use" state.
+  if ((pressureClosedLoopActive && pressureFault) || currentPressure > PUMP_MAX_SAFETY_BAR) {
     dimmerSetPowerPercent(0.0f);
+    if (pressureClosedLoopActive) {
+      // Also reset the pressure PID's integral accumulator (same bumpless
+      // trick used for the temperature loop's own safety-ceiling force-off
+      // branch above) so it isn't left wound-up at whatever value it held
+      // right before crossing the ceiling - without this, it re-fires at
+      // full power the instant the trip condition clears, causing bang-bang
+      // oscillation against the ceiling.
+      pressureOutput = 0;
+      pressurePID.SetMode(MANUAL);
+      pressurePID.SetMode(AUTOMATIC);
+    }
   }
 
   // Scheduled warm-up (see config.h) - minute-granularity, so checking once a

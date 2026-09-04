@@ -12,15 +12,28 @@
 static const float PRESSURE_PLAUSIBLE_MAX_BAR = PUMP_MAX_SAFETY_BAR * 1.5f;
 
 void pressureSensorInit() {
-  pinMode(PIN_PRESSURE_ADC, INPUT);
+  // Pulled down, not a plain floating input: an unconnected ADC1 pin floats
+  // and reads noisy mid-scale voltages, which the calibration formula below
+  // converts to plausible-looking bar values right around
+  // PUMP_MAX_SAFETY_BAR - exactly the failure mode that let sensor noise
+  // intermittently force the pump off during Milestone A's dimmer bench
+  // test, before the transducer is even wired in (see main.cpp's
+  // pressureClosedLoopActive-gated safety-ceiling check). With the pulldown,
+  // an unwired sensor reads ~0mV -> bar ~= -2.0 -> below the -0.5
+  // plausibility floor below -> deterministically OUT_OF_RANGE instead of a
+  // plausible-but-wrong reading.
+  pinMode(PIN_PRESSURE_ADC, INPUT_PULLDOWN);
   analogReadResolution(12); // 0-4095, matches the ESP32-S3 ADC's native width
 }
 
 PressureSensorStatus pressureSensorRead(float &outBar) {
-  int raw = analogRead(PIN_PRESSURE_ADC);
-  float mv = (raw / 4095.0f) * 3300.0f; // ESP32-S3 ADC1 full-scale is ~3.3V
+  // analogReadMilliVolts() uses the chip's factory eFuse ADC calibration and
+  // its nonlinearity correction near the rails, instead of a hand-rolled
+  // raw-count-to-mV linear scale - improves accuracy for the bench
+  // calibration step (Milestone B).
+  uint32_t mv = analogReadMilliVolts(PIN_PRESSURE_ADC);
 
-  float bar = (mv - PRESSURE_SENSOR_ZERO_MV) / PRESSURE_SENSOR_MV_PER_BAR;
+  float bar = ((float)mv - PRESSURE_SENSOR_ZERO_MV) / PRESSURE_SENSOR_MV_PER_BAR;
 
   if (bar < -0.5f || bar > PRESSURE_PLAUSIBLE_MAX_BAR) {
     outBar = 0.0f;
