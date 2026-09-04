@@ -1551,7 +1551,15 @@ Serial command or by starting a shot with a profile that has no pre-infusion
 and no pressure control (falls straight to `EXTRACTION` at plain 100% -
 temporarily hardcode a lower test percent if needed, revert after). Confirm
 the lamp dims smoothly and zero-cross timing looks stable (no flicker at a
-fixed percent).
+fixed percent) **first at idle, then specifically under WiFi load** (open
+the Web UI and leave it polling `/status` every 2s, or start an OTA-sized
+transfer) - the gate-fire callback runs in the esp_timer task rather than a
+true hardware ISR on this build (confirmed during final review: this
+board's sdkconfig doesn't enable `ESP_TIMER_ISR` dispatch), so idle-only
+testing would not actually exercise the jitter this architecture is meant
+to survive. Visible flicker appearing only under WiFi load is the tell that
+this needs revisiting with real hardware to validate a fix against,
+rather than guessing at one now.
 
 - [ ] **Step 2: Physically disconnect the old relay's control-side wiring**
 
