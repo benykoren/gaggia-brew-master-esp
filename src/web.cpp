@@ -555,11 +555,22 @@ const char *index_html = R"rawliteral(
             <div class="field"><label for="input_profile_autostop">Auto-stop (sec)</label><input type="number" step="1" min="5" max="90" id="input_profile_autostop" value="27" oninput="drawProfilePreview()"></div>
           </div>
           <label class="check-row"><input type="checkbox" id="input_profile_pi_enabled" onchange="drawProfilePreview()"> Pulsed pre-infusion</label>
-          <p class="hint" style="margin-top:var(--sp-2)">Cycles the pump on/off a few times before switching to continuous power - approximates the puck-saturation benefit of true low-pressure pre-infusion using just an on/off relay. Needs the pump relay wired (HARDWARE_ROADMAP.md item 4) to have any physical effect - software-only until then.</p>
+          <p class="hint" style="margin-top:var(--sp-2)">Cycles the pump on/off a few times before switching to continuous power - approximates the puck-saturation benefit of true low-pressure pre-infusion. Needs the dimmer wired (HARDWARE_ROADMAP.md item 8) to have any physical effect.</p>
           <div class="field-row-3" style="margin-top:var(--sp-3)">
             <div class="field"><label for="input_profile_pi_pulses">Pulses</label><input type="number" step="1" min="0" max="10" id="input_profile_pi_pulses" value="3" oninput="drawProfilePreview()"></div>
             <div class="field"><label for="input_profile_pi_on">On (sec)</label><input type="number" step="0.1" min="0.2" max="5" id="input_profile_pi_on" value="1" oninput="drawProfilePreview()"></div>
             <div class="field"><label for="input_profile_pi_off">Off (sec)</label><input type="number" step="0.1" min="0.2" max="5" id="input_profile_pi_off" value="2" oninput="drawProfilePreview()"></div>
+          </div>
+          <label class="check-row"><input type="checkbox" id="input_profile_press_enabled"> Pressure profile</label>
+          <p class="hint" style="margin-top:var(--sp-2)">Closed-loop pressure ramp, held for a duration, then an optional decline near the end of the shot. Needs the transducer + dimmer wired (HARDWARE_ROADMAP.md items 7/8).</p>
+          <div class="field-row-3" style="margin-top:var(--sp-3)">
+            <div class="field"><label for="input_profile_press_ramp_bar">Ramp target (bar)</label><input type="number" step="0.1" id="input_profile_press_ramp_bar" value="9"></div>
+            <div class="field"><label for="input_profile_press_ramp_sec">Ramp/hold (sec)</label><input type="number" step="1" min="1" id="input_profile_press_ramp_sec" value="20"></div>
+          </div>
+          <label class="check-row"><input type="checkbox" id="input_profile_press_decline_enabled"> Declining finish</label>
+          <div class="field-row-3" style="margin-top:var(--sp-3)">
+            <div class="field"><label for="input_profile_press_decline_bar">Decline target (bar)</label><input type="number" step="0.1" id="input_profile_press_decline_bar" value="6"></div>
+            <div class="field"><label for="input_profile_press_decline_sec">Decline (sec)</label><input type="number" step="1" min="1" id="input_profile_press_decline_sec" value="8"></div>
           </div>
           <div class="chart-card">
             <div class="chart-label"><span>Pump pattern preview</span><span id="profile_preview_label">&nbsp;</span></div>
@@ -1456,6 +1467,12 @@ function editProfile(idx) {
   document.getElementById("input_profile_pi_pulses").value = p.pulses;
   document.getElementById("input_profile_pi_on").value = p.on_ms / 1000;
   document.getElementById("input_profile_pi_off").value = p.off_ms / 1000;
+  document.getElementById("input_profile_press_enabled").checked = p.pressure_enabled;
+  document.getElementById("input_profile_press_ramp_bar").value = p.pressure_ramp_bar;
+  document.getElementById("input_profile_press_ramp_sec").value = p.pressure_ramp_ms / 1000;
+  document.getElementById("input_profile_press_decline_enabled").checked = p.pressure_decline_enabled;
+  document.getElementById("input_profile_press_decline_bar").value = p.pressure_decline_bar;
+  document.getElementById("input_profile_press_decline_sec").value = p.pressure_decline_ms / 1000;
   document.getElementById("profile_form_title").textContent = "Edit \"" + p.name + "\"";
   document.getElementById("profile_form_submit").textContent = "Save Changes";
   document.getElementById("profile_editor_card").scrollIntoView({ behavior: "smooth", block: "center" });
@@ -1471,6 +1488,12 @@ function newProfileForm() {
   document.getElementById("input_profile_pi_pulses").value = 3;
   document.getElementById("input_profile_pi_on").value = 1;
   document.getElementById("input_profile_pi_off").value = 2;
+  document.getElementById("input_profile_press_enabled").checked = false;
+  document.getElementById("input_profile_press_ramp_bar").value = 9;
+  document.getElementById("input_profile_press_ramp_sec").value = 20;
+  document.getElementById("input_profile_press_decline_enabled").checked = false;
+  document.getElementById("input_profile_press_decline_bar").value = 6;
+  document.getElementById("input_profile_press_decline_sec").value = 8;
   document.getElementById("profile_form_title").textContent = "New Profile";
   document.getElementById("profile_form_submit").textContent = "Add Profile";
   drawProfilePreview();
@@ -1515,6 +1538,12 @@ function submitProfileForm(ev) {
   q += "&profile_pi_pulses=" + document.getElementById("input_profile_pi_pulses").value;
   q += "&profile_pi_on_ms=" + Math.round(document.getElementById("input_profile_pi_on").value * 1000);
   q += "&profile_pi_off_ms=" + Math.round(document.getElementById("input_profile_pi_off").value * 1000);
+  q += "&profile_press_enabled=" + (document.getElementById("input_profile_press_enabled").checked ? "1" : "0");
+  q += "&profile_press_ramp_bar=" + document.getElementById("input_profile_press_ramp_bar").value;
+  q += "&profile_press_ramp_ms=" + Math.round(document.getElementById("input_profile_press_ramp_sec").value * 1000);
+  q += "&profile_press_decline_enabled=" + (document.getElementById("input_profile_press_decline_enabled").checked ? "1" : "0");
+  q += "&profile_press_decline_bar=" + document.getElementById("input_profile_press_decline_bar").value;
+  q += "&profile_press_decline_ms=" + Math.round(document.getElementById("input_profile_press_decline_sec").value * 1000);
 
   // Inline save feedback (disable + label swap) instead of nothing happening
   // until the list silently refreshes - same "no toast library, just button
