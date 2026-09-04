@@ -1023,17 +1023,25 @@ static void controlTick(unsigned long now) {
   // tickShotStages()).
   tickShotStages(now);
 
-  // Pressure PID - only drives the dimmer while a pressure-targeting stage
-  // is active (pressureClosedLoopActive, set by applyShotStagePumpOutput()
-  // above, including any transition tickShotStages() just made this tick);
-  // plain-duty stages already set the dimmer directly at their own stage
-  // transition and don't need a per-tick update.
-  if (pressureClosedLoopActive) {
-    pressureInput = currentPressure;
-    pressurePID.Compute();
-    dimmerSetPowerPercent((float)pressureOutput);
-  } else {
-    dimmerSetPowerPercent(plainDutyPercent);
+  // Pump restore - only while a shot is actually running (shotInProgress);
+  // stopShot() already forced the dimmer to 0% and nothing should touch it
+  // again until the next startShot(), otherwise the plain-duty branch below
+  // would immediately re-drive the dimmer back to its last recorded duty
+  // (typically 100%) on the very next tick after stop. While a shot IS
+  // running: pressure-targeting stages (pressureClosedLoopActive, set by
+  // applyShotStagePumpOutput() above, including any transition
+  // tickShotStages() just made this tick) get a fresh PID compute every
+  // tick; plain-duty stages get plainDutyPercent (set at their own stage
+  // transition) re-asserted every tick too, so the safety-ceiling check
+  // right below has something correct to restore once a trip clears.
+  if (shotInProgress) {
+    if (pressureClosedLoopActive) {
+      pressureInput = currentPressure;
+      pressurePID.Compute();
+      dimmerSetPowerPercent((float)pressureOutput);
+    } else {
+      dimmerSetPowerPercent(plainDutyPercent);
+    }
   }
 
   // Safety ceiling always wins, independent of PID/profile output - same
