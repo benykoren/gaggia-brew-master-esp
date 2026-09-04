@@ -461,6 +461,11 @@ const char *index_html = R"rawliteral(
           <div class="chart-label"><span>Temp &middot; last 2 min</span><span>&deg;C</span></div>
           <canvas id="temp_chart" width="300" height="60"></canvas>
         </div>
+
+        <div class="chart-card">
+          <div class="chart-label"><span>Pressure &middot; last 2 min</span><span id="pressure_label">-- bar</span></div>
+          <canvas id="pressure_chart" width="300" height="60"></canvas>
+        </div>
       </div>
 
       <div class="card">
@@ -514,6 +519,19 @@ const char *index_html = R"rawliteral(
             <input type="number" step="1" min="100" max="150" name="steam_max_safety" id="input_steam_max_safety" value="">
           </div>
           <button type="submit" class="submit">Save Steam</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <div class="tab-section-title">Pump Pressure</div>
+        <form action="/update" method="GET">
+          <p class="hint">Closed-loop control for the pressure ramp/decline stages of a shot profile (HARDWARE_ROADMAP.md item 8). Has no effect on plain on/off pre-infusion pulses.</p>
+          <div class="field-row-3">
+            <div class="field"><label for="input_press_kp">Kp</label><input type="number" step="any" name="press_kp" id="input_press_kp" value=""></div>
+            <div class="field"><label for="input_press_ki">Ki</label><input type="number" step="0.01" name="press_ki" id="input_press_ki" value=""></div>
+            <div class="field"><label for="input_press_kd">Kd</label><input type="number" step="any" name="press_kd" id="input_press_kd" value=""></div>
+          </div>
+          <button type="submit" class="submit">Save Pump Pressure</button>
         </form>
       </div>
 
@@ -814,6 +832,28 @@ function drawSparkline(data) {
   ctx.stroke();
 }
 
+function drawPressureSparkline(data) {
+  var canvas = document.getElementById("pressure_chart");
+  if (!canvas || !data || data.length < 2) return;
+  var ctx = canvas.getContext("2d");
+  var w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  var min = Math.min.apply(null, data), max = Math.max.apply(null, data);
+  if (max - min < 0.5) { max += 0.25; min -= 0.25; }
+  if (min > 0) min = 0; // pressure chart always includes zero for scale
+
+  ctx.beginPath();
+  data.forEach(function (v, i) {
+    var x = (i / (data.length - 1)) * w;
+    var y = h - ((v - min) / (max - min)) * (h - 6) - 3;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = "#3f8cd9";
+  ctx.lineWidth = 2.5;
+  ctx.lineJoin = "round";
+  ctx.stroke();
+}
+
 function formatElapsed(ms) {
   var s = Math.floor(ms / 1000);
   var m = Math.floor(s / 60);
@@ -1090,6 +1130,9 @@ setInterval(function () {
       document.getElementById("output").innerHTML = outputPct.toFixed(0);
       trackPhaseMarkers(json.shot_phase, json.shot_in_progress);
       drawSparkline(json.history);
+      drawPressureSparkline(json.pressure_history);
+      var pLabel = document.getElementById("pressure_label");
+      if (pLabel) pLabel.textContent = (json.pressure_fault ? "fault" : json.pressure.toFixed(2) + " bar");
 
       // Temperature ring - fill amount reuses the same ratio the linear bar
       // used before; color is the functional "heating / ready / over" signal,
@@ -1132,6 +1175,9 @@ setInterval(function () {
       setVal("input_steam_ki", json.steam_ki);
       setVal("input_steam_kd", json.steam_kd);
       setVal("input_steam_max_safety", json.steam_max_safety);
+      setVal("input_press_kp", json.press_kp);
+      setVal("input_press_ki", json.press_ki);
+      setVal("input_press_kd", json.press_kd);
       setVal("input_mqtt_server", json.mqtt_server || "");
       setVal("input_mqtt_port", json.mqtt_port);
       setVal("input_mqtt_user", json.mqtt_user || "");
