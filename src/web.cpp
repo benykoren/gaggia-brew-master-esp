@@ -10,6 +10,7 @@
 #include <Update.h>
 #include <time.h>
 
+#include "dimmer.h"
 #include "profiles.h"
 #include "shot_log.h"
 
@@ -17,9 +18,23 @@ extern float currentTemperature;
 extern bool sensorFault;
 extern double Setpoint, Input, Output;
 extern PID myPID;
+extern PID pressurePID;
 extern float tempHistory[];
 extern int tempHistoryHead;
 extern int tempHistoryCount;
+
+extern float currentPressure;
+extern bool pressureFault;
+extern bool activePressureEnabled;
+extern double activePressureRampBar;
+extern unsigned long activePressureRampMs;
+extern bool activePressureDeclineEnabled;
+extern double activePressureDeclineBar;
+extern unsigned long activePressureDeclineMs;
+extern double pressureKp, pressureKi, pressureKd;
+extern float pressureHistory[];
+extern int pressureHistoryHead;
+extern int pressureHistoryCount;
 
 extern OpMode currentMode;
 extern double brewSetpoint, brewKp, brewKi, brewKd;
@@ -447,6 +462,11 @@ const char *index_html = R"rawliteral(
           <div class="chart-label"><span>Temp &middot; last 2 min</span><span>&deg;C</span></div>
           <canvas id="temp_chart" width="300" height="60"></canvas>
         </div>
+
+        <div class="chart-card">
+          <div class="chart-label"><span>Pressure &middot; last 2 min</span><span id="pressure_label">-- bar</span></div>
+          <canvas id="pressure_chart" width="300" height="60"></canvas>
+        </div>
       </div>
 
       <div class="card">
@@ -504,6 +524,19 @@ const char *index_html = R"rawliteral(
       </div>
 
       <div class="card">
+        <div class="tab-section-title">Pump Pressure</div>
+        <form action="/update" method="GET">
+          <p class="hint">Closed-loop control for the pressure ramp/decline stages of a shot profile (HARDWARE_ROADMAP.md item 8). Has no effect on plain on/off pre-infusion pulses.</p>
+          <div class="field-row-3">
+            <div class="field"><label for="input_press_kp">Kp</label><input type="number" step="any" name="press_kp" id="input_press_kp" value=""></div>
+            <div class="field"><label for="input_press_ki">Ki</label><input type="number" step="0.01" name="press_ki" id="input_press_ki" value=""></div>
+            <div class="field"><label for="input_press_kd">Kd</label><input type="number" step="any" name="press_kd" id="input_press_kd" value=""></div>
+          </div>
+          <button type="submit" class="submit">Save Pump Pressure</button>
+        </form>
+      </div>
+
+      <div class="card">
         <div class="tab-section-title">Shot Profiles</div>
         <p class="hint">Each profile is a saved (temperature, auto-stop time, pre-infusion pattern) bundle - quick-select chips on the Now tab load one into the live Brew settings above. Loading a profile doesn't lock you to it; editing Brew target/auto-stop directly still works as always.</p>
         <div id="profile_list_body"><!-- populated from GET /profiles --></div>
@@ -523,11 +556,22 @@ const char *index_html = R"rawliteral(
             <div class="field"><label for="input_profile_autostop">Auto-stop (sec)</label><input type="number" step="1" min="5" max="90" id="input_profile_autostop" value="27" oninput="drawProfilePreview()"></div>
           </div>
           <label class="check-row"><input type="checkbox" id="input_profile_pi_enabled" onchange="drawProfilePreview()"> Pulsed pre-infusion</label>
-          <p class="hint" style="margin-top:var(--sp-2)">Cycles the pump on/off a few times before switching to continuous power - approximates the puck-saturation benefit of true low-pressure pre-infusion using just an on/off relay. Needs the pump relay wired (HARDWARE_ROADMAP.md item 4) to have any physical effect - software-only until then.</p>
+          <p class="hint" style="margin-top:var(--sp-2)">Cycles the pump on/off a few times before switching to continuous power - approximates the puck-saturation benefit of true low-pressure pre-infusion. Needs the dimmer wired (HARDWARE_ROADMAP.md item 8) to have any physical effect.</p>
           <div class="field-row-3" style="margin-top:var(--sp-3)">
             <div class="field"><label for="input_profile_pi_pulses">Pulses</label><input type="number" step="1" min="0" max="10" id="input_profile_pi_pulses" value="3" oninput="drawProfilePreview()"></div>
             <div class="field"><label for="input_profile_pi_on">On (sec)</label><input type="number" step="0.1" min="0.2" max="5" id="input_profile_pi_on" value="1" oninput="drawProfilePreview()"></div>
             <div class="field"><label for="input_profile_pi_off">Off (sec)</label><input type="number" step="0.1" min="0.2" max="5" id="input_profile_pi_off" value="2" oninput="drawProfilePreview()"></div>
+          </div>
+          <label class="check-row"><input type="checkbox" id="input_profile_press_enabled"> Pressure profile</label>
+          <p class="hint" style="margin-top:var(--sp-2)">Closed-loop pressure ramp, held for a duration, then an optional decline near the end of the shot. Needs the transducer + dimmer wired (HARDWARE_ROADMAP.md items 7/8).</p>
+          <div class="field-row-3" style="margin-top:var(--sp-3)">
+            <div class="field"><label for="input_profile_press_ramp_bar">Ramp target (bar)</label><input type="number" step="0.1" min="0" max="11.9" id="input_profile_press_ramp_bar" value="9"></div>
+            <div class="field"><label for="input_profile_press_ramp_sec">Ramp/hold (sec)</label><input type="number" step="1" min="1" id="input_profile_press_ramp_sec" value="20"></div>
+          </div>
+          <label class="check-row"><input type="checkbox" id="input_profile_press_decline_enabled"> Declining finish</label>
+          <div class="field-row-3" style="margin-top:var(--sp-3)">
+            <div class="field"><label for="input_profile_press_decline_bar">Decline target (bar)</label><input type="number" step="0.1" min="0" max="11.9" id="input_profile_press_decline_bar" value="6"></div>
+            <div class="field"><label for="input_profile_press_decline_sec">Decline (sec)</label><input type="number" step="1" min="1" id="input_profile_press_decline_sec" value="8"></div>
           </div>
           <div class="chart-card">
             <div class="chart-label"><span>Pump pattern preview</span><span id="profile_preview_label">&nbsp;</span></div>
@@ -795,6 +839,28 @@ function drawSparkline(data) {
     if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   });
   ctx.strokeStyle = "#d98c3f";
+  ctx.lineWidth = 2.5;
+  ctx.lineJoin = "round";
+  ctx.stroke();
+}
+
+function drawPressureSparkline(data) {
+  var canvas = document.getElementById("pressure_chart");
+  if (!canvas || !data || data.length < 2) return;
+  var ctx = canvas.getContext("2d");
+  var w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  var min = Math.min.apply(null, data), max = Math.max.apply(null, data);
+  if (max - min < 0.5) { max += 0.25; min -= 0.25; }
+  if (min > 0) min = 0; // pressure chart always includes zero for scale
+
+  ctx.beginPath();
+  data.forEach(function (v, i) {
+    var x = (i / (data.length - 1)) * w;
+    var y = h - ((v - min) / (max - min)) * (h - 6) - 3;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = "#3f8cd9";
   ctx.lineWidth = 2.5;
   ctx.lineJoin = "round";
   ctx.stroke();
@@ -1076,6 +1142,9 @@ setInterval(function () {
       document.getElementById("output").innerHTML = outputPct.toFixed(0);
       trackPhaseMarkers(json.shot_phase, json.shot_in_progress);
       drawSparkline(json.history);
+      drawPressureSparkline(json.pressure_history);
+      var pLabel = document.getElementById("pressure_label");
+      if (pLabel) pLabel.textContent = (json.pressure_fault ? "fault" : json.pressure.toFixed(2) + " bar");
 
       // Temperature ring - fill amount reuses the same ratio the linear bar
       // used before; color is the functional "heating / ready / over" signal,
@@ -1118,6 +1187,9 @@ setInterval(function () {
       setVal("input_steam_ki", json.steam_ki);
       setVal("input_steam_kd", json.steam_kd);
       setVal("input_steam_max_safety", json.steam_max_safety);
+      setVal("input_press_kp", json.press_kp);
+      setVal("input_press_ki", json.press_ki);
+      setVal("input_press_kd", json.press_kd);
       setVal("input_mqtt_server", json.mqtt_server || "");
       setVal("input_mqtt_port", json.mqtt_port);
       setVal("input_mqtt_user", json.mqtt_user || "");
@@ -1396,6 +1468,12 @@ function editProfile(idx) {
   document.getElementById("input_profile_pi_pulses").value = p.pulses;
   document.getElementById("input_profile_pi_on").value = p.on_ms / 1000;
   document.getElementById("input_profile_pi_off").value = p.off_ms / 1000;
+  document.getElementById("input_profile_press_enabled").checked = p.pressure_enabled;
+  document.getElementById("input_profile_press_ramp_bar").value = p.pressure_ramp_bar;
+  document.getElementById("input_profile_press_ramp_sec").value = p.pressure_ramp_ms / 1000;
+  document.getElementById("input_profile_press_decline_enabled").checked = p.pressure_decline_enabled;
+  document.getElementById("input_profile_press_decline_bar").value = p.pressure_decline_bar;
+  document.getElementById("input_profile_press_decline_sec").value = p.pressure_decline_ms / 1000;
   document.getElementById("profile_form_title").textContent = "Edit \"" + p.name + "\"";
   document.getElementById("profile_form_submit").textContent = "Save Changes";
   document.getElementById("profile_editor_card").scrollIntoView({ behavior: "smooth", block: "center" });
@@ -1411,6 +1489,12 @@ function newProfileForm() {
   document.getElementById("input_profile_pi_pulses").value = 3;
   document.getElementById("input_profile_pi_on").value = 1;
   document.getElementById("input_profile_pi_off").value = 2;
+  document.getElementById("input_profile_press_enabled").checked = false;
+  document.getElementById("input_profile_press_ramp_bar").value = 9;
+  document.getElementById("input_profile_press_ramp_sec").value = 20;
+  document.getElementById("input_profile_press_decline_enabled").checked = false;
+  document.getElementById("input_profile_press_decline_bar").value = 6;
+  document.getElementById("input_profile_press_decline_sec").value = 8;
   document.getElementById("profile_form_title").textContent = "New Profile";
   document.getElementById("profile_form_submit").textContent = "Add Profile";
   drawProfilePreview();
@@ -1455,6 +1539,12 @@ function submitProfileForm(ev) {
   q += "&profile_pi_pulses=" + document.getElementById("input_profile_pi_pulses").value;
   q += "&profile_pi_on_ms=" + Math.round(document.getElementById("input_profile_pi_on").value * 1000);
   q += "&profile_pi_off_ms=" + Math.round(document.getElementById("input_profile_pi_off").value * 1000);
+  q += "&profile_press_enabled=" + (document.getElementById("input_profile_press_enabled").checked ? "1" : "0");
+  q += "&profile_press_ramp_bar=" + document.getElementById("input_profile_press_ramp_bar").value;
+  q += "&profile_press_ramp_ms=" + Math.round(document.getElementById("input_profile_press_ramp_sec").value * 1000);
+  q += "&profile_press_decline_enabled=" + (document.getElementById("input_profile_press_decline_enabled").checked ? "1" : "0");
+  q += "&profile_press_decline_bar=" + document.getElementById("input_profile_press_decline_bar").value;
+  q += "&profile_press_decline_ms=" + Math.round(document.getElementById("input_profile_press_decline_sec").value * 1000);
 
   // Inline save feedback (disable + label swap) instead of nothing happening
   // until the list silently refreshes - same "no toast library, just button
@@ -1580,6 +1670,28 @@ static void handleStatus(AsyncWebServerRequest *request) {
     int idx = (snapHistoryHead - snapHistoryCount + i + TEMP_HISTORY_LEN * 2) % TEMP_HISTORY_LEN;
     snapHistory[i] = tempHistory[idx];
   }
+  bool snapPressureFault = pressureFault;
+  float snapPressure = currentPressure;
+  bool snapPressEnabled = activePressureEnabled;
+  double snapPressRampBar = activePressureRampBar;
+  unsigned long snapPressRampMs = activePressureRampMs;
+  bool snapPressDeclineEnabled = activePressureDeclineEnabled;
+  double snapPressDeclineBar = activePressureDeclineBar;
+  unsigned long snapPressDeclineMs = activePressureDeclineMs;
+  double snapPressKp = pressureKp, snapPressKi = pressureKi, snapPressKd = pressureKd;
+  // Pump telemetry - lets a bench operator (Milestones A-C) distinguish
+  // "pump idle" / "pump at 100% duty" / "PID commanding some percent" /
+  // "safety ceiling just tripped it to 0%", most importantly the last one
+  // now that Fix 1 makes an unwired-sensor fault the likeliest Milestone A
+  // confusion point.
+  float snapPumpPower = dimmerGetPowerPercent();
+  bool snapPressureCeilingTripped = (pressureFault || currentPressure > PUMP_MAX_SAFETY_BAR);
+  int snapPressHistoryCount = pressureHistoryCount, snapPressHistoryHead = pressureHistoryHead;
+  float snapPressHistory[TEMP_HISTORY_LEN];
+  for (int i = 0; i < snapPressHistoryCount; i++) {
+    int idx = (snapPressHistoryHead - snapPressHistoryCount + i + TEMP_HISTORY_LEN * 2) % TEMP_HISTORY_LEN;
+    snapPressHistory[i] = pressureHistory[idx];
+  }
   unlockState();
 
   String json = "{";
@@ -1674,10 +1786,24 @@ static void handleStatus(AsyncWebServerRequest *request) {
   json += ",\"pi_pulses\":" + String(snapPiPulses);
   json += ",\"pi_on_ms\":" + String(snapPiOnMs);
   json += ",\"pi_off_ms\":" + String(snapPiOffMs);
+  json += ",\"pressure\":" + String(snapPressure, 2);
+  json += ",\"pressure_fault\":" + String(snapPressureFault ? "true" : "false");
+  json += ",\"pump_power\":" + String(snapPumpPower, 1);
+  json += ",\"pressure_ceiling_tripped\":" + String(snapPressureCeilingTripped ? "true" : "false");
+  json += ",\"press_enabled\":" + String(snapPressEnabled ? "true" : "false");
+  json += ",\"press_ramp_bar\":" + String(snapPressRampBar);
+  json += ",\"press_ramp_ms\":" + String(snapPressRampMs);
+  json += ",\"press_decline_enabled\":" + String(snapPressDeclineEnabled ? "true" : "false");
+  json += ",\"press_decline_bar\":" + String(snapPressDeclineBar);
+  json += ",\"press_decline_ms\":" + String(snapPressDeclineMs);
+  json += ",\"press_kp\":" + String(snapPressKp, 4);
+  json += ",\"press_ki\":" + String(snapPressKi, 4);
+  json += ",\"press_kd\":" + String(snapPressKd, 4);
   json += ",\"shot_phase\":\"";
   switch (snapShotPhase) {
     case ShotPhase::PREINFUSION_ON:
     case ShotPhase::PREINFUSION_OFF: json += "preinfusion"; break;
+    case ShotPhase::PRESSURE: json += "pressure"; break;
     case ShotPhase::EXTRACTION: json += "extraction"; break;
     default: json += "none"; break;
   }
@@ -1697,6 +1823,12 @@ static void handleStatus(AsyncWebServerRequest *request) {
   for (int i = 0; i < snapHistoryCount; i++) {
     if (i > 0) json += ",";
     json += String(snapHistory[i], 1);
+  }
+  json += "]";
+  json += ",\"pressure_history\":[";
+  for (int i = 0; i < snapPressHistoryCount; i++) {
+    if (i > 0) json += ",";
+    json += String(snapPressHistory[i], 2);
   }
   json += "]";
 
@@ -1769,6 +1901,21 @@ static void handleUpdate(AsyncWebServerRequest *request) {
   if (hasArg("steam_kd")) {
     steamKd = arg("steam_kd").toDouble();
     preferences.putDouble("steam_kd", steamKd);
+  }
+  if (hasArg("press_kp")) {
+    pressureKp = arg("press_kp").toDouble();
+    preferences.putDouble("press_kp", pressureKp);
+  }
+  if (hasArg("press_ki")) {
+    pressureKi = arg("press_ki").toDouble();
+    preferences.putDouble("press_ki", pressureKi);
+  }
+  if (hasArg("press_kd")) {
+    pressureKd = arg("press_kd").toDouble();
+    preferences.putDouble("press_kd", pressureKd);
+  }
+  if (hasArg("press_kp") || hasArg("press_ki") || hasArg("press_kd")) {
+    pressurePID.SetTunings(pressureKp, pressureKi, pressureKd);
   }
   if (hasArg("steam_max_safety")) {
     // Clamped server-side - a typo in this field shouldn't be able to set
@@ -1902,7 +2049,27 @@ static void handleUpdate(AsyncWebServerRequest *request) {
         ? constrain(arg("profile_pi_on_ms").toInt(), PREINFUSION_PULSE_MS_MIN, PREINFUSION_PULSE_MS_MAX) : PREINFUSION_ON_MS_DEFAULT;
     int offMs = hasArg("profile_pi_off_ms")
         ? constrain(arg("profile_pi_off_ms").toInt(), PREINFUSION_PULSE_MS_MIN, PREINFUSION_PULSE_MS_MAX) : PREINFUSION_OFF_MS_DEFAULT;
-    int saved = profileSave(idx, name, temp, autoStop, piEnabled, pulses, onMs, offMs);
+    bool pressureEnabled = hasArg("profile_press_enabled") && arg("profile_press_enabled") == "1";
+    // Clamped the same way the neighboring fields above are (see
+    // steam_max_safety's comment elsewhere in this file) - a typo in this
+    // field shouldn't be able to command the PID to push toward a
+    // dangerously high ceiling.
+    double pressureRampBar = hasArg("profile_press_ramp_bar")
+        ? constrain(arg("profile_press_ramp_bar").toDouble(), 0.0, PUMP_MAX_SAFETY_BAR - 1.0)
+        : PRESSURE_RAMP_BAR_DEFAULT;
+    unsigned long pressureRampMs = hasArg("profile_press_ramp_ms")
+        ? (unsigned long)constrain((long)arg("profile_press_ramp_ms").toInt(), 0L, 120000L)
+        : PRESSURE_RAMP_MS_DEFAULT;
+    bool pressureDeclineEnabled = hasArg("profile_press_decline_enabled") && arg("profile_press_decline_enabled") == "1";
+    double pressureDeclineBar = hasArg("profile_press_decline_bar")
+        ? constrain(arg("profile_press_decline_bar").toDouble(), 0.0, PUMP_MAX_SAFETY_BAR - 1.0)
+        : PRESSURE_DECLINE_BAR_DEFAULT;
+    unsigned long pressureDeclineMs = hasArg("profile_press_decline_ms")
+        ? (unsigned long)constrain((long)arg("profile_press_decline_ms").toInt(), 0L, 120000L)
+        : PRESSURE_DECLINE_MS_DEFAULT;
+    int saved = profileSave(idx, name, temp, autoStop, piEnabled, pulses, onMs, offMs,
+                             pressureEnabled, pressureRampBar, pressureRampMs,
+                             pressureDeclineEnabled, pressureDeclineBar, pressureDeclineMs);
     // Editing the profile that's currently active also refreshes the live
     // settings from it, so tweaking "your current setup" takes effect
     // immediately instead of silently drifting from what's now saved.

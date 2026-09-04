@@ -44,6 +44,15 @@ static void addProfile(JsonArray &arr, const char *name, double temp,
   p["pulses"] = pulses;
   p["on_ms"] = onMs;
   p["off_ms"] = offMs;
+  // Pressure control (HARDWARE_ROADMAP.md item 8) - none of the seeded
+  // starter profiles use it; disabled by default, same as every other
+  // field's "no data yet" convention in this file.
+  p["pressure_enabled"] = false;
+  p["pressure_ramp_bar"] = 0.0;
+  p["pressure_ramp_ms"] = 0;
+  p["pressure_decline_enabled"] = false;
+  p["pressure_decline_bar"] = 0.0;
+  p["pressure_decline_ms"] = 0;
 }
 
 void profilesInit() {
@@ -90,7 +99,10 @@ String profilesReadJson() {
 }
 
 bool profileGet(int index, String &name, double &temp, unsigned long &autoStopSec,
-                bool &preinfusionEnabled, int &pulses, int &onMs, int &offMs) {
+                bool &preinfusionEnabled, int &pulses, int &onMs, int &offMs,
+                bool &pressureEnabled, double &pressureRampBar, unsigned long &pressureRampMs,
+                bool &pressureDeclineEnabled, double &pressureDeclineBar,
+                unsigned long &pressureDeclineMs) {
   JsonDocument doc;
   if (!loadDoc(doc)) return false;
   JsonArray arr = doc.as<JsonArray>();
@@ -104,11 +116,23 @@ bool profileGet(int index, String &name, double &temp, unsigned long &autoStopSe
   pulses = p["pulses"].as<int>();
   onMs = p["on_ms"].as<int>();
   offMs = p["off_ms"].as<int>();
+  // `| default` so profiles saved before this field existed (missing key)
+  // deserialize as "pressure control disabled" instead of an unpredictable
+  // JSON-null coercion.
+  pressureEnabled = p["pressure_enabled"] | false;
+  pressureRampBar = p["pressure_ramp_bar"] | 0.0;
+  pressureRampMs = p["pressure_ramp_ms"] | 0UL;
+  pressureDeclineEnabled = p["pressure_decline_enabled"] | false;
+  pressureDeclineBar = p["pressure_decline_bar"] | 0.0;
+  pressureDeclineMs = p["pressure_decline_ms"] | 0UL;
   return true;
 }
 
 int profileSave(int index, String name, double temp, unsigned long autoStopSec,
-                bool preinfusionEnabled, int pulses, int onMs, int offMs) {
+                bool preinfusionEnabled, int pulses, int onMs, int offMs,
+                bool pressureEnabled, double pressureRampBar, unsigned long pressureRampMs,
+                bool pressureDeclineEnabled, double pressureDeclineBar,
+                unsigned long pressureDeclineMs) {
   if (name.length() > PROFILE_NAME_MAX_LEN) name = name.substring(0, PROFILE_NAME_MAX_LEN);
   if (name.length() == 0) name = "Profile";
 
@@ -134,6 +158,12 @@ int profileSave(int index, String name, double temp, unsigned long autoStopSec,
   target["pulses"] = pulses;
   target["on_ms"] = onMs;
   target["off_ms"] = offMs;
+  target["pressure_enabled"] = pressureEnabled;
+  target["pressure_ramp_bar"] = pressureRampBar;
+  target["pressure_ramp_ms"] = pressureRampMs;
+  target["pressure_decline_enabled"] = pressureDeclineEnabled;
+  target["pressure_decline_bar"] = pressureDeclineBar;
+  target["pressure_decline_ms"] = pressureDeclineMs;
 
   saveDoc(doc);
   return targetIndex;

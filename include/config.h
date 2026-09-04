@@ -97,17 +97,80 @@
 // ============================================================================
 #define PIN_SSR 4
 
-// Pump relay (HARDWARE_ROADMAP.md item 4, revived 2026-08-30 - see AGENTS.md
-// change log) - NC relay module, control side (GPIO5/VCC/GND) wired; the
-// mains-side splice at the pump's own terminals (COM/NC) is not done yet.
-// GPIO5 was free (next available after PIN_SSR=4, PIN_SENSOR_RX/TX=18/17).
-// PIN_PUMP_ACTIVE_LEVEL=HIGH matches the relay module's trigger jumper (set
-// to H) - bench-test this (relay should click on GPIO5 HIGH with nothing
-// connected to COM/NO/NC) before ever wiring it to the pump. "Active"/
-// energized means the NC contact is OPEN (interrupting the pump), not "pump
-// on" - see setPumpRelay() in main.cpp.
-#define PIN_PUMP 5
-#define PIN_PUMP_ACTIVE_LEVEL HIGH
+// ============================================================================
+// Pump pressure control (HARDWARE_ROADMAP.md items 7/8, 2026-09-04) - AC
+// phase-control dimmer + pressure transducer. GPIO5 (freed once the old NC
+// relay is removed - see Task 4) becomes the TRIAC gate-fire output; GPIO6
+// is the dimmer's zero-cross detect input; GPIO1 (ADC1_CH0) is the pressure
+// transducer's analog input. ADC1 only - ADC2 shares hardware with WiFi and
+// becomes unavailable when WiFi is active (same rule already followed for
+// temp sensing).
+// ============================================================================
+#define PIN_DIMMER_GATE 5
+#define PIN_DIMMER_ZC 6
+#define PIN_PRESSURE_ADC 1
+
+// Mains half-cycle at 50Hz is ~10ms (Israel/Europe mains) - change to 8333
+// if this machine is ever run on a 60Hz supply. DIMMER_MIN_FIRING_DELAY_US
+// is how close to the zero-cross the TRIAC is allowed to fire (0 risks
+// firing into switching noise right at the crossing); DIMMER_GATE_PULSE_US
+// is the minimum gate-trigger pulse width most TRIAC modules need.
+#define DIMMER_AC_HALF_CYCLE_US 10000
+#define DIMMER_MIN_FIRING_DELAY_US 300
+#define DIMMER_GATE_PULSE_US 100
+
+// Pressure transducer calibration - linear mapping from ADC millivolts to
+// bar: bar = (mv - PRESSURE_SENSOR_ZERO_MV) / PRESSURE_SENSOR_MV_PER_BAR.
+// These are PLACEHOLDERS until the actual transducer is bench-calibrated
+// against a known reference (0 bar with the circuit open to atmosphere,
+// pump off) - see bring-up Task 11. Defaults below assume a common
+// 0.5-4.5V-output/12-16bar transducer wired through a 2-resistor divider
+// that halves it to 0.25-2.25V at the ADC pin.
+#define PRESSURE_SENSOR_ZERO_MV 250.0f
+#define PRESSURE_SENSOR_MV_PER_BAR 125.0f // (2250-250)/16 bar
+
+// Same rolling error-rate fault model as the temp sensor (see
+// SENSOR_FAULT_WINDOW above) - a separate window since pressure and temp
+// fail independently.
+#define PRESSURE_FAULT_WINDOW 20
+#define PRESSURE_FAULT_MIN_SAMPLES 5
+#define PRESSURE_FAULT_RATE_THRESHOLD 0.5f
+
+// Same smoothing idea as TEMP_EMA_ALPHA - cuts ADC noise reaching the PID
+// and the safety-ceiling comparison.
+#define PRESSURE_EMA_ALPHA 0.3f
+
+// Hard safety ceiling - comfortably under the machine's 16-bar safety valve
+// rating (docs/oem-manuals/hydraulic-schematic-SAI0103.pdf), above the
+// ~9 bar working target. Forces the dimmer to 0% immediately if exceeded or
+// if the pressure sensor is faulted, independent of PID/profile output -
+// same "cutoff wins over everything" rule as activeMaxSafety for
+// temperature. Fixed, not Web-UI-configurable (mirrors BREW_MAX_SAFETY,
+// not the configurable STEAM_MAX_SAFETY - no tuning need identified yet).
+#define PUMP_MAX_SAFETY_BAR 12.0
+
+// Pressure PID defaults - live-tunable from the Web UI (Pump Pressure
+// tuning card, Task 8), same pattern as Brew/Steam Kp/Ki/Kd. Untuned
+// starting guesses; expect real iteration against the real machine
+// (bring-up Task 12), the same way brew-temperature PID tuning did.
+#define PUMP_PRESSURE_KP_DEFAULT 8.0
+#define PUMP_PRESSURE_KI_DEFAULT 0.5
+#define PUMP_PRESSURE_KD_DEFAULT 0.0
+
+// Per-profile pressure stages (HARDWARE_ROADMAP.md item 8) - an optional
+// "ramp/hold" stage at a target bar for a fixed duration, then an optional
+// "decline" stage at a lower target for its own fixed duration,
+// approximating a declining-pressure curve near the end of a shot. After
+// these, the shot falls into the normal open-ended EXTRACTION stage,
+// holding the last pressure target (or 100% duty if pressure control isn't
+// enabled for this profile - unchanged, backward-compatible behavior).
+#define PRESSURE_RAMP_BAR_DEFAULT 9.0
+#define PRESSURE_RAMP_MS_DEFAULT 20000
+#define PRESSURE_DECLINE_BAR_DEFAULT 6.0
+#define PRESSURE_DECLINE_MS_DEFAULT 8000
+// Fixed count of profile-defined pressure stages (ramp + decline) - used
+// only to size main.cpp's activeShotStages array.
+#define PRESSURE_PROFILE_STAGE_COUNT 2
 
 // ============================================================================
 // Temperature sensor module (UART, NOT SPI)
@@ -316,14 +379,13 @@ enum class AutotuneState { IDLE, RUNNING, DONE_OK, DONE_FAIL };
 // persisted in NVS. Default sits in the middle of the 25-30s SCA-referenced
 // extraction window already shown in the Web UI.
 //
-// IMPORTANT - this is a software-only auto-stop right now: it ends the
-// firmware's own shot bookkeeping (timer, history log entry, reverting the
-// Brew gain profile from active back to gentle - see the brew-active gains
-// above) - it does NOT physically stop the pump. There's no hardware yet
-// that can cut the pump's own power (see AGENTS.md/HARDWARE_ROADMAP.md item
-// 4, not yet built) - water keeps flowing until the machine's own Brew
-// switch is released by hand, same as always. Don't confuse "the shot timer
-// stopped" with "the machine stopped brewing" until item 4 exists.
+// This ends the firmware's own shot bookkeeping (timer, history log entry,
+// reverting the Brew gain profile from active back to gentle - see the
+// brew-active gains above) AND physically stops the pump: stopShot() (in
+// main.cpp) drives the dimmer to 0% via dimmerSetPowerPercent(0.0f)
+// (HARDWARE_ROADMAP.md item 8). The old NC pump relay (item 4) that this
+// comment used to warn about has since been removed - see AGENTS.md change
+// log, 2026-09-04.
 #define SHOT_AUTO_STOP_SEC_DEFAULT 27
 #define SHOT_AUTO_STOP_SEC_MIN 5
 #define SHOT_AUTO_STOP_SEC_MAX 90
@@ -360,16 +422,15 @@ enum class AutotuneState { IDLE, RUNNING, DONE_OK, DONE_FAIL };
 #define PROFILE_NAME_MAX_LEN 20
 #define PROFILE_LOG_PATH "/profiles.csv"
 
-// Pre-infusion (2026-08-16) - see AGENTS.md/HARDWARE_ROADMAP.md item 4 for
-// the full reasoning. Pulses the pump relay on/off a few times before
-// switching to continuous power for the rest of the shot, approximating the
-// puck-saturation benefit of true low-pressure pre-infusion using only an
-// on/off relay (no dimmer/pressure transducer needed - those remain a
-// separate, harder item). Per-profile, not global - each saved profile
-// carries its own pre-infusion pattern (or none). Has no effect on the real
-// pump until the mains-side splice (item 4) is done; the phase state machine
-// and timing were built ahead of the hardware, same "software ahead of
-// hardware" pattern already proven for shot auto-stop.
+// Pre-infusion (2026-08-16, originally built ahead of hardware against the
+// old NC pump relay - item 4 - see AGENTS.md/HARDWARE_ROADMAP.md; that relay
+// was removed 2026-09-04 after an unresolved brownout bug). Pulses the pump
+// on/off a few times before switching to continuous power for the rest of
+// the shot, approximating the puck-saturation benefit of true low-pressure
+// pre-infusion. Now physically driven by the dimmer (item 8) via
+// dimmerSetPowerPercent(), same as the rest of pump control. Per-profile,
+// not global - each saved profile carries its own pre-infusion pattern (or
+// none).
 #define PREINFUSION_PULSES_DEFAULT 4
 #define PREINFUSION_PULSES_MAX 10
 #define PREINFUSION_ON_MS_DEFAULT 1000
@@ -377,7 +438,7 @@ enum class AutotuneState { IDLE, RUNNING, DONE_OK, DONE_FAIL };
 #define PREINFUSION_PULSE_MS_MIN 200
 #define PREINFUSION_PULSE_MS_MAX 5000
 
-enum class ShotPhase { NONE, PREINFUSION_ON, PREINFUSION_OFF, EXTRACTION };
+enum class ShotPhase { NONE, PREINFUSION_ON, PREINFUSION_OFF, PRESSURE, EXTRACTION };
 
 // ============================================================================
 // Scheduled warm-up (2026-08-16; multiple slots added same day)
