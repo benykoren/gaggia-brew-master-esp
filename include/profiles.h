@@ -20,16 +20,24 @@ String profilesReadJson();
 int profileCount();
 
 // Loads profile `index`'s fields into the out-params. Returns false (params
-// untouched) if index is out of range.
+// untouched) if index is out of range. Pressure fields default to
+// disabled/0 for profiles saved before pressure control existed - no
+// migration needed, ArduinoJson's `|` operator handles the missing keys.
 bool profileGet(int index, String &name, double &temp, unsigned long &autoStopSec,
-                bool &preinfusionEnabled, int &pulses, int &onMs, int &offMs);
+                bool &preinfusionEnabled, int &pulses, int &onMs, int &offMs,
+                bool &pressureEnabled, double &pressureRampBar, unsigned long &pressureRampMs,
+                bool &pressureDeclineEnabled, double &pressureDeclineBar,
+                unsigned long &pressureDeclineMs);
 
 // Adds a new profile (index == -1 or >= profileCount()) or overwrites an
 // existing one. Returns the resulting index, or -1 if the list is already
 // at PROFILE_MAX_COUNT and index requested a new entry. Commas in `name`
 // are stripped (CSV storage, no quoting support - keeps this simple).
 int profileSave(int index, String name, double temp, unsigned long autoStopSec,
-                bool preinfusionEnabled, int pulses, int onMs, int offMs);
+                bool preinfusionEnabled, int pulses, int onMs, int offMs,
+                bool pressureEnabled, double pressureRampBar, unsigned long pressureRampMs,
+                bool pressureDeclineEnabled, double pressureDeclineBar,
+                unsigned long pressureDeclineMs);
 
 // Removes profile `index`, shifting later indices down by one. No-op if out
 // of range or it would empty the list entirely (always keep at least one).

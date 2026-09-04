@@ -462,6 +462,18 @@ int activePreinfusionPulses = 0;
 int activePreinfusionOnMs = 0;
 int activePreinfusionOffMs = 0;
 
+// Per-profile pressure-stage settings (see profiles.cpp/Task 5) - plain
+// globals with sensible defaults, declared here (rather than down by the
+// rest of the pressure-control state near buildShotStages()) so
+// applyProfile() below can assign them; profileGet() supplies the real
+// per-profile values once a profile is loaded.
+bool activePressureEnabled = false;
+double activePressureRampBar = PRESSURE_RAMP_BAR_DEFAULT;
+unsigned long activePressureRampMs = PRESSURE_RAMP_MS_DEFAULT;
+bool activePressureDeclineEnabled = false;
+double activePressureDeclineBar = PRESSURE_DECLINE_BAR_DEFAULT;
+unsigned long activePressureDeclineMs = PRESSURE_DECLINE_MS_DEFAULT;
+
 // Loads profile `idx` into the live settings (brewSetpoint/shotAutoStopSec/
 // pre-infusion pattern), persists them exactly like editing those fields by
 // hand would, and remembers idx as the active profile for UI highlighting.
@@ -471,7 +483,12 @@ void applyProfile(int idx) {
   unsigned long autoStop;
   bool preinfEnabled;
   int pulses, onMs, offMs;
-  if (!profileGet(idx, name, temp, autoStop, preinfEnabled, pulses, onMs, offMs)) return;
+  bool pressureEnabled, pressureDeclineEnabled;
+  double pressureRampBar, pressureDeclineBar;
+  unsigned long pressureRampMs, pressureDeclineMs;
+  if (!profileGet(idx, name, temp, autoStop, preinfEnabled, pulses, onMs, offMs,
+                   pressureEnabled, pressureRampBar, pressureRampMs,
+                   pressureDeclineEnabled, pressureDeclineBar, pressureDeclineMs)) return;
 
   activeProfileIndex = idx;
   brewSetpoint = temp;
@@ -480,6 +497,12 @@ void applyProfile(int idx) {
   activePreinfusionPulses = pulses;
   activePreinfusionOnMs = onMs;
   activePreinfusionOffMs = offMs;
+  activePressureEnabled = pressureEnabled;
+  activePressureRampBar = pressureRampBar;
+  activePressureRampMs = pressureRampMs;
+  activePressureDeclineEnabled = pressureDeclineEnabled;
+  activePressureDeclineBar = pressureDeclineBar;
+  activePressureDeclineMs = pressureDeclineMs;
 
   Preferences preferences;
   preferences.begin("gaggia", false);
@@ -490,6 +513,12 @@ void applyProfile(int idx) {
   preferences.putInt("pi_pulses", activePreinfusionPulses);
   preferences.putInt("pi_on_ms", activePreinfusionOnMs);
   preferences.putInt("pi_off_ms", activePreinfusionOffMs);
+  preferences.putBool("press_en", activePressureEnabled);
+  preferences.putDouble("press_ramp_bar", activePressureRampBar);
+  preferences.putULong("press_ramp_ms", activePressureRampMs);
+  preferences.putBool("press_dec_en", activePressureDeclineEnabled);
+  preferences.putDouble("press_dec_bar", activePressureDeclineBar);
+  preferences.putULong("press_dec_ms", activePressureDeclineMs);
   preferences.end();
 
   refreshActiveProfileIfChanged();
@@ -552,16 +581,6 @@ bool pressureFault = false;
 float pressureHistory[TEMP_HISTORY_LEN] = {0};
 int pressureHistoryHead = 0;
 int pressureHistoryCount = 0;
-
-// Per-profile pressure-stage settings (see profiles.cpp/Task 5) - plain
-// globals with sensible defaults so buildShotStages() below works even
-// before Task 5 wires them up to saved profiles.
-bool activePressureEnabled = false;
-double activePressureRampBar = PRESSURE_RAMP_BAR_DEFAULT;
-unsigned long activePressureRampMs = PRESSURE_RAMP_MS_DEFAULT;
-bool activePressureDeclineEnabled = false;
-double activePressureDeclineBar = PRESSURE_DECLINE_BAR_DEFAULT;
-unsigned long activePressureDeclineMs = PRESSURE_DECLINE_MS_DEFAULT;
 
 // Drives the dimmer for whichever stage is now active. PUMP_ON/PUMP_OFF are
 // plain duty (matches the old relay's on/off behavior exactly: PUMP_ON =
@@ -810,6 +829,9 @@ void setup() {
   steamKi = preferences.getDouble("steam_ki", STEAM_KI_DEFAULT);
   steamKd = preferences.getDouble("steam_kd", STEAM_KD_DEFAULT);
   steamMaxSafety = preferences.getDouble("steam_max_safety", STEAM_MAX_SAFETY_DEFAULT);
+  pressureKp = preferences.getDouble("press_kp", PUMP_PRESSURE_KP_DEFAULT);
+  pressureKi = preferences.getDouble("press_ki", PUMP_PRESSURE_KI_DEFAULT);
+  pressureKd = preferences.getDouble("press_kd", PUMP_PRESSURE_KD_DEFAULT);
   ecoTimeoutMin = preferences.getULong("eco_min", ECO_TIMEOUT_MIN_DEFAULT);
   steamAutoOffMin = preferences.getULong("steam_off_min", STEAM_AUTO_OFF_MIN_DEFAULT);
   shotAutoStopSec = preferences.getULong("shot_auto_stop", SHOT_AUTO_STOP_SEC_DEFAULT);
@@ -824,6 +846,12 @@ void setup() {
   activePreinfusionPulses = preferences.getInt("pi_pulses", PREINFUSION_PULSES_DEFAULT);
   activePreinfusionOnMs = preferences.getInt("pi_on_ms", PREINFUSION_ON_MS_DEFAULT);
   activePreinfusionOffMs = preferences.getInt("pi_off_ms", PREINFUSION_OFF_MS_DEFAULT);
+  activePressureEnabled = preferences.getBool("press_en", false);
+  activePressureRampBar = preferences.getDouble("press_ramp_bar", PRESSURE_RAMP_BAR_DEFAULT);
+  activePressureRampMs = preferences.getULong("press_ramp_ms", PRESSURE_RAMP_MS_DEFAULT);
+  activePressureDeclineEnabled = preferences.getBool("press_dec_en", false);
+  activePressureDeclineBar = preferences.getDouble("press_dec_bar", PRESSURE_DECLINE_BAR_DEFAULT);
+  activePressureDeclineMs = preferences.getULong("press_dec_ms", PRESSURE_DECLINE_MS_DEFAULT);
   for (int i = 0; i < SCHED_MAX_COUNT; i++) {
     String p = "sched" + String(i) + "_";
     schedEnabled[i] = preferences.getBool((p + "en").c_str(), i == 0 ? SCHED_ENABLED_DEFAULT : false);
@@ -852,6 +880,7 @@ void setup() {
   // reset/power-cycle (safety: never auto-resume heating unattended).
   windowStartTime = millis();
   myPID.SetOutputLimits(0, WindowSize);
+  pressurePID.SetTunings(pressureKp, pressureKi, pressureKd);
   setOpMode(OpMode::OFF);
   noteActivity();
 
