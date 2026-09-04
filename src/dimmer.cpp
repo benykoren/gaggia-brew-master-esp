@@ -40,6 +40,7 @@ static void IRAM_ATTR onZeroCross(void *arg) {
   float percent = targetPercent;
   if (percent <= 0.0f) return; // stay off - no timer scheduled at all
 
+  esp_timer_stop(fireTimer);
   esp_timer_start_once(fireTimer, percentToDelayUs(percent));
 }
 
