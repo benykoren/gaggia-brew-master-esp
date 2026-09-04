@@ -97,18 +97,6 @@
 // ============================================================================
 #define PIN_SSR 4
 
-// Pump relay (HARDWARE_ROADMAP.md item 4, revived 2026-08-30 - see AGENTS.md
-// change log) - NC relay module, control side (GPIO5/VCC/GND) wired; the
-// mains-side splice at the pump's own terminals (COM/NC) is not done yet.
-// GPIO5 was free (next available after PIN_SSR=4, PIN_SENSOR_RX/TX=18/17).
-// PIN_PUMP_ACTIVE_LEVEL=HIGH matches the relay module's trigger jumper (set
-// to H) - bench-test this (relay should click on GPIO5 HIGH with nothing
-// connected to COM/NO/NC) before ever wiring it to the pump. "Active"/
-// energized means the NC contact is OPEN (interrupting the pump), not "pump
-// on" - see setPumpRelay() in main.cpp.
-#define PIN_PUMP 5
-#define PIN_PUMP_ACTIVE_LEVEL HIGH
-
 // ============================================================================
 // Pump pressure control (HARDWARE_ROADMAP.md items 7/8, 2026-09-04) - AC
 // phase-control dimmer + pressure transducer. GPIO5 (freed once the old NC
