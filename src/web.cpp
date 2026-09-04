@@ -17,6 +17,7 @@ extern float currentTemperature;
 extern bool sensorFault;
 extern double Setpoint, Input, Output;
 extern PID myPID;
+extern PID pressurePID;
 extern float tempHistory[];
 extern int tempHistoryHead;
 extern int tempHistoryCount;
@@ -1816,6 +1817,21 @@ static void handleUpdate(AsyncWebServerRequest *request) {
     steamKd = arg("steam_kd").toDouble();
     preferences.putDouble("steam_kd", steamKd);
   }
+  if (hasArg("press_kp")) {
+    pressureKp = arg("press_kp").toDouble();
+    preferences.putDouble("press_kp", pressureKp);
+  }
+  if (hasArg("press_ki")) {
+    pressureKi = arg("press_ki").toDouble();
+    preferences.putDouble("press_ki", pressureKi);
+  }
+  if (hasArg("press_kd")) {
+    pressureKd = arg("press_kd").toDouble();
+    preferences.putDouble("press_kd", pressureKd);
+  }
+  if (hasArg("press_kp") || hasArg("press_ki") || hasArg("press_kd")) {
+    pressurePID.SetTunings(pressureKp, pressureKi, pressureKd);
+  }
   if (hasArg("steam_max_safety")) {
     // Clamped server-side - a typo in this field shouldn't be able to set
     // a dangerously high (or uselessly low) steam safety ceiling.
@@ -1948,7 +1964,19 @@ static void handleUpdate(AsyncWebServerRequest *request) {
         ? constrain(arg("profile_pi_on_ms").toInt(), PREINFUSION_PULSE_MS_MIN, PREINFUSION_PULSE_MS_MAX) : PREINFUSION_ON_MS_DEFAULT;
     int offMs = hasArg("profile_pi_off_ms")
         ? constrain(arg("profile_pi_off_ms").toInt(), PREINFUSION_PULSE_MS_MIN, PREINFUSION_PULSE_MS_MAX) : PREINFUSION_OFF_MS_DEFAULT;
-    int saved = profileSave(idx, name, temp, autoStop, piEnabled, pulses, onMs, offMs);
+    bool pressureEnabled = hasArg("profile_press_enabled") && arg("profile_press_enabled") == "1";
+    double pressureRampBar = hasArg("profile_press_ramp_bar")
+        ? arg("profile_press_ramp_bar").toDouble() : PRESSURE_RAMP_BAR_DEFAULT;
+    unsigned long pressureRampMs = hasArg("profile_press_ramp_ms")
+        ? (unsigned long)arg("profile_press_ramp_ms").toInt() : PRESSURE_RAMP_MS_DEFAULT;
+    bool pressureDeclineEnabled = hasArg("profile_press_decline_enabled") && arg("profile_press_decline_enabled") == "1";
+    double pressureDeclineBar = hasArg("profile_press_decline_bar")
+        ? arg("profile_press_decline_bar").toDouble() : PRESSURE_DECLINE_BAR_DEFAULT;
+    unsigned long pressureDeclineMs = hasArg("profile_press_decline_ms")
+        ? (unsigned long)arg("profile_press_decline_ms").toInt() : PRESSURE_DECLINE_MS_DEFAULT;
+    int saved = profileSave(idx, name, temp, autoStop, piEnabled, pulses, onMs, offMs,
+                             pressureEnabled, pressureRampBar, pressureRampMs,
+                             pressureDeclineEnabled, pressureDeclineBar, pressureDeclineMs);
     // Editing the profile that's currently active also refreshes the live
     // settings from it, so tweaking "your current setup" takes effect
     // immediately instead of silently drifting from what's now saved.
