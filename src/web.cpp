@@ -407,9 +407,6 @@ const char *index_html = R"rawliteral(
       .view[data-view="now"] > .hero-card { grid-area: hero; margin: 0; }
       .view[data-view="now"] > .card:nth-of-type(2) { grid-area: shot; margin: 0; }
       .view[data-view="now"] > .card:nth-of-type(3) { grid-area: stats; margin: 0; }
-      /* Auto-Tune is a setup action, not a live-glance stat - hidden here to
-         save vertical space; still reachable in portrait. */
-      .view[data-view="now"] > .card:nth-of-type(4) { display: none; }
 
       .view[data-view="now"] .gauge-wrap {
         width: clamp(130px, 24vh, 190px); height: clamp(130px, 24vh, 190px);
@@ -522,10 +519,6 @@ const char *index_html = R"rawliteral(
         </div>
       </div>
 
-      <div class="card">
-        <button onclick="startAutotune()" id="btn_autotune" class="btn-autotune">&#9889; Start Auto-Tune</button>
-        <span id="autotune_status" class="autotune-status"></span>
-      </div>
     </main>
 
     <main class="view" data-view="tune" hidden>
@@ -554,6 +547,11 @@ const char *index_html = R"rawliteral(
           </div>
           <button type="submit" class="submit">Save Active-Brew Gains</button>
         </form>
+      </div>
+
+      <div class="card">
+        <button onclick="startAutotune()" id="btn_autotune" class="btn-autotune">&#9889; Start Auto-Tune</button>
+        <span id="autotune_status" class="autotune-status"></span>
       </div>
 
       <div class="card">
