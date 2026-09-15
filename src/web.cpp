@@ -151,9 +151,27 @@ const char *index_html = R"rawliteral(
 
       --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px;
       --ease: cubic-bezier(.22,.7,.32,1);
+
+      /* Font-size scale, named by rank (not by role) and derived from the
+         page's own existing hand-tuned values - not a new invented scale.
+         Centralizes what was ~35 scattered literals into one place without
+         changing any rendered size. */
+      --fs-1: 10.5px; --fs-2: 11px;   --fs-3: 11.5px; --fs-4: 12px;
+      --fs-5: 12.5px; --fs-6: 13px;   --fs-7: 14px;   --fs-8: 14.5px;
+      --fs-9: 15px;   --fs-10: 17px;  --fs-11: 19px;  --fs-12: 21px;
+      --fs-13: 22px;
     }
     * { box-sizing: border-box; }
     html, body { margin: 0; }
+    /* Visible, on-brand focus ring for keyboard/switch navigation. Plain
+       :focus first (works everywhere, including the Android 4.4 tablet's
+       browser), then :focus-visible narrows it to keyboard focus only on
+       browsers that support that distinction (~2020+) - an unsupported
+       browser just never matches the second rule and keeps the safe
+       plain-:focus outline on every focus, including touch/click. */
+    :focus { outline: 2px solid var(--copper-light); outline-offset: 2px; }
+    :focus:not(:focus-visible) { outline: none; }
+    :focus-visible { outline: 2px solid var(--copper-light); outline-offset: 2px; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       background: var(--bg-grad), var(--bg);
@@ -175,15 +193,15 @@ const char *index_html = R"rawliteral(
     .logo {
       width: 42px; height: 42px; border-radius: var(--radius-md); flex: none;
       background: linear-gradient(135deg, var(--copper-light), var(--copper-deep));
-      display: grid; place-items: center; font-size: 22px; box-shadow: var(--shadow-sm);
+      display: grid; place-items: center; font-size: var(--fs-13); box-shadow: var(--shadow-sm);
     }
-    .brand-text h1 { font-size: 17px; margin: 0; letter-spacing: .2px; }
-    .brand-text small { display: block; color: var(--text-dim); font-size: 11.5px; font-weight: 500; }
+    .brand-text h1 { font-size: var(--fs-10); margin: 0; letter-spacing: .2px; }
+    .brand-text small { display: block; color: var(--text-dim); font-size: var(--fs-3); font-weight: 500; }
     .brand-status { text-align: right; }
 
     .pill {
       display: inline-flex; align-items: center; gap: var(--sp-2);
-      padding: 7px 13px; border-radius: var(--radius-full); font-size: 12.5px; font-weight: 700;
+      padding: 7px 13px; border-radius: var(--radius-full); font-size: var(--fs-5); font-weight: 700;
       background: var(--surface); border: 1px solid var(--border);
     }
     .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); }
@@ -192,19 +210,19 @@ const char *index_html = R"rawliteral(
     .pill.fault { border-color: rgba(229,84,75,.5); }
     .pill.fault .dot { background: var(--red); box-shadow: 0 0 0 4px rgba(229,84,75,.2); animation: pulse-dot 1.1s var(--ease) infinite; }
     @keyframes pulse-dot { 0%,100% { opacity: 1 } 50% { opacity: .45 } }
-    .last-updated { font-size: 10.5px; color: var(--text-dim); margin-top: 5px; }
+    .last-updated { font-size: var(--fs-1); color: var(--text-dim); margin-top: 5px; }
 
     .alerts { display: flex; flex-direction: column; gap: var(--sp-2); margin-bottom: var(--sp-4); }
     .banner {
       display: none; align-items: center; justify-content: space-between; gap: var(--sp-3);
-      padding: 11px 15px; border-radius: var(--radius-md); font-size: 13px; font-weight: 700;
+      padding: 11px 15px; border-radius: var(--radius-md); font-size: var(--fs-6); font-weight: 700;
     }
     .banner-error { background: rgba(229,84,75,.14); border: 1px solid rgba(229,84,75,.4); color: #f3c6c2; }
     .banner-info { background: rgba(79,163,216,.14); border: 1px solid rgba(79,163,216,.4); color: #cfe8f7; }
     .banner-warn { background: rgba(224,161,58,.14); border: 1px solid rgba(224,161,58,.4); color: #f3dcc2; }
     .btn-chip {
       border: 1px solid var(--steam); background: var(--steam); color: #071824;
-      padding: 6px 13px; border-radius: var(--radius-sm); font-size: 12px; font-weight: 700; cursor: pointer; flex: none;
+      padding: 6px 13px; border-radius: var(--radius-sm); font-size: var(--fs-4); font-weight: 700; cursor: pointer; flex: none;
     }
 
     .card {
@@ -214,7 +232,11 @@ const char *index_html = R"rawliteral(
     }
 
     .hero-card { text-align: center; }
-    .gauge-wrap { position: relative; width: clamp(210px, 62vw, 280px); height: clamp(210px, 62vw, 280px); margin: 0 auto var(--sp-3); }
+    /* Two gauges side by side (temp, pressure) - sized smaller than a
+       single full-width gauge would be, so both fit on a phone screen. */
+    .gauge-row { display: flex; justify-content: center; align-items: flex-start; gap: var(--sp-4); flex-wrap: wrap; margin-bottom: var(--sp-3); }
+    .gauge-col { display: flex; flex-direction: column; align-items: center; }
+    .gauge-wrap { position: relative; width: clamp(130px, 38vw, 170px); height: clamp(130px, 38vw, 170px); margin: 0 auto var(--sp-2); }
     .gauge { width: 100%; height: 100%; transform: rotate(-90deg); }
     .gauge-track { fill: none; stroke: var(--border); stroke-width: 14; }
     .gauge-fill { fill: none; stroke: var(--text-faint); stroke-width: 14; stroke-linecap: round; transition: stroke-dashoffset .6s var(--ease), stroke .4s ease; }
@@ -225,6 +247,13 @@ const char *index_html = R"rawliteral(
     .gauge-fill.heating { stroke: var(--steam); filter: drop-shadow(0 0 10px rgba(79,163,216,.55)); }
     .gauge-fill.ready { stroke: var(--green); filter: drop-shadow(0 0 10px rgba(72,181,131,.55)); }
     .gauge-fill.over { stroke: var(--red); filter: drop-shadow(0 0 10px rgba(229,84,75,.55)); }
+    /* Pressure ring reuses the same heating/ready/over classes as the temp
+       ring above - fill amount is a fixed 0-16 bar scale (this machine's
+       safety-valve rating, a real manometer reading), but color answers a
+       different question: not "% of scale" (9 bar brew target would only
+       ever show ~56% full and never look "done"), but "how close to the
+       9 bar brew target, while a shot is actually running." Grey/idle the
+       rest of the time, same as the temp ring with no active target. */
     /* The number is the ONLY thing centered against this box, which exactly
        covers the ring (inset: 0 on .gauge-wrap) - so its flex centering
        lands on the ring's true geometric midpoint regardless of viewport
@@ -233,16 +262,16 @@ const char *index_html = R"rawliteral(
        group instead of the number alone, which visibly dragged the number
        upward off the ring's actual center. It now lives outside, below the
        ring, in normal document flow (see .gauge-target). */
-    .gauge-center { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
-    .gauge-value { display: flex; align-items: baseline; justify-content: center; font-size: clamp(3.4rem, 14vw, 5.2rem); font-weight: 800; line-height: 1; letter-spacing: -2px; font-variant-numeric: tabular-nums; }
-    .gauge-unit { font-size: clamp(1.1rem, 4vw, 1.4rem); color: var(--text-dim); font-weight: 600; margin-left: 3px; }
-    .gauge-target { color: var(--text-dim); margin: 0 0 var(--sp-4); font-size: 14px; }
+    .gauge-center { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: flex; align-items: center; justify-content: center; }
+    .gauge-value { display: flex; align-items: baseline; justify-content: center; font-size: clamp(2rem, 8vw, 2.8rem); font-weight: 800; line-height: 1; letter-spacing: -1px; font-variant-numeric: tabular-nums; }
+    .gauge-unit { font-size: clamp(0.8rem, 2.6vw, 1rem); color: var(--text-dim); font-weight: 600; margin-left: 3px; }
+    .gauge-target { color: var(--text-dim); margin: 0; font-size: var(--fs-7); }
     .gauge-target b { color: var(--text); }
 
     .mode-switch { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--sp-3); margin: var(--sp-4) 0; }
     .mode-btn {
       border: 1px solid var(--border); color: var(--text); background: var(--surface);
-      padding: 15px 10px; border-radius: var(--radius-md); font-size: 15px; font-weight: 700;
+      padding: 15px 10px; border-radius: var(--radius-md); font-size: var(--fs-9); font-weight: 700;
       cursor: pointer; min-height: 52px;
       transition: transform .05s ease, background .15s ease, border-color .15s ease, color .15s ease;
     }
@@ -257,9 +286,9 @@ const char *index_html = R"rawliteral(
        .stat-tile and the auto-fit grid reflows. */
     .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--sp-3); margin-top: var(--sp-4); text-align: left; }
     .stat-tile { background: var(--surface); border: 1px solid var(--border-soft); border-radius: var(--radius-md); padding: 13px 14px; }
-    .stat-label { display: block; font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .6px; font-weight: 700; margin-bottom: 6px; }
-    .stat-value { font-size: 21px; font-weight: 800; font-variant-numeric: tabular-nums; }
-    .stat-value small { font-size: 13px; color: var(--text-dim); font-weight: 600; margin-left: 2px; }
+    .stat-label { display: block; font-size: var(--fs-2); color: var(--text-dim); text-transform: uppercase; letter-spacing: .6px; font-weight: 700; margin-bottom: 6px; }
+    .stat-value { font-size: var(--fs-12); font-weight: 800; font-variant-numeric: tabular-nums; }
+    .stat-value small { font-size: var(--fs-6); color: var(--text-dim); font-weight: 600; margin-left: 2px; }
 
     .bar { height: 9px; border-radius: var(--radius-full); background: #100d0b; border: 1px solid var(--border-soft); overflow: hidden; margin-top: 9px; }
     .bar > span { display: block; height: 100%; width: 0%; border-radius: var(--radius-full); transition: width .5s ease; }
@@ -270,16 +299,16 @@ const char *index_html = R"rawliteral(
        .chart-card with its own canvas id, same label/legend pattern. */
     .chart-card { margin-top: var(--sp-4); text-align: left; }
     .chart-card canvas { width: 100%; height: 60px; display: block; }
-    .chart-label { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-dim); margin-bottom: 6px; }
+    .chart-label { display: flex; justify-content: space-between; font-size: var(--fs-2); color: var(--text-dim); margin-bottom: 6px; }
 
     .shot-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); }
     .shot-time { font-size: clamp(2.6rem, 13vw, 4rem); font-weight: 800; font-variant-numeric: tabular-nums; color: var(--text-dim); line-height: 1; transition: color .2s ease; }
     .shot-time.in-window { color: var(--green); }
     .shot-time.over { color: var(--red); }
-    .shot-sub { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
+    .shot-sub { font-size: var(--fs-4); color: var(--text-dim); margin-top: 4px; }
     .btn-shot {
       border: 1px solid rgba(72,181,131,.4); cursor: pointer; padding: 15px 22px; border-radius: var(--radius-md);
-      font-size: 14px; font-weight: 700; color: #cdeede; background: rgba(72,181,131,.14); flex: none;
+      font-size: var(--fs-7); font-weight: 700; color: #cdeede; background: rgba(72,181,131,.14); flex: none;
       transition: transform .05s ease, background .15s ease;
     }
     .btn-shot:active { transform: translateY(1px); }
@@ -294,7 +323,7 @@ const char *index_html = R"rawliteral(
     .preset-row { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-4); }
     .btn-preset {
       border: 1px solid var(--border); cursor: pointer; padding: 10px 14px; border-radius: var(--radius-full);
-      font-size: 12.5px; font-weight: 700; color: var(--text-dim); background: var(--surface);
+      font-size: var(--fs-5); font-weight: 700; color: var(--text-dim); background: var(--surface);
       transition: transform .05s ease, border-color .15s ease, color .15s ease;
     }
     .btn-preset:active { transform: translateY(1px); }
@@ -302,51 +331,51 @@ const char *index_html = R"rawliteral(
 
     .btn-autotune {
       width: 100%; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: var(--sp-2);
-      padding: 15px 16px; border-radius: var(--radius-md); font-size: 14.5px; font-weight: 700; color: #1a1206;
+      padding: 15px 16px; border-radius: var(--radius-md); font-size: var(--fs-8); font-weight: 700; color: #1a1206;
       background: linear-gradient(135deg, var(--copper-light), var(--copper-deep));
       box-shadow: 0 6px 18px rgba(217,140,63,.28); transition: transform .05s ease, opacity .15s ease;
     }
     .btn-autotune:active:not(:disabled) { transform: translateY(1px); }
     .btn-autotune:disabled { opacity: .4; cursor: default; box-shadow: none; }
     .btn-autotune.running { background: var(--red); color: #1a0d0c; box-shadow: 0 6px 18px rgba(229,84,75,.32); }
-    .autotune-status { display: block; margin-top: var(--sp-3); font-size: 12.5px; color: var(--text-dim); text-align: center; }
+    .autotune-status { display: block; margin-top: var(--sp-3); font-size: var(--fs-5); color: var(--text-dim); text-align: center; }
 
-    .tab-section-title { font-size: 12px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: var(--sp-3); }
+    .tab-section-title { font-size: var(--fs-4); font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: var(--sp-3); }
     .tab-section-title.mt { margin-top: var(--sp-5); }
-    .hint { font-size: 12px; color: var(--text-dim); margin: 0 0 var(--sp-3); line-height: 1.5; }
-    .hint-link { display: inline-block; margin-top: var(--sp-3); font-size: 13px; color: var(--copper); text-decoration: none; font-weight: 600; }
+    .hint { font-size: var(--fs-4); color: var(--text-dim); margin: 0 0 var(--sp-3); line-height: 1.5; }
+    .hint-link { display: inline-block; margin-top: var(--sp-3); font-size: var(--fs-6); color: var(--copper); text-decoration: none; font-weight: 600; }
 
-    label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 6px; font-weight: 600; }
+    label { display: block; font-size: var(--fs-4); color: var(--text-dim); margin-bottom: 6px; font-weight: 600; }
     .field { margin-bottom: var(--sp-3); }
     input {
-      width: 100%; padding: 12px 13px; border-radius: var(--radius-sm); font-size: 15px;
+      width: 100%; padding: 12px 13px; border-radius: var(--radius-sm); font-size: var(--fs-9);
       background: #100d0b; border: 1px solid var(--border); color: var(--text);
       outline: none; transition: border-color .15s ease, box-shadow .15s ease;
     }
     input:focus { border-color: var(--copper); box-shadow: 0 0 0 3px rgba(217,140,63,.18); }
     .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
     .field-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--sp-3); }
-    .check-row { display: flex; align-items: center; gap: var(--sp-2); font-size: 14px; color: var(--text); cursor: pointer; }
+    .check-row { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-7); color: var(--text); cursor: pointer; }
     .sched-slot { padding: var(--sp-3) 0; border-bottom: 1px solid var(--border-soft); }
     .sched-slot:first-child { padding-top: 0; }
     .sched-slot .field-row { margin-top: var(--sp-3); }
     .check-row input { width: auto; }
-    select { width: 100%; padding: 12px 13px; border-radius: var(--radius-sm); font-size: 15px; background: #100d0b; border: 1px solid var(--border); color: var(--text); outline: none; }
+    select { width: 100%; padding: 12px 13px; border-radius: var(--radius-sm); font-size: var(--fs-9); background: #100d0b; border: 1px solid var(--border); color: var(--text); outline: none; }
 
-    .submit, .btn-secondary, .btn-danger { width: 100%; border: none; cursor: pointer; padding: 14px; border-radius: var(--radius-md); font-size: 14.5px; font-weight: 700; margin-top: var(--sp-1); }
+    .submit, .btn-secondary, .btn-danger { width: 100%; border: none; cursor: pointer; padding: 14px; border-radius: var(--radius-md); font-size: var(--fs-8); font-weight: 700; margin-top: var(--sp-1); }
     .submit { color: #1a1206; background: linear-gradient(135deg, var(--copper-light), var(--copper-deep)); box-shadow: 0 6px 18px rgba(217,140,63,.28); }
     .submit:active { transform: translateY(1px); }
     .btn-secondary { color: var(--text); background: var(--surface); border: 1px solid var(--border); margin-top: var(--sp-4); }
     .btn-danger { color: #1a0d0c; background: var(--red); }
 
-    table.history { width: 100%; border-collapse: collapse; font-size: 13px; }
+    table.history { width: 100%; border-collapse: collapse; font-size: var(--fs-6); }
     table.history th, table.history td { text-align: left; padding: 9px 6px; border-bottom: 1px solid var(--border-soft); }
-    table.history th { color: var(--text-dim); font-weight: 600; font-size: 10.5px; text-transform: uppercase; letter-spacing: .5px; }
+    table.history th { color: var(--text-dim); font-weight: 600; font-size: var(--fs-1); text-transform: uppercase; letter-spacing: .5px; }
     table.history td.num { text-align: right; font-variant-numeric: tabular-nums; }
     .table-scroll { overflow-x: auto; }
-    .empty-hint { color: var(--text-dim); font-size: 13px; padding: 6px 0; }
-    .metric-row { display: flex; align-items: center; justify-content: space-between; margin: 0 0 var(--sp-3); font-size: 14px; color: var(--text-dim); }
-    .metric-row b { color: var(--text); font-size: 15px; }
+    .empty-hint { color: var(--text-dim); font-size: var(--fs-6); padding: 6px 0; }
+    .metric-row { display: flex; align-items: center; justify-content: space-between; margin: 0 0 var(--sp-3); font-size: var(--fs-7); color: var(--text-dim); }
+    .metric-row b { color: var(--text); font-size: var(--fs-9); }
 
     .profile-row {
       display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3);
@@ -355,20 +384,45 @@ const char *index_html = R"rawliteral(
     .profile-row:last-child { border-bottom: none; }
     .profile-row.active { border-left: 2px solid var(--copper); padding-left: var(--sp-2); margin-left: calc(var(--sp-2) * -1); }
     .profile-row-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-    .profile-row-main b { font-size: 14.5px; }
-    .profile-row-main span { font-size: 12px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .profile-row-main b { font-size: var(--fs-8); }
+    .profile-row-main span { font-size: var(--fs-4); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .profile-row-actions { display: flex; gap: var(--sp-2); flex: none; }
     .btn-chip-sm {
       border: 1px solid var(--border); background: var(--surface); color: var(--text-dim);
-      padding: 6px 11px; border-radius: var(--radius-sm); font-size: 11.5px; font-weight: 700; cursor: pointer;
+      padding: 6px 11px; border-radius: var(--radius-sm); font-size: var(--fs-3); font-weight: 700; cursor: pointer;
     }
     .btn-chip-sm.danger { border-color: rgba(229,84,75,.4); color: #f3c6c2; }
     .btn-chip-sm.danger.armed { background: var(--red); border-color: var(--red); color: #fff; }
 
-    .footer { text-align: center; color: var(--text-dim); font-size: 11.5px; margin: var(--sp-5) 0 var(--sp-3); }
+    .footer { text-align: center; color: var(--text-dim); font-size: var(--fs-3); margin: var(--sp-5) 0 var(--sp-3); }
     .footer a { color: var(--copper); text-decoration: none; }
 
     .view[hidden] { display: none; }
+
+    /* Inline "Saved"/"Restarting..."/"Save failed" confirmation, created
+       on demand next to whichever submit button was just used. */
+    .save-confirm {
+      display: block; text-align: center; margin-top: var(--sp-2);
+      font-size: var(--fs-6); font-weight: 700; color: var(--green);
+      opacity: 0; transition: opacity .3s var(--ease);
+    }
+    .save-confirm.show { opacity: 1; }
+    .save-confirm.error { color: var(--red); }
+
+    /* Loading-skeleton placeholder for the gauge/stat values before the
+       first /status response lands - swapped for the real value the
+       instant it does (see the poll handler's firstStatusReceived flag). */
+    .skeleton {
+      color: transparent; background: linear-gradient(90deg, var(--surface-2), var(--border), var(--surface-2));
+      background-size: 200% 100%; border-radius: var(--radius-sm);
+    }
+    @media (prefers-reduced-motion: no-preference) {
+      .skeleton { animation: skeleton-pulse 1.5s ease-in-out infinite; }
+    }
+    @keyframes skeleton-pulse {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
 
     .tabbar {
       position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
@@ -379,11 +433,67 @@ const char *index_html = R"rawliteral(
     }
     .tab {
       flex: 1; max-width: 200px; display: flex; flex-direction: column; align-items: center; gap: 3px;
-      border: none; background: none; color: var(--text-faint); font-size: 10.5px; font-weight: 700;
+      border: none; background: none; color: var(--text-faint); font-size: var(--fs-1); font-weight: 700;
       padding: 8px 4px 6px; cursor: pointer; border-radius: var(--radius-md); transition: color .15s ease;
     }
-    .tab-icon { font-size: 19px; }
+    .tab-icon { font-size: var(--fs-11); }
     .tab.active { color: var(--copper-light); }
+
+    /* Compact landscape layout for the "Now" tab only (live status at a
+       glance on a tablet mounted sideways) - gated on max-height, not just
+       orientation, so a tall landscape screen (e.g. a laptop) doesn't get
+       squeezed into this. Tune/History/Settings stay single-column scrolling
+       forms; they aren't something you need to see all at once. */
+    @media (orientation: landscape) and (max-height: 600px) {
+      .app { padding-top: var(--sp-3); }
+      /* :not([hidden]) matters here: this selector (class + attribute) is
+         otherwise more specific than the UA default `[hidden] { display:
+         none }`, so without it, switching tabs away from "now" would leave
+         this view forced visible via `display: grid` regardless of the
+         `hidden` attribute showTab() sets on it. */
+      .view[data-view="now"]:not([hidden]) {
+        display: grid;
+        grid-template-columns: minmax(190px, 260px) 1fr;
+        grid-template-areas: "hero shot" "hero stats";
+        gap: var(--sp-3);
+        align-items: start;
+      }
+      .view[data-view="now"] > .hero-card { grid-area: hero; margin: 0; }
+      .view[data-view="now"] > .card:nth-of-type(2) { grid-area: shot; margin: 0; }
+      .view[data-view="now"] > .card:nth-of-type(3) { grid-area: stats; margin: 0; }
+
+      /* The narrow hero column (190-260px) can't fit two side-by-side
+         circles at their portrait size - .gauge-row's existing flex-wrap
+         already stacks them here automatically; this just shrinks each one
+         so the stacked pair still fits the same vertical budget a single
+         circle used before. */
+      .view[data-view="now"] .gauge-row { gap: var(--sp-1); margin-bottom: var(--sp-2); }
+      .view[data-view="now"] .gauge-wrap {
+        width: clamp(70px, 11vh, 100px); height: clamp(70px, 11vh, 100px);
+        margin-bottom: var(--sp-1);
+      }
+      .view[data-view="now"] .gauge-value { font-size: clamp(1.1rem, 4vh, 1.5rem); letter-spacing: 0; }
+      .view[data-view="now"] .gauge-unit { font-size: clamp(0.55rem, 2vh, 0.7rem); }
+      .view[data-view="now"] .gauge-target { font-size: var(--fs-1); margin-bottom: var(--sp-1); }
+
+      /* The two charts sit side-by-side instead of stacked, roughly halving
+         the vertical space this card needs. */
+      .view[data-view="now"] > .card:nth-of-type(3) {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        grid-template-areas: "stat stat" "chart1 chart2";
+        gap: var(--sp-3);
+      }
+      .view[data-view="now"] > .card:nth-of-type(3) > .stat-grid { grid-area: stat; margin-top: 0; }
+      /* :nth-of-type counts by tag (div), not by class - .stat-grid is the
+         1st div here, so ":nth-of-type" can't pick out "the 1st/2nd
+         .chart-card" directly. Use the adjacent-sibling combinator instead:
+         every .chart-card defaults to chart1, then the one immediately
+         preceded by another .chart-card (i.e. the second one) overrides to
+         chart2 - correct regardless of what precedes the pair. */
+      .view[data-view="now"] > .card:nth-of-type(3) > .chart-card { grid-area: chart1; margin-top: 0; }
+      .view[data-view="now"] > .card:nth-of-type(3) > .chart-card + .chart-card { grid-area: chart2; }
+    }
   </style>
 </head>
 <body>
@@ -412,19 +522,37 @@ const char *index_html = R"rawliteral(
       <div id="descale_banner_top" class="banner banner-warn">&#9888; Descale recommended &mdash; see History tab</div>
     </div>
 
-    <main class="view" data-view="now">
+    <main class="view" data-view="now" id="view-now" role="tabpanel" aria-labelledby="tab-now">
       <div class="card hero-card">
-        <div class="gauge-wrap">
-          <svg class="gauge" viewBox="0 0 220 220">
-            <circle class="gauge-track" cx="110" cy="110" r="96"></circle>
-            <circle id="temp_ring_fill" class="gauge-fill" cx="110" cy="110" r="96"
-                    stroke-dasharray="603" stroke-dashoffset="603"></circle>
-          </svg>
-          <div class="gauge-center">
-            <div class="gauge-value"><span id="temp">--</span><span class="gauge-unit">&deg;C</span></div>
+        <div class="gauge-row">
+          <div class="gauge-col">
+            <div class="gauge-wrap">
+              <svg class="gauge" viewBox="0 0 220 220">
+                <circle class="gauge-track" cx="110" cy="110" r="96"></circle>
+                <circle id="temp_ring_fill" class="gauge-fill" cx="110" cy="110" r="96"
+                        stroke-dasharray="603" stroke-dashoffset="603"></circle>
+              </svg>
+              <div class="gauge-center">
+                <div class="gauge-value"><span id="temp" class="skeleton">--</span><span class="gauge-unit">&deg;C</span></div>
+              </div>
+            </div>
+            <div class="gauge-target">Target <b><span id="target" class="skeleton">--</span>&deg;C</b></div>
+          </div>
+
+          <div class="gauge-col">
+            <div class="gauge-wrap">
+              <svg class="gauge" viewBox="0 0 220 220">
+                <circle class="gauge-track" cx="110" cy="110" r="96"></circle>
+                <circle id="pressure_ring_fill" class="gauge-fill" cx="110" cy="110" r="96"
+                        stroke-dasharray="603" stroke-dashoffset="603"></circle>
+              </svg>
+              <div class="gauge-center">
+                <div class="gauge-value"><span id="pressure_gauge_val" class="skeleton">--</span><span class="gauge-unit">bar</span></div>
+              </div>
+            </div>
+            <div class="gauge-target">Pressure</div>
           </div>
         </div>
-        <div class="gauge-target">Target <b><span id="target">--</span>&deg;C</b></div>
 
         <div class="mode-switch" role="group" aria-label="Mode">
           <button onclick="setMode('off')" id="btn_off" class="mode-btn mode-off">Off</button>
@@ -453,7 +581,7 @@ const char *index_html = R"rawliteral(
         <div class="stat-grid">
           <div class="stat-tile">
             <span class="stat-label">Heater Output</span>
-            <span class="stat-value"><span id="output">--</span><small>%</small></span>
+            <span class="stat-value"><span id="output" class="skeleton">--</span><small>%</small></span>
             <div class="bar heat"><span id="output_bar"></span></div>
           </div>
         </div>
@@ -469,13 +597,9 @@ const char *index_html = R"rawliteral(
         </div>
       </div>
 
-      <div class="card">
-        <button onclick="startAutotune()" id="btn_autotune" class="btn-autotune">&#9889; Start Auto-Tune</button>
-        <span id="autotune_status" class="autotune-status"></span>
-      </div>
     </main>
 
-    <main class="view" data-view="tune" hidden>
+    <main class="view" data-view="tune" id="view-tune" role="tabpanel" aria-labelledby="tab-tune" hidden>
       <div class="card">
         <div class="tab-section-title">Brew</div>
         <form action="/update" method="GET">
@@ -501,6 +625,11 @@ const char *index_html = R"rawliteral(
           </div>
           <button type="submit" class="submit">Save Active-Brew Gains</button>
         </form>
+      </div>
+
+      <div class="card">
+        <button onclick="startAutotune()" id="btn_autotune" class="btn-autotune">&#9889; Start Auto-Tune</button>
+        <span id="autotune_status" class="autotune-status"></span>
       </div>
 
       <div class="card">
@@ -582,7 +711,7 @@ const char *index_html = R"rawliteral(
       </div>
     </main>
 
-    <main class="view" data-view="history" hidden>
+    <main class="view" data-view="history" id="view-history" role="tabpanel" aria-labelledby="tab-history" hidden>
       <div class="card">
         <div class="tab-section-title">Shot History</div>
         <div id="shot_history_empty" class="empty-hint">No shots logged yet.</div>
@@ -644,7 +773,7 @@ const char *index_html = R"rawliteral(
       </div>
     </main>
 
-    <main class="view" data-view="settings" hidden>
+    <main class="view" data-view="settings" id="view-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
       <div class="card">
         <div class="tab-section-title">Shot Timer</div>
         <form action="/update" method="GET">
@@ -751,11 +880,11 @@ const char *index_html = R"rawliteral(
     </footer>
   </div>
 
-  <nav class="tabbar">
-    <button class="tab active" data-tab="now"><span class="tab-icon">&#9749;</span><span>Now</span></button>
-    <button class="tab" data-tab="tune"><span class="tab-icon">&#9881;</span><span>Tune</span></button>
-    <button class="tab" data-tab="history"><span class="tab-icon">&#8987;</span><span>History</span></button>
-    <button class="tab" data-tab="settings"><span class="tab-icon">&#9776;</span><span>Settings</span></button>
+  <nav class="tabbar" role="tablist" aria-label="Sections">
+    <button class="tab active" role="tab" aria-selected="true" aria-controls="view-now" id="tab-now" data-tab="now"><span class="tab-icon">&#9749;</span><span>Now</span></button>
+    <button class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="view-tune" id="tab-tune" data-tab="tune"><span class="tab-icon">&#9881;</span><span>Tune</span></button>
+    <button class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="view-history" id="tab-history" data-tab="history"><span class="tab-icon">&#8987;</span><span>History</span></button>
+    <button class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="view-settings" id="tab-settings" data-tab="settings"><span class="tab-icon">&#9776;</span><span>Settings</span></button>
   </nav>
 
 <script>
@@ -768,6 +897,56 @@ function setVal(id, v) {
 }
 function clamp(x) { return Math.max(0, Math.min(100, x)); }
 
+// Every plain settings form (action="/update", method="GET") is
+// intercepted here and sent via XHR instead, so saving no longer does a
+// full page reload - the fields keep whatever the user just typed, and an
+// inline confirmation appears next to the button instead. Forms with their
+// own onsubmit handler (profile editor, shot notes) already do this and
+// are untouched. MQTT save reboots the controller - shown a distinct
+// "Restarting..." message immediately, since the HTTP response may never
+// complete before the device restarts.
+document.addEventListener("submit", function (e) {
+  var form = e.target;
+  if (!form || form.tagName !== "FORM" || form.getAttribute("action") !== "/update") return;
+  e.preventDefault();
+
+  var parts = [];
+  for (var i = 0; i < form.elements.length; i++) {
+    var el = form.elements[i];
+    if (!el.name) continue;
+    parts.push(encodeURIComponent(el.name) + "=" + encodeURIComponent(el.value));
+  }
+  var btn = form.querySelector("button[type=submit]");
+  var isMqtt = !!form.querySelector("#input_mqtt_server");
+  var xhttp = new XMLHttpRequest();
+  if (isMqtt) {
+    showSaveConfirm(btn, "Restarting...", false);
+  } else {
+    xhttp.onreadystatechange = function () {
+      if (xhttp.readyState !== 4) return;
+      showSaveConfirm(btn, xhttp.status === 200 ? "Saved" : "Save failed", xhttp.status !== 200);
+    };
+  }
+  xhttp.open("GET", "/update?" + parts.join("&"), true);
+  xhttp.send();
+});
+
+function showSaveConfirm(btn, text, isError) {
+  if (!btn) return;
+  var el = btn.nextElementSibling;
+  if (!el || !el.classList.contains("save-confirm")) {
+    el = document.createElement("span");
+    el.className = "save-confirm";
+    el.setAttribute("aria-live", "polite");
+    btn.insertAdjacentElement("afterend", el);
+  }
+  el.textContent = text;
+  el.classList.toggle("error", !!isError);
+  el.classList.add("show");
+  clearTimeout(el._hideTimer);
+  el._hideTimer = setTimeout(function () { el.classList.remove("show"); }, 2200);
+}
+
 // Tabs - hash-addressable (#now/#tune/#history/#settings) so a reload keeps
 // whichever view was open; all four share the single /status poll below.
 function showTab(name) {
@@ -776,7 +955,12 @@ function showTab(name) {
   var views = document.querySelectorAll(".view");
   for (var i = 0; i < views.length; i++) views[i].hidden = views[i].dataset.view !== name;
   var tabs = document.querySelectorAll(".tab");
-  for (var j = 0; j < tabs.length; j++) tabs[j].classList.toggle("active", tabs[j].dataset.tab === name);
+  for (var j = 0; j < tabs.length; j++) {
+    var active = tabs[j].dataset.tab === name;
+    tabs[j].classList.toggle("active", active);
+    tabs[j].setAttribute("aria-selected", active ? "true" : "false");
+    tabs[j].tabIndex = active ? 0 : -1;
+  }
   history.replaceState(null, "", "#" + name);
 }
 (function () {
@@ -797,6 +981,7 @@ showTab(location.hash.slice(1));
 // they scroll off the visible window.
 var phaseMarkers = [];
 var lastSeenShotPhase = null;
+var firstStatusReceived = false;
 
 function trackPhaseMarkers(shotPhase, shotInProgress) {
   phaseMarkers.forEach(function (m) { m.age++; });
@@ -806,13 +991,30 @@ function trackPhaseMarkers(shotPhase, shotInProgress) {
   lastSeenShotPhase = shotInProgress ? shotPhase : null;
 }
 
-function drawSparkline(data) {
+// Draws a dashed horizontal reference line at the given target value,
+// using the same min/max scale as the data line - shared by both charts.
+function drawTargetLine(ctx, w, h, min, max, target) {
+  if (target === null || target === undefined) return;
+  var y = h - ((target - min) / (max - min)) * (h - 6) - 3;
+  ctx.save();
+  ctx.strokeStyle = "rgba(179,162,148,.55)"; // --text-dim, translucent
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 3]);
+  ctx.beginPath();
+  ctx.moveTo(0, y);
+  ctx.lineTo(w, y);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawSparkline(data, target) {
   var canvas = document.getElementById("temp_chart");
   if (!canvas || !data || data.length < 2) return;
   var ctx = canvas.getContext("2d");
   var w = canvas.width, h = canvas.height;
   ctx.clearRect(0, 0, w, h);
-  var min = Math.min.apply(null, data), max = Math.max.apply(null, data);
+  var scaleValues = (target === null || target === undefined) ? data : data.concat([target]);
+  var min = Math.min.apply(null, scaleValues), max = Math.max.apply(null, scaleValues);
   if (max - min < 1) { max += 0.5; min -= 0.5; }
 
   phaseMarkers = phaseMarkers.filter(function (m) { return m.age < data.length; });
@@ -832,6 +1034,8 @@ function drawSparkline(data) {
     ctx.restore();
   }
 
+  drawTargetLine(ctx, w, h, min, max, target);
+
   ctx.beginPath();
   data.forEach(function (v, i) {
     var x = (i / (data.length - 1)) * w;
@@ -844,15 +1048,18 @@ function drawSparkline(data) {
   ctx.stroke();
 }
 
-function drawPressureSparkline(data) {
+function drawPressureSparkline(data, target) {
   var canvas = document.getElementById("pressure_chart");
   if (!canvas || !data || data.length < 2) return;
   var ctx = canvas.getContext("2d");
   var w = canvas.width, h = canvas.height;
   ctx.clearRect(0, 0, w, h);
-  var min = Math.min.apply(null, data), max = Math.max.apply(null, data);
+  var scaleValues = (target === null || target === undefined) ? data : data.concat([target]);
+  var min = Math.min.apply(null, scaleValues), max = Math.max.apply(null, scaleValues);
   if (max - min < 0.5) { max += 0.25; min -= 0.25; }
   if (min > 0) min = 0; // pressure chart always includes zero for scale
+
+  drawTargetLine(ctx, w, h, min, max, target);
 
   ctx.beginPath();
   data.forEach(function (v, i) {
@@ -1136,13 +1343,23 @@ setInterval(function () {
       var mode = json.opmode; // "off" | "brew" | "steam"
       var hasTarget = mode !== "off" && target > 0;
 
+      if (!firstStatusReceived) {
+        firstStatusReceived = true;
+        var skeletons = document.querySelectorAll(".skeleton");
+        for (var s = 0; s < skeletons.length; s++) skeletons[s].classList.remove("skeleton");
+      }
+
       document.getElementById("fault_banner").style.display = json.fault ? "flex" : "none";
       document.getElementById("temp").innerHTML = json.fault ? "--" : temp.toFixed(1);
       document.getElementById("target").innerHTML = hasTarget ? target.toFixed(1) : "--";
       document.getElementById("output").innerHTML = outputPct.toFixed(0);
       trackPhaseMarkers(json.shot_phase, json.shot_in_progress);
-      drawSparkline(json.history);
-      drawPressureSparkline(json.pressure_history);
+      drawSparkline(json.history, hasTarget ? target : null);
+      // Only "pressure" phase exposes a ramp/hold target via this JSON API
+      // (a later decline sub-stage isn't distinguished from "pressure" here) -
+      // no target line outside that phase or when no pressure profile ran.
+      var pressureTarget = (json.press_enabled && json.shot_phase === "pressure") ? json.press_ramp_bar : null;
+      drawPressureSparkline(json.pressure_history, pressureTarget);
       var pLabel = document.getElementById("pressure_label");
       if (pLabel) pLabel.textContent = (json.pressure_fault ? "fault" : json.pressure.toFixed(2) + " bar");
 
@@ -1160,6 +1377,30 @@ setInterval(function () {
         else if (temp > target + READY_MARGIN_C) ring.classList.add("over");
         else ring.classList.add("ready");
       }
+
+      // Pressure ring - fill is a fixed 0-16 bar scale (this machine's
+      // safety-valve rating - a real manometer reading, not %-of-target,
+      // since 9 bar would only ever show ~56% full and never look "done").
+      // Color instead answers "how close to the 9 bar brew target", and
+      // only while a shot is actually running - otherwise it's just idle,
+      // same as the temp ring with no active target.
+      var PRESSURE_GAUGE_MAX_BAR = 16;
+      var PRESSURE_BREW_TARGET_BAR = 9;
+      var pressureVal = json.pressure;
+      var pressurePct = json.pressure_fault ? 0 : clamp((pressureVal / PRESSURE_GAUGE_MAX_BAR) * 100);
+      var pRing = document.getElementById("pressure_ring_fill");
+      if (pRing) {
+        pRing.style.strokeDashoffset = RING_CIRCUMFERENCE * (1 - pressurePct / 100);
+        pRing.classList.remove("heating", "ready", "over");
+        if (!json.pressure_fault && json.shot_in_progress) {
+          var PRESSURE_READY_MARGIN_BAR = 1.5;
+          if (pressureVal < PRESSURE_BREW_TARGET_BAR - PRESSURE_READY_MARGIN_BAR) pRing.classList.add("heating");
+          else if (pressureVal > PRESSURE_BREW_TARGET_BAR + PRESSURE_READY_MARGIN_BAR) pRing.classList.add("over");
+          else pRing.classList.add("ready");
+        }
+      }
+      var pGaugeVal = document.getElementById("pressure_gauge_val");
+      if (pGaugeVal) pGaugeVal.innerHTML = json.pressure_fault ? "--" : pressureVal.toFixed(1);
 
       document.getElementById("output_bar").style.width = clamp(outputPct) + "%";
 
@@ -2209,7 +2450,15 @@ void setupWeb() {
 
   // Main Page Handler
   server.on("/", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(200, "text/html", index_html);
+    // No-store: this page has been changing rapidly during active
+    // development, and with no versioned URL/ETag, a browser's default
+    // caching heuristics can silently keep serving a stale copy after a
+    // firmware update - confirmed 2026-09-15 (see AGENTS.md) when a
+    // browser showed no visible change immediately after a fresh OTA
+    // flash. Always revalidate instead of guessing.
+    AsyncWebServerResponse *response = request->beginResponse(200, "text/html", index_html);
+    response->addHeader("Cache-Control", "no-store");
+    request->send(response);
   });
 
   // PWA manifest + icon (add-to-home-screen support)

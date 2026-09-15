@@ -1,6 +1,11 @@
 # Unified BLE/Serial Connectivity Protocol — Design Spec
 
-**Status:** approved, ready for implementation planning
+**Status:** approved, ready for implementation planning - **implementation
+paused 2026-09-15** (see
+`docs/superpowers/plans/2026-09-15-connectivity-protocol.md`'s status
+note; sub-project 3's tablet connectivity moved to the WiFi web UI
+instead, and this plan wasn't otherwise prioritized to continue on its
+own). Spec itself remains valid, not superseded.
 **Date:** 2026-09-04
 **Sub-project 2 of 3** in the larger "FreeRTOS task-priority refactor +
 dual connectivity + Android app" initiative (see `AGENTS.md`/this repo's
@@ -70,27 +75,36 @@ profiles (brainstorming, 2026-09-04):
 
 ### 4a. Live telemetry — compact binary frame
 
-A fixed 21-byte little-endian frame, small enough to fit inside a single
-BLE packet **even at the default, un-negotiated 23-byte ATT MTU** — no MTU
-negotiation round-trip is required for telemetry to work:
+**Corrected 2026-09-15** (Android app brainstorming caught this): a BLE
+notification's usable payload at the default, un-negotiated 23-byte ATT
+MTU is **20 bytes**, not 21 — 3 bytes are reserved for ATT protocol
+overhead (1-byte opcode + 2-byte handle) on every notification. The
+original 21-byte frame below would silently truncate on any central that
+never negotiates a larger MTU — which, critically, includes **every**
+Android client older than API 21 (Lollipop): `BluetoothGatt.requestMtu()`
+doesn't exist before then, so a KitKat (API 19) client has no way to ask
+for more room at all, ever. The fix costs nothing: the frame's separate
+"protocol version" byte was redundant with the sync-marker byte right next
+to it, so folding them into one field shrinks the frame to exactly 20
+bytes — fits the guaranteed-available default MTU everywhere, no
+negotiation required, on every client including KitKat's:
 
 | Offset | Bytes | Field | Notes |
 |---|---|---|---|
-| 0 | 1 | Sync marker | `0xA5` — lets a Serial reader distinguish this from a JSON command line (which always starts with `{` / `0x7B`) |
-| 1 | 1 | Protocol version | `1` |
-| 2 | 4 | `temp` | float32, °C |
-| 6 | 4 | `pressure` | float32, bar |
-| 10 | 1 | `output` | uint8, 0-100% heater duty |
-| 11 | 1 | `pump_power` | uint8, 0-100% dimmer duty |
-| 12 | 1 | `opmode` | 0=off, 1=brew, 2=steam |
-| 13 | 1 | `shot_phase` | 0=none, 1=preinfusion_on, 2=preinfusion_off, 3=pressure, 4=extraction |
-| 14 | 1 | flags bitfield | bit0 sensorFault, bit1 pressureFault, bit2 shotInProgress, bit3 autoSleeping, bit4 pressureCeilingTripped, bit5 descaleDue |
-| 15 | 4 | `shot_elapsed_ms` | uint32, 0 if no shot in progress |
-| 19 | 2 | CRC16 | over bytes 0-18 (CCITT) — BLE's link layer has its own CRC, but Serial does not, and a single shared encoder is simpler than two |
+| 0 | 1 | Sync marker / version | `0xA5` = protocol v1. Lets a Serial reader distinguish this from a JSON command line (which always starts with `{` / `0x7B`); a future incompatible frame layout uses a different marker byte value rather than a separate version field, keeping the frame at 20 bytes. |
+| 1 | 4 | `temp` | float32, °C |
+| 5 | 4 | `pressure` | float32, bar |
+| 9 | 1 | `output` | uint8, 0-100% heater duty |
+| 10 | 1 | `pump_power` | uint8, 0-100% dimmer duty |
+| 11 | 1 | `opmode` | 0=off, 1=brew, 2=steam |
+| 12 | 1 | `shot_phase` | 0=none, 1=preinfusion_on, 2=preinfusion_off, 3=pressure, 4=extraction |
+| 13 | 1 | flags bitfield | bit0 sensorFault, bit1 pressureFault, bit2 shotInProgress, bit3 autoSleeping, bit4 pressureCeilingTripped, bit5 descaleDue |
+| 14 | 4 | `shot_elapsed_ms` | uint32, 0 if no shot in progress |
+| 18 | 2 | CRC16 | over bytes 0-17 (CCITT) — BLE's link layer has its own CRC, but Serial does not, and a single shared encoder is simpler than two |
 
 Pushed as a BLE notification and as a Serial line-oriented binary write, at
 a configurable rate (default matching the Web UI's existing 2s poll
-interval; can be raised since a 21-byte frame is cheap).
+interval; can be raised since a 20-byte frame is cheap).
 
 ### 4b. Commands & everything else — JSON request/response
 
@@ -207,6 +221,15 @@ transport a command arrived over.
 
 ## 10. Decisions log (from brainstorming, 2026-09-04)
 
+- **2026-09-15 correction** (surfaced during the Android app's brainstorming,
+  sub-project 3): the telemetry frame was 21 bytes, one over BLE's
+  guaranteed-available default-MTU payload of 20 bytes (MTU 23 minus 3
+  bytes of ATT overhead) — would silently truncate on any central that
+  never negotiates a larger MTU, which includes every Android client below
+  API 21 (`BluetoothGatt.requestMtu()` doesn't exist before Lollipop), i.e.
+  guaranteed broken on the KitKat (API 19) tablet this project targets.
+  Fixed by folding the redundant "protocol version" byte into the sync
+  marker, bringing the frame to 20 bytes — see §4a.
 - Decomposition: task-priority+protocol design, then USB Serial transport,
   then BLE transport, then web UI auth as its own later spec — all folded
   into this one spec since the protocol is the shared foundation both
