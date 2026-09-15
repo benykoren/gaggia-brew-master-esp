@@ -391,7 +391,14 @@ mechanically, don't trust a single read.
 
 ## Item 7 — Real-time pressure transducer + live pressure graph
 
-**Status:** not started. **Depends on:** nothing (item 8 later depends on
+**Status:** electrically wired and bench-verified (2026-09-15) - reads
+`pressure: 0.0`, `pressure_fault: false` at rest, powered from 3V3 (the
+board's "5V IN" pin turned out to be input-only; see `AGENTS.md`'s
+2026-09-15 change log entry) with `config.h`'s calibration constants
+recalibrated to match. **Not yet physically plumbed into the machine's
+hydraulic circuit** - still needs the T-fitting installed at the pump
+outlet and a real calibration against a known pressure reference
+(bring-up Task 11). **Depends on:** nothing (item 8 later depends on
 this). (Originally "item 6.")
 
 **What it's for:** a standalone monitoring/graph feature on its own, and
@@ -424,12 +431,22 @@ time for it separately from the electrical work.
 
 ## Item 8 — Phase-control dimmer to a pressure target (e.g. 9 bar)
 
-**Status:** next active build (2026-08-29), alongside item 7. **Depends
-on:** item 7 (pressure transducer) — hard prerequisite for the
-closed-loop pressure-target half only, see below. (Originally "item 9b.")
-**Also now covers item 4's former role** (plain pump on/off) — item 4 was
-dropped as a separate build on 2026-08-29 once it was clear this item's
-dimmer subsumes on/off; see item 4 above for the fail-off tradeoff this
+**Status: on/off half complete and verified on the real machine
+(2026-09-15, Milestone A)** - the dimmer replaces the old relay entirely,
+spliced at the Brew Switch's own White-wire output terminal (same point
+item 4 already identified), and Start Shot/Stop Shot correctly starts
+and stops the real pump. Getting here required finding and fixing a real
+firmware bug (floating-point math inside the zero-cross ISR, causing a
+"Coprocessor exception" panic under real mains load - see `AGENTS.md`'s
+2026-09-15 change log entry) that no bench test had ever caught, since
+the lamp test was skipped by user decision. **Closed-loop pressure-target
+half not yet started** - depends on item 7's transducer being physically
+plumbed in and calibrated first (bring-up Tasks 11-12). **Depends on:**
+item 7 (pressure transducer) — hard prerequisite for the closed-loop
+pressure-target half only, see below. (Originally "item 9b.") **Also now
+covers item 4's former role** (plain pump on/off) — item 4 was dropped as
+a separate build on 2026-08-29 once it was clear this item's dimmer
+subsumes on/off; see item 4 above for the fail-off tradeoff this
 accepts.
 
 **Two things, one build:**
