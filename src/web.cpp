@@ -233,7 +233,7 @@ const char *index_html = R"rawliteral(
        group instead of the number alone, which visibly dragged the number
        upward off the ring's actual center. It now lives outside, below the
        ring, in normal document flow (see .gauge-target). */
-    .gauge-center { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+    .gauge-center { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: flex; align-items: center; justify-content: center; }
     .gauge-value { display: flex; align-items: baseline; justify-content: center; font-size: clamp(3.4rem, 14vw, 5.2rem); font-weight: 800; line-height: 1; letter-spacing: -2px; font-variant-numeric: tabular-nums; }
     .gauge-unit { font-size: clamp(1.1rem, 4vw, 1.4rem); color: var(--text-dim); font-weight: 600; margin-left: 3px; }
     .gauge-target { color: var(--text-dim); margin: 0 0 var(--sp-4); font-size: 14px; }
