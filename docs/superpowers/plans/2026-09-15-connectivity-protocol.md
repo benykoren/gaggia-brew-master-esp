@@ -20,7 +20,7 @@ polling a new `serial_transport.cpp` (line-buffered JSON over the existing
 USB-CDC Serial link) and a new `ble_transport.cpp` (NimBLE GATT service:
 Notify telemetry, Write command, Notify response), dispatching JSON
 commands through the same `command_dispatch` functions the Web UI uses, and
-pushing a compact 21-byte binary telemetry frame (`telemetry.cpp`) to both
+pushing a compact 20-byte binary telemetry frame (`telemetry.cpp`) to both
 transports on a timer. `controlLoopTask` and its `stateMutex` are untouched.
 
 **Tech Stack:** ESP32-S3 / Arduino framework / PlatformIO, `bblanchon/ArduinoJson`
@@ -73,8 +73,8 @@ stack for WiFi coexistence and lower RAM/flash footprint - spec §3).
 **Interfaces:**
 - Produces: `CONNECTIVITY_TASK_STACK_SIZE`, `CONNECTIVITY_TASK_PRIORITY`,
   `CONNECTIVITY_TASK_POLL_MS`, `CONNECTIVITY_TELEMETRY_INTERVAL_MS`,
-  `TELEMETRY_FRAME_LEN`, `TELEMETRY_PROTOCOL_VERSION`,
-  `TELEMETRY_SYNC_MARKER`, `SERIAL_MAX_LINE_LEN`, `BLE_MAX_COMMAND_LEN`,
+  `TELEMETRY_FRAME_LEN`, `TELEMETRY_SYNC_MARKER`, `SERIAL_MAX_LINE_LEN`,
+  `BLE_MAX_COMMAND_LEN`,
   `BLE_DEVICE_NAME`, `BLE_SERVICE_UUID`, `BLE_CHAR_TELEMETRY_UUID`,
   `BLE_CHAR_COMMAND_UUID`, `BLE_CHAR_RESPONSE_UUID` - all consumed by later
   tasks.
@@ -120,12 +120,19 @@ block):
 // Matches the existing Web UI's /status poll cadence (spec §4a).
 #define CONNECTIVITY_TELEMETRY_INTERVAL_MS 2000
 
-// Binary telemetry frame (spec §4a) - fixed 21 bytes, little-endian, fits
-// inside a single BLE packet even at the default 23-byte ATT MTU.
-#define TELEMETRY_FRAME_LEN 21
-#define TELEMETRY_PROTOCOL_VERSION 1
+// Binary telemetry frame (spec §4a) - fixed 20 bytes, little-endian. This
+// is exactly BLE's guaranteed-available payload at the default,
+// un-negotiated 23-byte ATT MTU (MTU - 3 bytes of ATT overhead) - matters
+// because BluetoothGatt.requestMtu() doesn't exist before Android API 21,
+// so any pre-Lollipop client (KitKat's API 19 included) can never
+// negotiate more than this, ever. The frame's sync marker doubles as its
+// protocol version (no separate version byte) specifically to fit this
+// budget - see spec §4a's 2026-09-15 correction.
+#define TELEMETRY_FRAME_LEN 20
 // Distinguishes a binary telemetry frame from a JSON command line (which
-// always starts with '{' / 0x7B) on the shared Serial link.
+// always starts with '{' / 0x7B) on the shared Serial link, and doubles as
+// the protocol version (a future incompatible frame layout uses a
+// different marker byte rather than growing the frame).
 #define TELEMETRY_SYNC_MARKER 0xA5
 
 // Longest JSON command line this firmware will buffer before giving up on
@@ -1026,15 +1033,20 @@ void encodeTelemetryFrame(uint8_t *out) {
       (snapShotCount >= snapDescaleShotThreshold) ||
       (daysSinceDescale >= 0 && (unsigned long)daysSinceDescale >= snapDescaleDayThreshold);
 
+  // Byte 0 doubles as the protocol version (no separate version byte) -
+  // keeps the frame at exactly 20 bytes, BLE's guaranteed-available
+  // payload at the default, un-negotiated 23-byte ATT MTU (MTU - 3 bytes
+  // of ATT overhead) - see config.h's TELEMETRY_FRAME_LEN comment for why
+  // this matters (BluetoothGatt.requestMtu() doesn't exist before Android
+  // API 21, so a KitKat client can never negotiate more than this).
   out[0] = TELEMETRY_SYNC_MARKER;
-  out[1] = TELEMETRY_PROTOCOL_VERSION;
-  writeFloatLE(out + 2, snapTemp);
-  writeFloatLE(out + 6, snapPressure);
+  writeFloatLE(out + 1, snapTemp);
+  writeFloatLE(out + 5, snapPressure);
   uint8_t outputPercent = (uint8_t)constrain((int)(snapOutput * 100.0 / snapWindowSize), 0, 100);
-  out[10] = outputPercent;
-  out[11] = (uint8_t)constrain((int)(snapPumpPower + 0.5f), 0, 100);
-  out[12] = (uint8_t)snapMode;
-  out[13] = (uint8_t)snapPhase;
+  out[9] = outputPercent;
+  out[10] = (uint8_t)constrain((int)(snapPumpPower + 0.5f), 0, 100);
+  out[11] = (uint8_t)snapMode;
+  out[12] = (uint8_t)snapPhase;
 
   uint8_t flags = 0;
   if (snapSensorFault) flags |= (1 << 0);
@@ -1043,14 +1055,14 @@ void encodeTelemetryFrame(uint8_t *out) {
   if (snapAutoSleeping) flags |= (1 << 3);
   if (pressureCeilingTripped) flags |= (1 << 4);
   if (descaleDue) flags |= (1 << 5);
-  out[14] = flags;
+  out[13] = flags;
 
   uint32_t shotElapsedMs = snapShotInProgress ? (uint32_t)(millis() - snapShotStartMillis) : 0;
-  writeU32LE(out + 15, shotElapsedMs);
+  writeU32LE(out + 14, shotElapsedMs);
 
-  uint16_t crc = crc16Ccitt(out, 19);
-  out[19] = (uint8_t)(crc & 0xFF);
-  out[20] = (uint8_t)((crc >> 8) & 0xFF);
+  uint16_t crc = crc16Ccitt(out, 18);
+  out[18] = (uint8_t)(crc & 0xFF);
+  out[19] = (uint8_t)((crc >> 8) & 0xFF);
 }
 ```
 
@@ -1064,7 +1076,7 @@ Expected: PASS. Nothing calls `encodeTelemetryFrame()` yet (wired in Task
 
 ```bash
 git add include/telemetry.h src/telemetry.cpp
-git commit -m "Add the 21-byte binary telemetry frame encoder and its CRC16"
+git commit -m "Add the 20-byte binary telemetry frame encoder and its CRC16"
 ```
 
 ---
@@ -1574,7 +1586,7 @@ port = sys.argv[1] if len(sys.argv) > 1 else "COM6"
 baud = int(sys.argv[2]) if len(sys.argv) > 2 else 115200
 
 SYNC_MARKER = 0xA5
-FRAME_LEN = 21
+FRAME_LEN = 20
 
 
 def crc16_ccitt(data: bytes) -> int:
@@ -1662,8 +1674,8 @@ try:
 
     kind, payload = read_response(deadline_s=3.0)
     assert kind == "frame", f"expected a telemetry frame, got {kind!r}"
-    crc_in_frame = payload[19] | (payload[20] << 8)
-    assert crc16_ccitt(payload[:19]) == crc_in_frame, "telemetry frame CRC mismatch"
+    crc_in_frame = payload[18] | (payload[19] << 8)
+    assert crc16_ccitt(payload[:18]) == crc_in_frame, "telemetry frame CRC mismatch"
     print(f"[smoke test] telemetry frame OK: {len(payload)} bytes, CRC valid")
 
     print("[smoke test] ALL CHECKS PASSED")
@@ -1714,10 +1726,13 @@ properties respectively.
 - [ ] **Step 2: Verify telemetry**
 
 Subscribe (enable notifications) on the Telemetry characteristic. Confirm a
-21-byte value arrives roughly every 2 seconds (`CONNECTIVITY_TELEMETRY_INTERVAL_MS`).
-Spot-check a couple of fields by hand against what `/status` (Web UI or
-`curl`) shows at the same moment: byte 0 = `0xA5`, bytes 2-5 as a
-little-endian float32 should match the current temperature, byte 12 should
+20-byte value arrives roughly every 2 seconds (`CONNECTIVITY_TELEMETRY_INTERVAL_MS`)
+**without ever needing an MTU request** - the scanner app should show the
+full 20 bytes at the connection's default MTU, confirming the frame fits
+without negotiation (the whole point of the 2026-09-15 fix - see spec
+§4a). Spot-check a couple of fields by hand against what `/status` (Web UI
+or `curl`) shows at the same moment: byte 0 = `0xA5`, bytes 1-4 as a
+little-endian float32 should match the current temperature, byte 11 should
 be `0`/`1`/`2` for off/brew/steam matching `opmode`.
 
 - [ ] **Step 3: Verify commands**
