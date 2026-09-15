@@ -1685,6 +1685,9 @@ static void handleStatus(AsyncWebServerRequest *request) {
   // now that Fix 1 makes an unwired-sensor fault the likeliest Milestone A
   // confusion point.
   float snapPumpPower = dimmerGetPowerPercent();
+  // Temporary bring-up diagnostic (2026-09-15) - see dimmerGetZcCount()'s
+  // declaration comment. Remove alongside it once bring-up is complete.
+  uint32_t snapDimmerZcCount = dimmerGetZcCount();
   bool snapPressureCeilingTripped = (pressureFault || currentPressure > PUMP_MAX_SAFETY_BAR);
   int snapPressHistoryCount = pressureHistoryCount, snapPressHistoryHead = pressureHistoryHead;
   float snapPressHistory[TEMP_HISTORY_LEN];
@@ -1789,6 +1792,7 @@ static void handleStatus(AsyncWebServerRequest *request) {
   json += ",\"pressure\":" + String(snapPressure, 2);
   json += ",\"pressure_fault\":" + String(snapPressureFault ? "true" : "false");
   json += ",\"pump_power\":" + String(snapPumpPower, 1);
+  json += ",\"dimmer_zc_count\":" + String(snapDimmerZcCount);
   json += ",\"pressure_ceiling_tripped\":" + String(snapPressureCeilingTripped ? "true" : "false");
   json += ",\"press_enabled\":" + String(snapPressEnabled ? "true" : "false");
   json += ",\"press_ramp_bar\":" + String(snapPressRampBar);
