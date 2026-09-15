@@ -431,21 +431,22 @@ time for it separately from the electrical work.
 
 ## Item 8 — Phase-control dimmer to a pressure target (e.g. 9 bar)
 
-**Status: BROKEN (2026-09-15) - the dimmer module's TRIAC is
-permanently shorted, replacement in progress.** On/off control was
-briefly complete and verified on the real machine (2026-09-15, Milestone
-A - see `AGENTS.md`'s first 2026-09-15 change log entry), but shortly
-after, an accidental `OUT`/`N` terminal swap during unrelated wiring work
-put the TRIAC's switched Live output directly onto the board's unswitched
-Neutral pass-through; firing it mid-shot shorted mains straight through
-the TRIAC and welded it permanently conducting. Confirmed via a staged
-continuity check down to probing the module's own terminals in total
-isolation (nothing wired to `IN`/`OUT`/`N`) - still shorted, so the fault
-is the module itself, not any external wiring. Full diagnosis in
-`AGENTS.md`'s second 2026-09-15 change log entry. **The pump currently
-runs whenever the physical Brew switch is closed, with zero ESP32
-control** - this is not a safe or working state to leave the machine in
-between sessions.
+**Status: module dead, wiring/splice confirmed good (2026-09-15) -
+waiting on a replacement module only.** On/off control was briefly
+complete and verified on the real machine (2026-09-15, Milestone A - see
+`AGENTS.md`'s first 2026-09-15 change log entry), but shortly after, an
+accidental `OUT`/`N` terminal swap during unrelated wiring work put the
+TRIAC's switched Live output directly onto the board's unswitched Neutral
+pass-through; firing it mid-shot shorted mains straight through the TRIAC
+and welded it permanently conducting. Confirmed via a staged continuity
+check down to probing the module's own terminals in total isolation
+(nothing wired to `IN`/`OUT`/`N`) - still shorted, so the fault is the
+module itself, not the external wiring, which has since been corrected
+and confirmed good. Full diagnosis in `AGENTS.md`'s second 2026-09-15
+change log entry. **The pump currently runs whenever the physical Brew
+switch is closed, with zero ESP32 control** - this is not a safe or
+working state to leave the machine in between sessions, until the
+replacement module is dropped in.
 **Terminal layout, worth getting right this time**: these boards have
 four separate mains terminals, not a generic "IN"/"OUT" pair - `L(IN)`,
 `N(IN)`, `L(OUT)`, `N(OUT)`. Only the Live leg (`L(IN)`->`L(OUT)`) is
@@ -454,20 +455,23 @@ pass-through. The pump must bridge `L(OUT)`/`N(OUT)` as the load - never
 let `N(OUT)` (or `N(IN)`) land anywhere except true Neutral.
 **Replacement module identified**: a RobotDyn-style "AC Light/Motor
 Dimmer Module," 1-channel, 3.3V/5V logic, 8A/400V (well above the pump's
-sub-1A draw, and explicitly rated for motor/inductive loads). Before
-wiring it in: verify `L(IN)`-`L(OUT)` reads open with nothing connected
-to any terminal, then wire Live -> `L(IN)`, Neutral -> `N(IN)`, pump
-bridging `L(OUT)`/`N(OUT)`, labeling each wire before landing it.
-**Milestone A must be re-verified from scratch once the replacement is
-wired in** - it is not currently working. **Closed-loop pressure-target
-half not yet started** - depends on item 7's transducer being physically
-plumbed in and calibrated first (bring-up Tasks 11-12), and now also on
-Milestone A being re-established. **Depends on:** item 7 (pressure
-transducer) — hard prerequisite for the closed-loop pressure-target half
-only, see below. (Originally "item 9b.") **Also now covers item 4's
-former role** (plain pump on/off) — item 4 was dropped as a separate
-build on 2026-08-29 once it was clear this item's dimmer subsumes on/off;
-see item 4 above for the fail-off tradeoff this accepts.
+sub-1A draw, and explicitly rated for motor/inductive loads) - purchase
+in progress. Before wiring it in: verify `L(IN)`-`L(OUT)` reads open with
+nothing connected to any terminal, then swap it into the already-correct
+wiring (Live -> `L(IN)`, Neutral -> `N(IN)`, pump bridging
+`L(OUT)`/`N(OUT)`) - no re-wiring of the splice itself should be needed,
+just landing the same wires on the new module's terminals. **Once
+swapped in, re-run the Milestone A on/off test** (Start Shot/Stop Shot
+via the ESP32) to confirm control is restored before moving on.
+**Closed-loop pressure-target half not yet started** - depends on item
+7's transducer being physically plumbed in and calibrated first
+(bring-up Tasks 11-12), and now also on the replacement module being
+installed. **Depends on:** item 7 (pressure transducer) — hard
+prerequisite for the closed-loop pressure-target half only, see below.
+(Originally "item 9b.") **Also now covers item 4's former role** (plain
+pump on/off) — item 4 was dropped as a separate build on 2026-08-29 once
+it was clear this item's dimmer subsumes on/off; see item 4 above for the
+fail-off tradeoff this accepts.
 
 **Two things, one build:**
 1. **Plain pump on/off** (former item 4's whole scope) — time-based

@@ -889,13 +889,15 @@ everything again.
   only passed through the TRIAC's own conduction path, so the zero-cross
   detection and opto-isolated gate-drive circuitry are likely undamaged)
   but not yet attempted - replacement is the primary path.
-- **Before wiring the replacement**: verify in total isolation (nothing
-  connected to any terminal) that `L(IN)`-`L(OUT)` reads open at rest,
-  then wire per the corrected topology - Live -> `L(IN)`, Neutral ->
-  `N(IN)`, pump bridging `L(OUT)`/`N(OUT)` as the load - labeling each
-  wire before landing it this time. **Milestone A (verified working in
-  the entry below) will need to be re-confirmed once the replacement
-  module is wired in** - it is not currently in a working state.
+- **The external wiring itself has since been corrected and confirmed
+  good** - Live -> `L(IN)`, Neutral -> `N(IN)`, pump bridging
+  `L(OUT)`/`N(OUT)` as the load. Only the module itself needs replacing;
+  no re-wiring of the splice is expected once the new module arrives -
+  verify in total isolation (nothing connected to any terminal) that the
+  new module's `L(IN)`-`L(OUT)` reads open at rest, then land the same
+  wires on its terminals. **Milestone A (verified working in the entry
+  below) will need to be re-confirmed once the replacement module is
+  swapped in** - it is not currently in a working state.
 
 ### 2026-09-15 — Claude Code (Sonnet 5) — Items 7/8 real hardware bring-up: dimmer wired to the actual pump and confirmed working; pressure sensor bench-verified (not yet plumbed); a real ISR crash bug found and fixed
 
