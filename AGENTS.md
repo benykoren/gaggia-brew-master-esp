@@ -843,6 +843,60 @@ everything again.
 
 ## 10. Change Log
 
+### 2026-09-15 — Claude Code (Sonnet 5) — Dimmer TRIAC destroyed by an OUT/N wiring mixup while prepping Milestone B; diagnosed, root-caused, replacement module selected
+
+- Immediately after Milestone A was confirmed working (previous entry
+  below), while doing unrelated wiring work at the dimmer's mains splice
+  in preparation for Milestone B (plumbing item 7's pressure sensor into
+  the hydraulic circuit), the module's `OUT` and `N` terminals got
+  accidentally swapped. Starting a shot right after fired the TRIAC into
+  what the swapped wiring had turned into a direct Live-to-Neutral path
+  with the pump no longer in series to limit current - a massive fault
+  current through the TRIAC, almost certainly welding its junction
+  permanently shorted in that instant.
+- **Symptom**: pump ran continuously whenever the physical Brew switch was
+  closed, completely independent of ESP32 command state (`/status` showed
+  `pump_power: 0.0`, `opmode: off` while the pump physically ran).
+- **Diagnosed via a staged continuity-check process** (multimeter, mains
+  unplugged throughout) that progressively isolated the fault:
+  1. `IN`-`OUT` continuity on the still-wired module beeped - suggested a
+     short somewhere in that path, but didn't yet say where.
+  2. Still beeped with the dimmer physically disconnected from the
+     external wiring at both ends - ruled out an external wiring bridge
+     (e.g., the original White wire never fully cut) as the cause.
+  3. Still beeped probing directly on the module's own terminals with
+     nothing wired to `IN`, `OUT`, or `N` at all - isolated the fault to
+     the module itself. The TRIAC is now a permanently-closed switch;
+     no GPIO or firmware state can affect it.
+- **Root cause confirmed: reversed `OUT`/`N` wiring, not the
+  inductive-load/no-snubber theory considered mid-diagnosis.** These
+  RobotDyn-style boards only switch the Live leg through the TRIAC
+  (`L(IN)` -> `L(OUT)`); Neutral (`N(IN)` -> `N(OUT)`) is a straight,
+  always-connected pass-through trace, never switched. Swapping `OUT` and
+  `N` put the TRIAC's switched Live output directly onto that Neutral
+  pass-through with the pump no longer in the loop at all, so firing the
+  TRIAC shorted mains directly across it. **Worth recording for next
+  time**: this project's docs (`HARDWARE_ROADMAP.md` item 8) only ever
+  described the module's mains side as generic "IN"/"OUT" - the board
+  actually has four separate mains terminals (`L(IN)`, `N(IN)`, `L(OUT)`,
+  `N(OUT)`), and the pump must bridge `L(OUT)`/`N(OUT)` as the load, not
+  land on `N(IN)`/`N(OUT)` directly.
+- **Fix in progress**: sourcing a replacement module - a RobotDyn-style
+  "AC Light/Motor Dimmer Module" (1-channel, 3.3V/5V logic, 8A/400V,
+  explicitly marketed for motor/inductive loads) - well above the pump's
+  sub-1A draw. Repairing the dead module by desoldering and replacing just
+  the TRIAC was discussed as plausible in principle (the fault current
+  only passed through the TRIAC's own conduction path, so the zero-cross
+  detection and opto-isolated gate-drive circuitry are likely undamaged)
+  but not yet attempted - replacement is the primary path.
+- **Before wiring the replacement**: verify in total isolation (nothing
+  connected to any terminal) that `L(IN)`-`L(OUT)` reads open at rest,
+  then wire per the corrected topology - Live -> `L(IN)`, Neutral ->
+  `N(IN)`, pump bridging `L(OUT)`/`N(OUT)` as the load - labeling each
+  wire before landing it this time. **Milestone A (verified working in
+  the entry below) will need to be re-confirmed once the replacement
+  module is wired in** - it is not currently in a working state.
+
 ### 2026-09-15 — Claude Code (Sonnet 5) — Items 7/8 real hardware bring-up: dimmer wired to the actual pump and confirmed working; pressure sensor bench-verified (not yet plumbed); a real ISR crash bug found and fixed
 
 - **New ESP32-S3 board flashed and brought online** - fresh board, WiFi
