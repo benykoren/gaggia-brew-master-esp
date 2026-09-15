@@ -163,6 +163,15 @@ const char *index_html = R"rawliteral(
     }
     * { box-sizing: border-box; }
     html, body { margin: 0; }
+    /* Visible, on-brand focus ring for keyboard/switch navigation. Plain
+       :focus first (works everywhere, including the Android 4.4 tablet's
+       browser), then :focus-visible narrows it to keyboard focus only on
+       browsers that support that distinction (~2020+) - an unsupported
+       browser just never matches the second rule and keeps the safe
+       plain-:focus outline on every focus, including touch/click. */
+    :focus { outline: 2px solid var(--copper-light); outline-offset: 2px; }
+    :focus:not(:focus-visible) { outline: none; }
+    :focus-visible { outline: 2px solid var(--copper-light); outline-offset: 2px; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       background: var(--bg-grad), var(--bg);
@@ -471,7 +480,7 @@ const char *index_html = R"rawliteral(
       <div id="descale_banner_top" class="banner banner-warn">&#9888; Descale recommended &mdash; see History tab</div>
     </div>
 
-    <main class="view" data-view="now">
+    <main class="view" data-view="now" id="view-now" role="tabpanel" aria-labelledby="tab-now">
       <div class="card hero-card">
         <div class="gauge-wrap">
           <svg class="gauge" viewBox="0 0 220 220">
@@ -530,7 +539,7 @@ const char *index_html = R"rawliteral(
 
     </main>
 
-    <main class="view" data-view="tune" hidden>
+    <main class="view" data-view="tune" id="view-tune" role="tabpanel" aria-labelledby="tab-tune" hidden>
       <div class="card">
         <div class="tab-section-title">Brew</div>
         <form action="/update" method="GET">
@@ -642,7 +651,7 @@ const char *index_html = R"rawliteral(
       </div>
     </main>
 
-    <main class="view" data-view="history" hidden>
+    <main class="view" data-view="history" id="view-history" role="tabpanel" aria-labelledby="tab-history" hidden>
       <div class="card">
         <div class="tab-section-title">Shot History</div>
         <div id="shot_history_empty" class="empty-hint">No shots logged yet.</div>
@@ -704,7 +713,7 @@ const char *index_html = R"rawliteral(
       </div>
     </main>
 
-    <main class="view" data-view="settings" hidden>
+    <main class="view" data-view="settings" id="view-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
       <div class="card">
         <div class="tab-section-title">Shot Timer</div>
         <form action="/update" method="GET">
@@ -811,11 +820,11 @@ const char *index_html = R"rawliteral(
     </footer>
   </div>
 
-  <nav class="tabbar">
-    <button class="tab active" data-tab="now"><span class="tab-icon">&#9749;</span><span>Now</span></button>
-    <button class="tab" data-tab="tune"><span class="tab-icon">&#9881;</span><span>Tune</span></button>
-    <button class="tab" data-tab="history"><span class="tab-icon">&#8987;</span><span>History</span></button>
-    <button class="tab" data-tab="settings"><span class="tab-icon">&#9776;</span><span>Settings</span></button>
+  <nav class="tabbar" role="tablist" aria-label="Sections">
+    <button class="tab active" role="tab" aria-selected="true" aria-controls="view-now" id="tab-now" data-tab="now"><span class="tab-icon">&#9749;</span><span>Now</span></button>
+    <button class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="view-tune" id="tab-tune" data-tab="tune"><span class="tab-icon">&#9881;</span><span>Tune</span></button>
+    <button class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="view-history" id="tab-history" data-tab="history"><span class="tab-icon">&#8987;</span><span>History</span></button>
+    <button class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="view-settings" id="tab-settings" data-tab="settings"><span class="tab-icon">&#9776;</span><span>Settings</span></button>
   </nav>
 
 <script>
@@ -836,7 +845,12 @@ function showTab(name) {
   var views = document.querySelectorAll(".view");
   for (var i = 0; i < views.length; i++) views[i].hidden = views[i].dataset.view !== name;
   var tabs = document.querySelectorAll(".tab");
-  for (var j = 0; j < tabs.length; j++) tabs[j].classList.toggle("active", tabs[j].dataset.tab === name);
+  for (var j = 0; j < tabs.length; j++) {
+    var active = tabs[j].dataset.tab === name;
+    tabs[j].classList.toggle("active", active);
+    tabs[j].setAttribute("aria-selected", active ? "true" : "false");
+    tabs[j].tabIndex = active ? 0 : -1;
+  }
   history.replaceState(null, "", "#" + name);
 }
 (function () {
