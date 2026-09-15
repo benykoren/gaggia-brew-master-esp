@@ -103,11 +103,11 @@ protocol work.
   usb-serial-for-android`, API 14+), reading/writing over the same
   USB-CDC link the firmware's `serial_transport.cpp` speaks. Mirrors that
   file's line-buffering logic: accumulate bytes until `\n` for a JSON
-  line, or treat a leading `0xA5` byte as the start of a fixed 21-byte
+  line, or treat a leading `0xA5` byte as the start of a fixed 20-byte
   binary telemetry frame; discard anything else (the same USB link also
   carries the firmware's own plain-text `Serial.println()` debug logs -
   see that file's design note).
-- **`TelemetryFrame`** - a pure decoder class parsing the identical 21-byte
+- **`TelemetryFrame`** - a pure decoder class parsing the identical 20-byte
   little-endian layout `telemetry.cpp`'s `encodeTelemetryFrame()` produces
   (see the byte table below), including CRC16-CCITT validation (a frame
   that fails CRC is dropped, not shown). Feeds an in-memory ring buffer
