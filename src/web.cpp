@@ -384,6 +384,48 @@ const char *index_html = R"rawliteral(
     }
     .tab-icon { font-size: 19px; }
     .tab.active { color: var(--copper-light); }
+
+    /* Compact landscape layout for the "Now" tab only (live status at a
+       glance on a tablet mounted sideways) - gated on max-height, not just
+       orientation, so a tall landscape screen (e.g. a laptop) doesn't get
+       squeezed into this. Tune/History/Settings stay single-column scrolling
+       forms; they aren't something you need to see all at once. */
+    @media (orientation: landscape) and (max-height: 600px) {
+      .app { padding-top: var(--sp-3); }
+      .view[data-view="now"] {
+        display: grid;
+        grid-template-columns: minmax(190px, 260px) 1fr;
+        grid-template-areas: "hero shot" "hero stats";
+        gap: var(--sp-3);
+        align-items: start;
+      }
+      .view[data-view="now"] > .hero-card { grid-area: hero; margin: 0; }
+      .view[data-view="now"] > .card:nth-of-type(2) { grid-area: shot; margin: 0; }
+      .view[data-view="now"] > .card:nth-of-type(3) { grid-area: stats; margin: 0; }
+      /* Auto-Tune is a setup action, not a live-glance stat - hidden here to
+         save vertical space; still reachable in portrait. */
+      .view[data-view="now"] > .card:nth-of-type(4) { display: none; }
+
+      .view[data-view="now"] .gauge-wrap {
+        width: clamp(130px, 24vh, 190px); height: clamp(130px, 24vh, 190px);
+        margin-bottom: var(--sp-2);
+      }
+      .view[data-view="now"] .gauge-value { font-size: clamp(1.8rem, 7vh, 2.6rem); }
+      .view[data-view="now"] .gauge-unit { font-size: clamp(0.9rem, 3vh, 1.1rem); }
+      .view[data-view="now"] .gauge-target { margin-bottom: var(--sp-2); }
+
+      /* The two charts sit side-by-side instead of stacked, roughly halving
+         the vertical space this card needs. */
+      .view[data-view="now"] > .card:nth-of-type(3) {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        grid-template-areas: "stat stat" "chart1 chart2";
+        gap: var(--sp-3);
+      }
+      .view[data-view="now"] > .card:nth-of-type(3) > .stat-grid { grid-area: stat; margin-top: 0; }
+      .view[data-view="now"] > .card:nth-of-type(3) > .chart-card:nth-of-type(1) { grid-area: chart1; margin-top: 0; }
+      .view[data-view="now"] > .card:nth-of-type(3) > .chart-card:nth-of-type(2) { grid-area: chart2; margin-top: 0; }
+    }
   </style>
 </head>
 <body>
