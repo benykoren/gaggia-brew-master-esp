@@ -121,13 +121,17 @@
 
 // Pressure transducer calibration - linear mapping from ADC millivolts to
 // bar: bar = (mv - PRESSURE_SENSOR_ZERO_MV) / PRESSURE_SENSOR_MV_PER_BAR.
-// These are PLACEHOLDERS until the actual transducer is bench-calibrated
-// against a known reference (0 bar with the circuit open to atmosphere,
-// pump off) - see bring-up Task 11. Defaults below assume a common
-// 0.5-4.5V-output/12-16bar transducer wired through a 2-resistor divider
-// that halves it to 0.25-2.25V at the ADC pin.
-#define PRESSURE_SENSOR_ZERO_MV 250.0f
-#define PRESSURE_SENSOR_MV_PER_BAR 125.0f // (2250-250)/16 bar
+// Recalibrated 2026-09-15 for this specific bench setup: the transducer is
+// rated for a 5V supply but this board's "5V IN" pin turned out to be
+// input-only (doesn't back-feed when USB-powered), so it's actually
+// running on 3V3 instead - the same underpowered-but-working approach
+// already used for the temp sensor module. ZERO_MV is the real bench-
+// measured zero-pressure reading at the ADC pin (0.16V); MV_PER_BAR is
+// scaled down from the original 5V-based value by the 3.3/5 supply ratio
+// (125.0 * 0.66 = 82.5) - still an approximation until a real pressure
+// reference point is available (bring-up Task 11's full calibration).
+#define PRESSURE_SENSOR_ZERO_MV 160.0f
+#define PRESSURE_SENSOR_MV_PER_BAR 82.5f
 
 // Same rolling error-rate fault model as the temp sensor (see
 // SENSOR_FAULT_WINDOW above) - a separate window since pressure and temp
