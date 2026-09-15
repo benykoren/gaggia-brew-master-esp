@@ -2391,7 +2391,15 @@ void setupWeb() {
 
   // Main Page Handler
   server.on("/", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(200, "text/html", index_html);
+    // No-store: this page has been changing rapidly during active
+    // development, and with no versioned URL/ETag, a browser's default
+    // caching heuristics can silently keep serving a stale copy after a
+    // firmware update - confirmed 2026-09-15 (see AGENTS.md) when a
+    // browser showed no visible change immediately after a fresh OTA
+    // flash. Always revalidate instead of guessing.
+    AsyncWebServerResponse *response = request->beginResponse(200, "text/html", index_html);
+    response->addHeader("Cache-Control", "no-store");
+    request->send(response);
   });
 
   // PWA manifest + icon (add-to-home-screen support)
