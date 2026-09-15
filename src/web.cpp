@@ -388,6 +388,31 @@ const char *index_html = R"rawliteral(
 
     .view[hidden] { display: none; }
 
+    /* Inline "Saved"/"Restarting..."/"Save failed" confirmation, created
+       on demand next to whichever submit button was just used. */
+    .save-confirm {
+      display: block; text-align: center; margin-top: var(--sp-2);
+      font-size: var(--fs-6); font-weight: 700; color: var(--green);
+      opacity: 0; transition: opacity .3s var(--ease);
+    }
+    .save-confirm.show { opacity: 1; }
+    .save-confirm.error { color: var(--red); }
+
+    /* Loading-skeleton placeholder for the gauge/stat values before the
+       first /status response lands - swapped for the real value the
+       instant it does (see the poll handler's firstStatusReceived flag). */
+    .skeleton {
+      color: transparent; background: linear-gradient(90deg, var(--surface-2), var(--border), var(--surface-2));
+      background-size: 200% 100%; border-radius: var(--radius-sm);
+    }
+    @media (prefers-reduced-motion: no-preference) {
+      .skeleton { animation: skeleton-pulse 1.5s ease-in-out infinite; }
+    }
+    @keyframes skeleton-pulse {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+
     .tabbar {
       position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
       display: flex; justify-content: center; gap: var(--sp-2);
@@ -489,10 +514,10 @@ const char *index_html = R"rawliteral(
                     stroke-dasharray="603" stroke-dashoffset="603"></circle>
           </svg>
           <div class="gauge-center">
-            <div class="gauge-value"><span id="temp">--</span><span class="gauge-unit">&deg;C</span></div>
+            <div class="gauge-value"><span id="temp" class="skeleton">--</span><span class="gauge-unit">&deg;C</span></div>
           </div>
         </div>
-        <div class="gauge-target">Target <b><span id="target">--</span>&deg;C</b></div>
+        <div class="gauge-target">Target <b><span id="target" class="skeleton">--</span>&deg;C</b></div>
 
         <div class="mode-switch" role="group" aria-label="Mode">
           <button onclick="setMode('off')" id="btn_off" class="mode-btn mode-off">Off</button>
@@ -521,7 +546,7 @@ const char *index_html = R"rawliteral(
         <div class="stat-grid">
           <div class="stat-tile">
             <span class="stat-label">Heater Output</span>
-            <span class="stat-value"><span id="output">--</span><small>%</small></span>
+            <span class="stat-value"><span id="output" class="skeleton">--</span><small>%</small></span>
             <div class="bar heat"><span id="output_bar"></span></div>
           </div>
         </div>
@@ -837,6 +862,56 @@ function setVal(id, v) {
 }
 function clamp(x) { return Math.max(0, Math.min(100, x)); }
 
+// Every plain settings form (action="/update", method="GET") is
+// intercepted here and sent via XHR instead, so saving no longer does a
+// full page reload - the fields keep whatever the user just typed, and an
+// inline confirmation appears next to the button instead. Forms with their
+// own onsubmit handler (profile editor, shot notes) already do this and
+// are untouched. MQTT save reboots the controller - shown a distinct
+// "Restarting..." message immediately, since the HTTP response may never
+// complete before the device restarts.
+document.addEventListener("submit", function (e) {
+  var form = e.target;
+  if (!form || form.tagName !== "FORM" || form.getAttribute("action") !== "/update") return;
+  e.preventDefault();
+
+  var parts = [];
+  for (var i = 0; i < form.elements.length; i++) {
+    var el = form.elements[i];
+    if (!el.name) continue;
+    parts.push(encodeURIComponent(el.name) + "=" + encodeURIComponent(el.value));
+  }
+  var btn = form.querySelector("button[type=submit]");
+  var isMqtt = !!form.querySelector("#input_mqtt_server");
+  var xhttp = new XMLHttpRequest();
+  if (isMqtt) {
+    showSaveConfirm(btn, "Restarting...", false);
+  } else {
+    xhttp.onreadystatechange = function () {
+      if (xhttp.readyState !== 4) return;
+      showSaveConfirm(btn, xhttp.status === 200 ? "Saved" : "Save failed", xhttp.status !== 200);
+    };
+  }
+  xhttp.open("GET", "/update?" + parts.join("&"), true);
+  xhttp.send();
+});
+
+function showSaveConfirm(btn, text, isError) {
+  if (!btn) return;
+  var el = btn.nextElementSibling;
+  if (!el || !el.classList.contains("save-confirm")) {
+    el = document.createElement("span");
+    el.className = "save-confirm";
+    el.setAttribute("aria-live", "polite");
+    btn.insertAdjacentElement("afterend", el);
+  }
+  el.textContent = text;
+  el.classList.toggle("error", !!isError);
+  el.classList.add("show");
+  clearTimeout(el._hideTimer);
+  el._hideTimer = setTimeout(function () { el.classList.remove("show"); }, 2200);
+}
+
 // Tabs - hash-addressable (#now/#tune/#history/#settings) so a reload keeps
 // whichever view was open; all four share the single /status poll below.
 function showTab(name) {
@@ -871,6 +946,7 @@ showTab(location.hash.slice(1));
 // they scroll off the visible window.
 var phaseMarkers = [];
 var lastSeenShotPhase = null;
+var firstStatusReceived = false;
 
 function trackPhaseMarkers(shotPhase, shotInProgress) {
   phaseMarkers.forEach(function (m) { m.age++; });
@@ -1209,6 +1285,12 @@ setInterval(function () {
       // whether that stale value happens to be nonzero.
       var mode = json.opmode; // "off" | "brew" | "steam"
       var hasTarget = mode !== "off" && target > 0;
+
+      if (!firstStatusReceived) {
+        firstStatusReceived = true;
+        var skeletons = document.querySelectorAll(".skeleton");
+        for (var s = 0; s < skeletons.length; s++) skeletons[s].classList.remove("skeleton");
+      }
 
       document.getElementById("fault_banner").style.display = json.fault ? "flex" : "none";
       document.getElementById("temp").innerHTML = json.fault ? "--" : temp.toFixed(1);
