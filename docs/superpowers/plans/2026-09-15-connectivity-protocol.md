@@ -1,5 +1,15 @@
 # Unified BLE/Serial Connectivity Protocol Implementation Plan
 
+> **Status: PAUSED (2026-09-15).** Not currently being executed - the
+> tablet connectivity work that motivated part of this (the Android app,
+> sub-project 3) was redirected to the existing WiFi web UI instead (see
+> `docs/superpowers/specs/2026-09-15-android-companion-app-design.md`'s
+> superseded-status note). The user explicitly chose to pause this plan
+> rather than abandon it - it's still valid, still part of the original
+> firmware-architecture ask (dual Serial+BLE connectivity, independent of
+> any specific app), and can be picked back up later. No tasks below have
+> been executed as of the pause.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Give the ESP32-S3 firmware a transport-agnostic command/telemetry

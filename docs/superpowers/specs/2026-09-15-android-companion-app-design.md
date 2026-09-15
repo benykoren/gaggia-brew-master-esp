@@ -1,6 +1,20 @@
 # Android Companion App (MVP) — Design Spec
 
-**Status:** approved, ready for implementation planning
+**Status: SUPERSEDED (2026-09-15) - not being built.** After this spec was
+written, a real hardware constraint surfaced during physical-connection
+planning: the ESP32 and tablet are each independently powered over the
+same USB ports a Serial link would need, creating a genuine two-power-
+-source conflict (see this conversation's 2026-09-15 discussion) - and
+weighing that against actually needing a native app at all, the user
+decided to drop the native-app approach entirely and instead connect over
+**WiFi using the existing web UI** (already built, `web.cpp`'s
+`index_html`), investing effort in making that web UI run well on a
+KitKat-era browser instead. See
+`docs/superpowers/specs/2026-09-15-web-ui-kitkat-compat-design.md` for the
+spec that replaces this one. Kept for history/context, not for
+implementation - do not build against this document.
+
+**Original status:** approved, ready for implementation planning
 **Date:** 2026-09-15
 **Sub-project 3 of 3** in the larger "FreeRTOS task-priority refactor + dual
 connectivity + Android app" initiative (see `AGENTS.md` and

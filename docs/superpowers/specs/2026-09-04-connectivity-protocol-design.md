@@ -1,6 +1,11 @@
 # Unified BLE/Serial Connectivity Protocol — Design Spec
 
-**Status:** approved, ready for implementation planning
+**Status:** approved, ready for implementation planning - **implementation
+paused 2026-09-15** (see
+`docs/superpowers/plans/2026-09-15-connectivity-protocol.md`'s status
+note; sub-project 3's tablet connectivity moved to the WiFi web UI
+instead, and this plan wasn't otherwise prioritized to continue on its
+own). Spec itself remains valid, not superseded.
 **Date:** 2026-09-04
 **Sub-project 2 of 3** in the larger "FreeRTOS task-priority refactor +
 dual connectivity + Android app" initiative (see `AGENTS.md`/this repo's
