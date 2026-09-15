@@ -392,7 +392,12 @@ const char *index_html = R"rawliteral(
        forms; they aren't something you need to see all at once. */
     @media (orientation: landscape) and (max-height: 600px) {
       .app { padding-top: var(--sp-3); }
-      .view[data-view="now"] {
+      /* :not([hidden]) matters here: this selector (class + attribute) is
+         otherwise more specific than the UA default `[hidden] { display:
+         none }`, so without it, switching tabs away from "now" would leave
+         this view forced visible via `display: grid` regardless of the
+         `hidden` attribute showTab() sets on it. */
+      .view[data-view="now"]:not([hidden]) {
         display: grid;
         grid-template-columns: minmax(190px, 260px) 1fr;
         grid-template-areas: "hero shot" "hero stats";
