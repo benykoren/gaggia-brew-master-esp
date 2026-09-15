@@ -232,7 +232,11 @@ const char *index_html = R"rawliteral(
     }
 
     .hero-card { text-align: center; }
-    .gauge-wrap { position: relative; width: clamp(210px, 62vw, 280px); height: clamp(210px, 62vw, 280px); margin: 0 auto var(--sp-3); }
+    /* Two gauges side by side (temp, pressure) - sized smaller than a
+       single full-width gauge would be, so both fit on a phone screen. */
+    .gauge-row { display: flex; justify-content: center; align-items: flex-start; gap: var(--sp-4); flex-wrap: wrap; margin-bottom: var(--sp-3); }
+    .gauge-col { display: flex; flex-direction: column; align-items: center; }
+    .gauge-wrap { position: relative; width: clamp(130px, 38vw, 170px); height: clamp(130px, 38vw, 170px); margin: 0 auto var(--sp-2); }
     .gauge { width: 100%; height: 100%; transform: rotate(-90deg); }
     .gauge-track { fill: none; stroke: var(--border); stroke-width: 14; }
     .gauge-fill { fill: none; stroke: var(--text-faint); stroke-width: 14; stroke-linecap: round; transition: stroke-dashoffset .6s var(--ease), stroke .4s ease; }
@@ -243,6 +247,13 @@ const char *index_html = R"rawliteral(
     .gauge-fill.heating { stroke: var(--steam); filter: drop-shadow(0 0 10px rgba(79,163,216,.55)); }
     .gauge-fill.ready { stroke: var(--green); filter: drop-shadow(0 0 10px rgba(72,181,131,.55)); }
     .gauge-fill.over { stroke: var(--red); filter: drop-shadow(0 0 10px rgba(229,84,75,.55)); }
+    /* Pressure ring reuses the same heating/ready/over classes as the temp
+       ring above - fill amount is a fixed 0-16 bar scale (this machine's
+       safety-valve rating, a real manometer reading), but color answers a
+       different question: not "% of scale" (9 bar brew target would only
+       ever show ~56% full and never look "done"), but "how close to the
+       9 bar brew target, while a shot is actually running." Grey/idle the
+       rest of the time, same as the temp ring with no active target. */
     /* The number is the ONLY thing centered against this box, which exactly
        covers the ring (inset: 0 on .gauge-wrap) - so its flex centering
        lands on the ring's true geometric midpoint regardless of viewport
@@ -252,9 +263,9 @@ const char *index_html = R"rawliteral(
        upward off the ring's actual center. It now lives outside, below the
        ring, in normal document flow (see .gauge-target). */
     .gauge-center { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: flex; align-items: center; justify-content: center; }
-    .gauge-value { display: flex; align-items: baseline; justify-content: center; font-size: clamp(3.4rem, 14vw, 5.2rem); font-weight: 800; line-height: 1; letter-spacing: -2px; font-variant-numeric: tabular-nums; }
-    .gauge-unit { font-size: clamp(1.1rem, 4vw, 1.4rem); color: var(--text-dim); font-weight: 600; margin-left: 3px; }
-    .gauge-target { color: var(--text-dim); margin: 0 0 var(--sp-4); font-size: var(--fs-7); }
+    .gauge-value { display: flex; align-items: baseline; justify-content: center; font-size: clamp(2rem, 8vw, 2.8rem); font-weight: 800; line-height: 1; letter-spacing: -1px; font-variant-numeric: tabular-nums; }
+    .gauge-unit { font-size: clamp(0.8rem, 2.6vw, 1rem); color: var(--text-dim); font-weight: 600; margin-left: 3px; }
+    .gauge-target { color: var(--text-dim); margin: 0; font-size: var(--fs-7); }
     .gauge-target b { color: var(--text); }
 
     .mode-switch { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--sp-3); margin: var(--sp-4) 0; }
@@ -451,13 +462,19 @@ const char *index_html = R"rawliteral(
       .view[data-view="now"] > .card:nth-of-type(2) { grid-area: shot; margin: 0; }
       .view[data-view="now"] > .card:nth-of-type(3) { grid-area: stats; margin: 0; }
 
+      /* The narrow hero column (190-260px) can't fit two side-by-side
+         circles at their portrait size - .gauge-row's existing flex-wrap
+         already stacks them here automatically; this just shrinks each one
+         so the stacked pair still fits the same vertical budget a single
+         circle used before. */
+      .view[data-view="now"] .gauge-row { gap: var(--sp-1); margin-bottom: var(--sp-2); }
       .view[data-view="now"] .gauge-wrap {
-        width: clamp(130px, 24vh, 190px); height: clamp(130px, 24vh, 190px);
-        margin-bottom: var(--sp-2);
+        width: clamp(70px, 11vh, 100px); height: clamp(70px, 11vh, 100px);
+        margin-bottom: var(--sp-1);
       }
-      .view[data-view="now"] .gauge-value { font-size: clamp(1.8rem, 7vh, 2.6rem); }
-      .view[data-view="now"] .gauge-unit { font-size: clamp(0.9rem, 3vh, 1.1rem); }
-      .view[data-view="now"] .gauge-target { margin-bottom: var(--sp-2); }
+      .view[data-view="now"] .gauge-value { font-size: clamp(1.1rem, 4vh, 1.5rem); letter-spacing: 0; }
+      .view[data-view="now"] .gauge-unit { font-size: clamp(0.55rem, 2vh, 0.7rem); }
+      .view[data-view="now"] .gauge-target { font-size: var(--fs-1); margin-bottom: var(--sp-1); }
 
       /* The two charts sit side-by-side instead of stacked, roughly halving
          the vertical space this card needs. */
@@ -507,17 +524,35 @@ const char *index_html = R"rawliteral(
 
     <main class="view" data-view="now" id="view-now" role="tabpanel" aria-labelledby="tab-now">
       <div class="card hero-card">
-        <div class="gauge-wrap">
-          <svg class="gauge" viewBox="0 0 220 220">
-            <circle class="gauge-track" cx="110" cy="110" r="96"></circle>
-            <circle id="temp_ring_fill" class="gauge-fill" cx="110" cy="110" r="96"
-                    stroke-dasharray="603" stroke-dashoffset="603"></circle>
-          </svg>
-          <div class="gauge-center">
-            <div class="gauge-value"><span id="temp" class="skeleton">--</span><span class="gauge-unit">&deg;C</span></div>
+        <div class="gauge-row">
+          <div class="gauge-col">
+            <div class="gauge-wrap">
+              <svg class="gauge" viewBox="0 0 220 220">
+                <circle class="gauge-track" cx="110" cy="110" r="96"></circle>
+                <circle id="temp_ring_fill" class="gauge-fill" cx="110" cy="110" r="96"
+                        stroke-dasharray="603" stroke-dashoffset="603"></circle>
+              </svg>
+              <div class="gauge-center">
+                <div class="gauge-value"><span id="temp" class="skeleton">--</span><span class="gauge-unit">&deg;C</span></div>
+              </div>
+            </div>
+            <div class="gauge-target">Target <b><span id="target" class="skeleton">--</span>&deg;C</b></div>
+          </div>
+
+          <div class="gauge-col">
+            <div class="gauge-wrap">
+              <svg class="gauge" viewBox="0 0 220 220">
+                <circle class="gauge-track" cx="110" cy="110" r="96"></circle>
+                <circle id="pressure_ring_fill" class="gauge-fill" cx="110" cy="110" r="96"
+                        stroke-dasharray="603" stroke-dashoffset="603"></circle>
+              </svg>
+              <div class="gauge-center">
+                <div class="gauge-value"><span id="pressure_gauge_val" class="skeleton">--</span><span class="gauge-unit">bar</span></div>
+              </div>
+            </div>
+            <div class="gauge-target">Pressure</div>
           </div>
         </div>
-        <div class="gauge-target">Target <b><span id="target" class="skeleton">--</span>&deg;C</b></div>
 
         <div class="mode-switch" role="group" aria-label="Mode">
           <button onclick="setMode('off')" id="btn_off" class="mode-btn mode-off">Off</button>
@@ -1342,6 +1377,30 @@ setInterval(function () {
         else if (temp > target + READY_MARGIN_C) ring.classList.add("over");
         else ring.classList.add("ready");
       }
+
+      // Pressure ring - fill is a fixed 0-16 bar scale (this machine's
+      // safety-valve rating - a real manometer reading, not %-of-target,
+      // since 9 bar would only ever show ~56% full and never look "done").
+      // Color instead answers "how close to the 9 bar brew target", and
+      // only while a shot is actually running - otherwise it's just idle,
+      // same as the temp ring with no active target.
+      var PRESSURE_GAUGE_MAX_BAR = 16;
+      var PRESSURE_BREW_TARGET_BAR = 9;
+      var pressureVal = json.pressure;
+      var pressurePct = json.pressure_fault ? 0 : clamp((pressureVal / PRESSURE_GAUGE_MAX_BAR) * 100);
+      var pRing = document.getElementById("pressure_ring_fill");
+      if (pRing) {
+        pRing.style.strokeDashoffset = RING_CIRCUMFERENCE * (1 - pressurePct / 100);
+        pRing.classList.remove("heating", "ready", "over");
+        if (!json.pressure_fault && json.shot_in_progress) {
+          var PRESSURE_READY_MARGIN_BAR = 1.5;
+          if (pressureVal < PRESSURE_BREW_TARGET_BAR - PRESSURE_READY_MARGIN_BAR) pRing.classList.add("heating");
+          else if (pressureVal > PRESSURE_BREW_TARGET_BAR + PRESSURE_READY_MARGIN_BAR) pRing.classList.add("over");
+          else pRing.classList.add("ready");
+        }
+      }
+      var pGaugeVal = document.getElementById("pressure_gauge_val");
+      if (pGaugeVal) pGaugeVal.innerHTML = json.pressure_fault ? "--" : pressureVal.toFixed(1);
 
       document.getElementById("output_bar").style.width = clamp(outputPct) + "%";
 
