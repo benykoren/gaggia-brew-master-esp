@@ -428,8 +428,14 @@ const char *index_html = R"rawliteral(
         gap: var(--sp-3);
       }
       .view[data-view="now"] > .card:nth-of-type(3) > .stat-grid { grid-area: stat; margin-top: 0; }
-      .view[data-view="now"] > .card:nth-of-type(3) > .chart-card:nth-of-type(1) { grid-area: chart1; margin-top: 0; }
-      .view[data-view="now"] > .card:nth-of-type(3) > .chart-card:nth-of-type(2) { grid-area: chart2; margin-top: 0; }
+      /* :nth-of-type counts by tag (div), not by class - .stat-grid is the
+         1st div here, so ":nth-of-type" can't pick out "the 1st/2nd
+         .chart-card" directly. Use the adjacent-sibling combinator instead:
+         every .chart-card defaults to chart1, then the one immediately
+         preceded by another .chart-card (i.e. the second one) overrides to
+         chart2 - correct regardless of what precedes the pair. */
+      .view[data-view="now"] > .card:nth-of-type(3) > .chart-card { grid-area: chart1; margin-top: 0; }
+      .view[data-view="now"] > .card:nth-of-type(3) > .chart-card + .chart-card { grid-area: chart2; }
     }
   </style>
 </head>
