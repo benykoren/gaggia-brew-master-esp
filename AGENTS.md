@@ -843,6 +843,149 @@ everything again.
 
 ## 10. Change Log
 
+### 2026-09-15 — Claude Code (Sonnet 5) — Dimmer TRIAC destroyed by an OUT/N wiring mixup while prepping Milestone B; diagnosed, root-caused, replacement module selected
+
+- Immediately after Milestone A was confirmed working (previous entry
+  below), while doing unrelated wiring work at the dimmer's mains splice
+  in preparation for Milestone B (plumbing item 7's pressure sensor into
+  the hydraulic circuit), the module's `OUT` and `N` terminals got
+  accidentally swapped. Starting a shot right after fired the TRIAC into
+  what the swapped wiring had turned into a direct Live-to-Neutral path
+  with the pump no longer in series to limit current - a massive fault
+  current through the TRIAC, almost certainly welding its junction
+  permanently shorted in that instant.
+- **Symptom**: pump ran continuously whenever the physical Brew switch was
+  closed, completely independent of ESP32 command state (`/status` showed
+  `pump_power: 0.0`, `opmode: off` while the pump physically ran).
+- **Diagnosed via a staged continuity-check process** (multimeter, mains
+  unplugged throughout) that progressively isolated the fault:
+  1. `IN`-`OUT` continuity on the still-wired module beeped - suggested a
+     short somewhere in that path, but didn't yet say where.
+  2. Still beeped with the dimmer physically disconnected from the
+     external wiring at both ends - ruled out an external wiring bridge
+     (e.g., the original White wire never fully cut) as the cause.
+  3. Still beeped probing directly on the module's own terminals with
+     nothing wired to `IN`, `OUT`, or `N` at all - isolated the fault to
+     the module itself. The TRIAC is now a permanently-closed switch;
+     no GPIO or firmware state can affect it.
+- **Root cause confirmed: reversed `OUT`/`N` wiring, not the
+  inductive-load/no-snubber theory considered mid-diagnosis.** These
+  RobotDyn-style boards only switch the Live leg through the TRIAC
+  (`L(IN)` -> `L(OUT)`); Neutral (`N(IN)` -> `N(OUT)`) is a straight,
+  always-connected pass-through trace, never switched. Swapping `OUT` and
+  `N` put the TRIAC's switched Live output directly onto that Neutral
+  pass-through with the pump no longer in the loop at all, so firing the
+  TRIAC shorted mains directly across it. **Worth recording for next
+  time**: this project's docs (`HARDWARE_ROADMAP.md` item 8) only ever
+  described the module's mains side as generic "IN"/"OUT" - the board
+  actually has four separate mains terminals (`L(IN)`, `N(IN)`, `L(OUT)`,
+  `N(OUT)`), and the pump must bridge `L(OUT)`/`N(OUT)` as the load, not
+  land on `N(IN)`/`N(OUT)` directly.
+- **Fix in progress**: sourcing a replacement module - a RobotDyn-style
+  "AC Light/Motor Dimmer Module" (1-channel, 3.3V/5V logic, 8A/400V,
+  explicitly marketed for motor/inductive loads) - well above the pump's
+  sub-1A draw. Repairing the dead module by desoldering and replacing just
+  the TRIAC was discussed as plausible in principle (the fault current
+  only passed through the TRIAC's own conduction path, so the zero-cross
+  detection and opto-isolated gate-drive circuitry are likely undamaged)
+  but not yet attempted - replacement is the primary path.
+- **The external wiring itself has since been corrected and confirmed
+  good** - Live -> `L(IN)`, Neutral -> `N(IN)`, pump bridging
+  `L(OUT)`/`N(OUT)` as the load. Only the module itself needs replacing;
+  no re-wiring of the splice is expected once the new module arrives -
+  verify in total isolation (nothing connected to any terminal) that the
+  new module's `L(IN)`-`L(OUT)` reads open at rest, then land the same
+  wires on its terminals. **Milestone A (verified working in the entry
+  below) will need to be re-confirmed once the replacement module is
+  swapped in** - it is not currently in a working state.
+
+### 2026-09-15 — Claude Code (Sonnet 5) — Items 7/8 real hardware bring-up: dimmer wired to the actual pump and confirmed working; pressure sensor bench-verified (not yet plumbed); a real ISR crash bug found and fixed
+
+- **New ESP32-S3 board flashed and brought online** - fresh board, WiFi
+  configured via the `GaggiaBrewMasterESP_Setup` captive portal, temp
+  sensor and SSR wired per the existing bench procedure. Historical PID
+  gains from the original (now-crashed) board's tuning sessions
+  (documented in this file's earlier 2026-08-15 entries) were re-entered
+  by hand since no export/backup of that board's NVS ever existed - worth
+  remembering for next time: consider adding a real `/settings_export`
+  habit or periodic backup, since this gap cost real reconstruction effort.
+- **Items 7 (pressure transducer) and 8 (dimmer) wired to the real
+  machine for the first time**, following the `fix/hydraulic-circuit-
+  transducer-placement` branch's firmware (PR #20, still open/unmerged).
+  Old NC relay's control-side wiring physically removed. Dimmer spliced
+  at the Brew Switch's own White-wire output terminal (per
+  `HARDWARE_ROADMAP.md` item 4/8's already-documented splice point and
+  wire ID), not at the pump end - confirmed both are electrically
+  identical, this project's own prior wiring was done at the switch end
+  for physical accessibility.
+- **Real hardware find #1 - this board's "5V IN" header pin is
+  input-only.** Multimeter-confirmed: reads ~0.18V when only USB-powered,
+  regardless of load, USB port, or PC vs. wall-charger source; a
+  neighboring 3V3 pin reads correctly (3.26V). Very likely a one-way diode
+  from that pin to the board's power rail (protects against back-feeding
+  if both USB and an external 5V supply were connected at once) - not
+  confirmed against a schematic, but consistent with every measurement.
+  **Fix**: powered the pressure transducer from 3V3 instead (same
+  underpowered-but-working precedent already set for the temp sensor
+  module), and recalibrated `PRESSURE_SENSOR_ZERO_MV`/`_MV_PER_BAR` in
+  `config.h` against the real bench-measured 0.16V zero-pressure reading
+  at that supply voltage (see this session's config.h commit). Still an
+  approximation - a full calibration against a known pressure reference
+  is still open (bring-up Task 11), and the transducer is not yet
+  physically plumbed into the machine's hydraulic circuit at all, only
+  electrically bench-verified (`pressure: 0.0`, `pressure_fault: false`
+  at rest).
+- **Real hardware find #2 - a genuine firmware bug, not a wiring
+  problem.** With the dimmer wired to real mains for the first time,
+  Start Shot produced no pump response and the board went unreachable.
+  Serial capture caught the actual cause: `Guru Meditation Error: Core 1
+  panic'ed (Coprocessor exception)`, repeating every ~20-60 seconds.
+  Root cause: `dimmer.cpp`'s zero-cross ISR (`onZeroCross()`) used
+  floating-point arithmetic (`percentToDelayUs()`), which is unsafe
+  inside a genuine hardware interrupt on this chip - the FPU coprocessor's
+  register state is only saved/restored across FreeRTOS task context
+  switches, not interrupt entry/exit, so any float math reachable from an
+  ISR risks corrupting whichever task's FPU state was live at the moment
+  of interruption. This bug existed since the dimmer driver was first
+  written (Task 3 of the pump-pressure implementation plan) and passed
+  two rounds of code review, including one specifically checking for
+  ISR-safety issues - it was never caught because it only triggers once
+  the zero-cross interrupt is actually firing from real mains, which
+  never happened in any bench test (the lamp test was explicitly skipped
+  by user decision). **Fixed** by rewriting the ISR and its helper to use
+  pure integer math (percent stored as tenths-of-a-percent, 0-1000,
+  instead of a float 0.0-100.0); the public `dimmerSetPowerPercent()`
+  API is unchanged, converting to the integer representation in normal
+  task context where float math is safe. Verified via a 90-second
+  continuous serial capture with the dimmer live on mains and zero
+  crashes (previously crashed reliably within that window) - see this
+  session's dimmer.cpp commit.
+- **OTA was unreliable throughout this session** (repeated "connection
+  reset" failures, including on attempts unrelated to the crash bug, e.g.
+  with the dimmer disconnected from mains) - root cause not confirmed.
+  **USB flashing (hold-BOOT + tap-RESET into the bootloader) was
+  consistently reliable** and is what actually got both fixes onto the
+  board. Worth a closer look in a future session if OTA continues to be
+  flaky; for now, prefer USB when OTA fails more than once in a row.
+- **Added a temporary zero-cross counter diagnostic**
+  (`dimmerGetZcCount()`, exposed as `/status`'s `dimmer_zc_count`) to get
+  hard data during this bring-up rather than guessing - confirmed the
+  ESP32 detects a genuine, continuous ~100Hz signal (matching 50Hz mains)
+  once the Brew switch is physically on. This also surfaced a real "duh"
+  moment worth documenting: the dimmer only receives any mains power at
+  all when the **physical** Brew switch is on (it's spliced into the
+  switched White wire) - Start Shot alone can't make the pump run if the
+  physical switch is off, since firmware can only control duty cycle
+  *given* power is already present. Remove this diagnostic once hardware
+  bring-up is fully complete (Milestone C).
+- **Result: Milestone A (HARDWARE_ROADMAP.md item 8, on/off dimmer
+  control) is complete** - the dimmer is wired into the real machine,
+  replacing the old relay, and Start Shot/Stop Shot correctly starts and
+  stops the actual pump. Milestone B (real pressure calibration - the
+  transducer needs to be physically plumbed in, then calibrated against
+  a known reference) and Milestone C (closed-loop pressure PID tuning)
+  remain.
+
 ### 2026-08-30 — Claude Code (Sonnet 5) — Pump relay brownout diagnosed on real hardware; item 4 re-dropped in favor of item 8's dimmer
 - **Real-hardware failure found before the mains-side splice was ever
   done**: with the item 4 relay's control side wired and bench-tested
