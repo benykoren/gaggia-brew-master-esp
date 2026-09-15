@@ -34,15 +34,15 @@ possible.
 ## 2. Goal
 
 A native Android app, installable and running on **Android 4.4 (KitKat,
-API 19)**, that connects to the ESP32 over BLE or USB-OTG Serial (sub-project
-2's protocol), shows live telemetry with graphing, and provides the core
-brew controls - **an MVP slice**, not full feature parity with the web UI
-yet (§3).
+API 19)**, that connects to the ESP32 over USB-OTG Serial (sub-project 2's
+protocol), shows live telemetry with graphing, and provides the core brew
+controls - **an MVP slice**, not full feature parity with the web UI yet
+(§3).
 
 ## 3. Scope
 
 **In scope (this spec, MVP):**
-- Connect via BLE or USB-OTG Serial, remember the last-used device.
+- Connect via USB-OTG Serial, remember the last-used device.
 - Live dashboard: temperature + pressure charts, current temp/target/
   pressure/output stat tiles, Off/Brew/Steam mode buttons, shot start/stop
   with a live elapsed timer.
@@ -50,6 +50,11 @@ yet (§3).
 
 **Explicitly deferred to a phase-2 spec, once this MVP is working
 end-to-end on the real tablet:**
+- **BLE transport** - the target tablet has no Bluetooth hardware at all
+  (confirmed 2026-09-15), so `BleTransport` isn't built for this MVP. The
+  firmware protocol (sub-project 2) still speaks BLE regardless - this is
+  purely about what this particular app targets. Revisit if this app is
+  ever run on a different, BLE-capable tablet.
 - Named shot profiles (CRUD, apply).
 - Scheduled warm-up.
 - Descale/maintenance tracking.
@@ -72,33 +77,37 @@ protocol work.
   well-trodden "support an old device with modern tooling" setup, not a
   special one.
 - **Language: Kotlin.**
-- **Tablet radios not yet fully confirmed** (2026-09-15: Bluetooth
-  present, BLE support and USB-OTG host support both still unverified on
-  the actual device - see the "Recheck" item in §11). The app is designed
-  to support **both** transports from the start specifically so this
-  doesn't block the architecture either way; whichever the tablet actually
-  has becomes the one actually used.
+- **Tablet has no Bluetooth hardware at all** (confirmed 2026-09-15) - USB-OTG
+  Serial is the only transport this app targets (§3). USB-OTG host support
+  itself is still worth confirming before implementation (see the
+  "Recheck" item in §11), but the architecture no longer needs to hedge
+  between two transports.
 - **Repo layout:** a new top-level `android-app/` folder in this same repo
   (`gaggia-brew-master-esp`), alongside `src/`, `include/`, `docs/` - one
   repo, one history, keeps the app and the firmware protocol it depends on
   versioned together.
+- **Physical connection:** the ESP32-S3's existing native USB-C port (the
+  same one `pio run -t upload -t monitor` already uses to flash/monitor
+  over the board's USB-CDC virtual serial link, `AGENTS.md` §5) connects
+  to the tablet's USB port via a USB-OTG adapter cable (tablet-side
+  micro-USB on this device) plus a standard USB-A-to-USB-C cable - no new
+  firmware-side hardware or wiring. `usb-serial-for-android` enumerates it
+  as a CDC-ACM device once attached; the app requests the one USB
+  permission dialog Android shows on first attach (this is the only
+  runtime permission this app needs at all - see §6).
 
 ## 5. Architecture
 
 ### 5a. Components
 
 - **`ConnectivityService`** - a foreground `Service` (survives
-  backgrounding mid-shot) that owns one `BleTransport` and one
-  `SerialTransport`, tries the last-used transport/device first (from
-  `SharedPreferences`), decodes incoming telemetry frames and JSON
-  responses, and exposes current state via `ViewModel`/`LiveData`
-  (AndroidX Lifecycle, works fine at `minSdk 19`).
-- **`BleTransport`** - wraps `BluetoothGatt` against the exact
-  `BLE_SERVICE_UUID`/`BLE_CHAR_TELEMETRY_UUID`/`BLE_CHAR_COMMAND_UUID`/
-  `BLE_CHAR_RESPONSE_UUID` values defined in
-  `docs/superpowers/plans/2026-09-15-connectivity-protocol.md` Task 1
-  (`include/config.h`) - hardcoded constants shared by direct reference,
-  not redefined independently.
+  backgrounding mid-shot) that owns a `SerialTransport`, remembers the
+  last-used USB device (`SharedPreferences`) for auto-reconnect on next
+  launch, decodes incoming telemetry frames and JSON responses, and
+  exposes current state via `ViewModel`/`LiveData` (AndroidX Lifecycle,
+  works fine at `minSdk 19`). Named generically rather than
+  `SerialConnectivityService` since the underlying protocol (and this
+  service's role) isn't inherently Serial-only - see §3's BLE note.
 - **`SerialTransport`** - wraps `usb-serial-for-android` (`mik3y/
   usb-serial-for-android`, API 14+), reading/writing over the same
   USB-CDC link the firmware's `serial_transport.cpp` speaks. Mirrors that
@@ -115,14 +124,15 @@ protocol work.
   `tempHistory`/`pressureHistory`) that `TelemetryChartView` reads from.
 - **`CommandClient`** - builds `{"id", "cmd", "params"}` JSON (using
   `org.json`, already built into Android - no new JSON dependency needed
-  for this app's small objects), sends it over whichever transport is
-  currently active, and correlates the response by `id` with a timeout
-  (default 3s). Sub-project 2's protocol keeps no reconnection/resume
-  state (spec §8), so a response that never arrives is a normal, expected
-  case here, not a bug to work around.
+  for this app's small objects), sends it over `SerialTransport`, and
+  correlates the response by `id` with a timeout (default 3s).
+  Sub-project 2's protocol keeps no reconnection/resume state (spec §8),
+  so a response that never arrives is a normal, expected case here, not a
+  bug to work around.
 - **UI:**
-  - `ConnectActivity` - BLE scan (see §6 KitKat note) or USB device pick;
-    remembers the chosen device for next launch.
+  - `ConnectActivity` - lists attached USB-OTG devices
+    (`UsbManager.getDeviceList()` via `usb-serial-for-android`) for the
+    user to pick; remembers the chosen device for next launch.
   - `DashboardFragment` - the main "Now" screen (naming matches the
     existing web UI's own "Now" view, `AGENTS.md`/`web.cpp`): stat tiles,
     `TelemetryChartView` (a custom `View` with `onDraw(Canvas)`, no
@@ -138,14 +148,17 @@ protocol work.
 
 Copied verbatim from
 `docs/superpowers/specs/2026-09-04-connectivity-protocol-design.md` §4a -
-`TelemetryFrame` must decode exactly this, byte for byte. **20 bytes, not
-21** - corrected during this app's own brainstorming (2026-09-15): a BLE
-notification's usable payload at the default, un-negotiated 23-byte ATT
-MTU is 20 bytes (MTU minus 3 bytes of ATT overhead), and **KitKat's
-`BluetoothGatt` has no `requestMtu()` at all** (added in API 21) - so this
-app can never negotiate a bigger MTU even if it wanted to. The frame's
-sync-marker byte doubles as its protocol version rather than carrying a
-separate version byte, to fit exactly:
+`TelemetryFrame` must decode exactly this, byte for byte, whether it
+arrives over Serial (this app's only transport, §3) or BLE (other
+clients of the same firmware protocol). **20 bytes, not 21** - corrected
+during this app's own brainstorming (2026-09-15): a BLE notification's
+usable payload at the default, un-negotiated 23-byte ATT MTU is 20 bytes
+(MTU minus 3 bytes of ATT overhead), and **KitKat's `BluetoothGatt` has no
+`requestMtu()` at all** (added in API 21) - so no Android client older
+than that could ever negotiate a bigger MTU, even though this specific app
+doesn't use BLE itself. The frame's sync-marker byte doubles as its
+protocol version rather than carrying a separate version byte, to fit
+exactly:
 
 | Offset | Bytes | Field | Notes |
 |---|---|---|---|
@@ -172,8 +185,9 @@ hand in `onDraw(Canvas)` instead of a charting library.
 
 ### 5c. Data flow
 
-1. App launch → `ConnectActivity` (or auto-reconnect if a last-used device
-   is remembered) → `ConnectivityService` starts, transport connects.
+1. App launch → `ConnectActivity` (or auto-reconnect if a last-used USB
+   device is remembered) → `ConnectivityService` starts, `SerialTransport`
+   connects.
 2. Telemetry frames arrive ~every 2s (matches firmware's
    `CONNECTIVITY_TELEMETRY_INTERVAL_MS`) → `TelemetryFrame.decode()` →
    pushed into the ring buffer + `LiveData` → `DashboardFragment`
@@ -189,40 +203,35 @@ hand in `onDraw(Canvas)` instead of a charting library.
 ## 6. KitKat (API 19) compatibility notes
 
 Concrete traps, not generic caution - each of these is a real API that
-does not exist yet at API 19:
+does not exist yet at API 19. (BLE-specific traps - `startLeScan()` vs.
+`BluetoothLeScanner`, `requestMtu()`'s API 21 floor - dropped from this
+list along with BLE itself, §3; kept in the firmware-side connectivity
+spec since the protocol still serves BLE clients in general.)
 
-- **BLE scanning must use `BluetoothAdapter.startLeScan()`/`stopLeScan()`**
-  (deprecated in later Android versions, but the *only* option before API
-  21) - not `BluetoothLeScanner`, which doesn't exist until Lollipop.
-  `BluetoothGatt` itself (the GATT client used post-connect) has existed
-  since API 18, so it's fine on KitKat.
-- **No BLE-scan runtime permission needed** - the runtime permission
-  dialog flow is API 23+ (Marshmallow); on API 19, a manifest-declared
-  `ACCESS_FINE_LOCATION`/`BLUETOOTH`/`BLUETOOTH_ADMIN` is granted at
-  install time. Simpler here, but don't copy this assumption if the app
-  is ever built against a higher `minSdk` later.
 - **Foreground-service notification channels are API 26+** - guard that
   specific call with `Build.VERSION.SDK_INT >= 26`, not the whole
   foreground-service call (`startForeground()` itself has existed since
   API 5).
 - **USB host APIs** (`UsbManager`, `UsbDevice`, used by
   `usb-serial-for-android`) have existed since API 12 - no gating needed.
+  This is now the one compatibility surface that actually matters for
+  connectivity, since it's the app's only transport. USB device access
+  itself is gated by a one-time `UsbManager` permission dialog (not the
+  API-23+ runtime permission system - this is a separate, older Android
+  mechanism that's worked the same way since USB host support was added),
+  shown the first time the app tries to open the attached ESP32.
 - No WebView used in this design (Canvas chosen over WebView per this
   conversation's brainstorming decision), so KitKat's WebView-version
   nuances don't apply here.
 
 ## 7. Error handling & reconnection
 
-- Connection drop (BLE disconnect callback, or a Serial read/write
-  failure) → `ConnectivityService` marks state "disconnected",
-  `DashboardFragment` grays out and shows "Reconnecting…" over the last
-  known telemetry (not cleared - stale-but-visible is more useful than
-  blank).
+- Connection drop (USB device detached, or a read/write failure) →
+  `ConnectivityService` marks state "disconnected", `DashboardFragment`
+  grays out and shows "Reconnecting…" over the last known telemetry (not
+  cleared - stale-but-visible is more useful than blank).
 - Reconnect attempts on a capped backoff (e.g. 3s, 3s, 5s, 10s, then
-  settle at 10s) against the same last-used transport/device - no
-  fallback-switch-transport-automatically logic in the MVP (if BLE drops,
-  retry BLE; don't silently jump to Serial even if it's available - keeps
-  behavior predictable).
+  settle at 10s) against the same last-used USB device.
 - A command response that never arrives within its timeout surfaces an
   error to the user (§5c) - never retried automatically.
 
@@ -297,19 +306,21 @@ Checked this repo's two vendored reference projects
 - Persistence: `SharedPreferences` + in-memory ring buffer only for the
   MVP - no Room/SQLite yet, since there's nothing relational to store
   until phase 2's profiles/schedules/shot-history land.
-- Transport: support both BLE and USB-OTG Serial from the start, not
-  BLE-only - the target tablet's exact radio capabilities weren't
-  confirmed during brainstorming (Bluetooth present, BLE/OTG support
-  unverified - see "Recheck" below).
+- Transport: initially scoped as "support both BLE and USB-OTG Serial from
+  the start," pending confirmation of the tablet's radios. **Revised
+  later the same day, 2026-09-15: the tablet has no Bluetooth hardware at
+  all (user-confirmed)** - BLE dropped from the MVP entirely (§3),
+  `BleTransport` removed from the architecture (§5a), leaving Serial as
+  the only transport this app builds.
 - Repo layout: new `android-app/` top-level folder in this same repo, not
   a separate repository.
 - Language/toolchain: Kotlin, current Android Studio/Gradle, AndroidX,
   `minSdk 19`.
 
-**Recheck before/during implementation:** the user was given two ways to
-confirm the tablet's actual BLE and USB-OTG host support (`adb shell pm
-list features | grep bluetooth_le`/`usb.host`, or Settings → About tablet
-+ a BLE scanner app) but had not run either as of this spec. Confirming
-before writing `BleTransport`/`SerialTransport` is worthwhile even though
-the architecture doesn't strictly require it (both are built regardless) -
-it tells us which one to actually bench-test first.
+**Recheck before/during implementation:** USB-OTG host support
+(`android.hardware.usb.host`) still hasn't been explicitly confirmed on
+the tablet (only Bluetooth's absence has) - worth a quick check (`adb
+shell pm list features | grep usb.host`, or plugging in a USB-OTG
+flash drive/mouse and confirming Android recognizes it) before writing
+`SerialTransport`, since it's now the app's *only* transport rather than
+one of two.
