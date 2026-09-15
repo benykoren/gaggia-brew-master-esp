@@ -956,13 +956,30 @@ function trackPhaseMarkers(shotPhase, shotInProgress) {
   lastSeenShotPhase = shotInProgress ? shotPhase : null;
 }
 
-function drawSparkline(data) {
+// Draws a dashed horizontal reference line at the given target value,
+// using the same min/max scale as the data line - shared by both charts.
+function drawTargetLine(ctx, w, h, min, max, target) {
+  if (target === null || target === undefined) return;
+  var y = h - ((target - min) / (max - min)) * (h - 6) - 3;
+  ctx.save();
+  ctx.strokeStyle = "rgba(179,162,148,.55)"; // --text-dim, translucent
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 3]);
+  ctx.beginPath();
+  ctx.moveTo(0, y);
+  ctx.lineTo(w, y);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawSparkline(data, target) {
   var canvas = document.getElementById("temp_chart");
   if (!canvas || !data || data.length < 2) return;
   var ctx = canvas.getContext("2d");
   var w = canvas.width, h = canvas.height;
   ctx.clearRect(0, 0, w, h);
-  var min = Math.min.apply(null, data), max = Math.max.apply(null, data);
+  var scaleValues = (target === null || target === undefined) ? data : data.concat([target]);
+  var min = Math.min.apply(null, scaleValues), max = Math.max.apply(null, scaleValues);
   if (max - min < 1) { max += 0.5; min -= 0.5; }
 
   phaseMarkers = phaseMarkers.filter(function (m) { return m.age < data.length; });
@@ -982,6 +999,8 @@ function drawSparkline(data) {
     ctx.restore();
   }
 
+  drawTargetLine(ctx, w, h, min, max, target);
+
   ctx.beginPath();
   data.forEach(function (v, i) {
     var x = (i / (data.length - 1)) * w;
@@ -994,15 +1013,18 @@ function drawSparkline(data) {
   ctx.stroke();
 }
 
-function drawPressureSparkline(data) {
+function drawPressureSparkline(data, target) {
   var canvas = document.getElementById("pressure_chart");
   if (!canvas || !data || data.length < 2) return;
   var ctx = canvas.getContext("2d");
   var w = canvas.width, h = canvas.height;
   ctx.clearRect(0, 0, w, h);
-  var min = Math.min.apply(null, data), max = Math.max.apply(null, data);
+  var scaleValues = (target === null || target === undefined) ? data : data.concat([target]);
+  var min = Math.min.apply(null, scaleValues), max = Math.max.apply(null, scaleValues);
   if (max - min < 0.5) { max += 0.25; min -= 0.25; }
   if (min > 0) min = 0; // pressure chart always includes zero for scale
+
+  drawTargetLine(ctx, w, h, min, max, target);
 
   ctx.beginPath();
   data.forEach(function (v, i) {
@@ -1297,8 +1319,12 @@ setInterval(function () {
       document.getElementById("target").innerHTML = hasTarget ? target.toFixed(1) : "--";
       document.getElementById("output").innerHTML = outputPct.toFixed(0);
       trackPhaseMarkers(json.shot_phase, json.shot_in_progress);
-      drawSparkline(json.history);
-      drawPressureSparkline(json.pressure_history);
+      drawSparkline(json.history, hasTarget ? target : null);
+      // Only "pressure" phase exposes a ramp/hold target via this JSON API
+      // (a later decline sub-stage isn't distinguished from "pressure" here) -
+      // no target line outside that phase or when no pressure profile ran.
+      var pressureTarget = (json.press_enabled && json.shot_phase === "pressure") ? json.press_ramp_bar : null;
+      drawPressureSparkline(json.pressure_history, pressureTarget);
       var pLabel = document.getElementById("pressure_label");
       if (pLabel) pLabel.textContent = (json.pressure_fault ? "fault" : json.pressure.toFixed(2) + " bar");
 
