@@ -122,11 +122,13 @@ The temp module also needs **3.3V** and **GND** from the DevKit (module is
     PID autotune relay-feedback state machine (see their own subsections).
   - `src/temp_sensor.cpp` / `include/temp_sensor.h` — UART driver for the
     temperature module (see Section 3).
-  - `src/web.cpp` / `include/web.h` — `WebServer` on port 80, WiFiManager captive
-    portal, `/status` JSON, `/update` settings, `/firmware`+`/update_fw` OTA,
-    `/wifi_reset`, mDNS `gaggia.local`. The UI (`index_html`) is a
-    self-contained dark-themed responsive dashboard (no external assets); it
-    polls `/status` every 2 s.
+  - `src/web.cpp` / `include/web.h` — `ESPAsyncWebServer` on port 80, WiFiManager
+    captive portal, `/status` JSON, `/update` settings, `/firmware`+`/update_fw`
+    OTA, `/wifi_reset`, mDNS `gaggia.local`. The UI (`index_html`) is a
+    self-contained dark dashboard (no external assets): Now / Tune / History /
+    Settings tabs, 2 s `/status` poll with an unreachable banner if the poll
+    fails, optimistic mode/shot controls, and live heater + pump duty. `/status`
+    reports `mqtt_pass_set` (boolean) rather than the MQTT password itself.
   - `src/mqtt.cpp` / `include/mqtt.h` — MQTT + Home Assistant auto-discovery.
   - `include/config.h` — pins, sensor UART config, brew/steam gain-scheduling
     profile defaults, per-mode safety ceilings, eco-sleep default, autotune
@@ -224,9 +226,10 @@ The temp module also needs **3.3V** and **GND** from the DevKit (module is
   real-hardware autotune attempt.
 
 ### Interfaces
-- **Web UI:** connect to the ESP's IP or `http://gaggia.local` — shows temp,
-  target, output, mode (Off/Brew/Steam), eco-sleep status, autotune status,
-  and live per-profile Kp/Ki/Kd + target editing.
+- **Web UI:** connect to the ESP's IP or `http://gaggia.local` — Now tab
+  shows temp, pressure, mode, shot timer, heater/pump duty, and
+  fault/unreachable/brew-switch banners. Tune/History/Settings hold PID,
+  profiles, shot log, and network. Polls `/status` every 2 s.
 - **Wi-Fi setup (captive portal):** on first boot it creates an AP
   **`GaggiaPID_Setup`** — join it and enter your home Wi-Fi credentials.
   **`/wifi_reset`** (Web UI "Reset WiFi Settings" button) clears stored
@@ -234,6 +237,8 @@ The temp module also needs **3.3V** and **GND** from the DevKit (module is
   needing USB — reuses this existing, proven path rather than a second
   custom WiFi-config UI.
 - **MQTT / Home Assistant:** optional, configured from the Web UI form.
+  `/status` exposes `mqtt_pass_set` rather than the password; a blank
+  password field on save keeps the stored credential.
 - **OTA:** `http://<ip>/firmware` (upload form) → `/update_fw` (upload
   handler). **First real-world test (2026-08-15) initially failed silently**
   (empty HTTP response, board rebooted back into the still-working previous
@@ -842,6 +847,37 @@ everything again.
 ---
 
 ## 10. Change Log
+
+### 2026-09-15 — Cursor Grok 4.6 — Web UI: appliance-console redesign (telemetry, IA, states)
+
+- **Now tab tells the truth about the pump.** Heater and pump duty sit
+  side-by-side. Banners cover controller unreachable, pressure
+  fault/ceiling trip, and "flip the physical Brew switch" when a shot is
+  running but zero-cross has stopped (uses `dimmer_zc_count` as a rate,
+  not as a visible diagnostic number). Pressure-ring color tracks the
+  active profile ramp target instead of a hardcoded 9 bar. Shot phase
+  labels include the pressure-hold stage.
+- **Optimistic controls.** Mode and Start/Stop Shot flip immediately
+  instead of waiting up to 2 s for the next `/status` poll. Polling no
+  longer overlaps, parses JSON behind try/catch, and times out.
+- **Tune/Settings IA.** Brew target stays visible; PID gains, steam
+  extras, and pump-pressure PID sit in `<details>`. Profile editor is
+  hidden until New/Edit. Settings grouped (Brewing / Power / Network /
+  Backup). Shot auto-stop copy now says the dimmer actually cuts the
+  pump. NTP-unsynced warning on the schedule card. Weight column hidden
+  until a shot has a weight.
+- **Visual tightening, not a new look.** Semantic color tokens, flatter
+  cards (no glass/gradient chrome), autotune is an outline danger
+  control instead of another copper Save button, `prefers-reduced-motion`
+  kills pulses/transitions.
+- **A11y / XSS.** One `<main>`, arrow-key tablist, `textContent` for
+  user-supplied profile names and shot notes. Firmware OTA page uses the
+  same palette and shows upload progress.
+- **MQTT password no longer rides `/status` every 2 s.** JSON now has
+  `mqtt_pass_set` (bool). Saving MQTT with a blank password leaves the
+  stored one alone. Settings export still includes the password (that's
+  a user-downloaded backup). Profile lists are no longer rebuilt from
+  every `/status` tick (that was wiping an armed Delete).
 
 ### 2026-09-15 — Claude Code (Sonnet 5) — Dimmer TRIAC destroyed by an OUT/N wiring mixup while prepping Milestone B; diagnosed, root-caused, replacement module selected
 

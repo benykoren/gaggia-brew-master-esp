@@ -127,39 +127,51 @@ const char *index_html = R"rawliteral(
       --bg-grad: radial-gradient(1400px 700px at 50% -14%, #241a13 0%, #0e0b09 55%);
       --surface: #1a1512;
       --surface-2: #221b16;
+      --elevated: #2a221c;
       --border: #392e26;
       --border-soft: #2a221c;
       --text: #f6efe6;
-      --text-dim: #b3a294;
+      --text-muted: #b3a294;
       --text-faint: #7d7166;
 
-      --copper: #d98c3f;
-      --copper-deep: #b06a2c;
-      --copper-light: #f2b46f;
-      --steam: #4fa3d8;
-      --green: #48b583;
-      --red: #e5544b;
-      --amber: #e0a13a;
+      --primary: #d98c3f;
+      --primary-deep: #b06a2c;
+      --primary-light: #f2b46f;
+      --accent: #4fa3d8;
+      --success: #48b583;
+      --danger: #e5544b;
+      --warning: #e0a13a;
+      --info: #4fa3d8;
 
-      --radius-sm: 10px;
-      --radius-md: 16px;
-      --radius-lg: 22px;
+      /* Aliases so existing rules keep working while new rules use roles. */
+      --text-dim: var(--text-muted);
+      --copper: var(--primary);
+      --copper-deep: var(--primary-deep);
+      --copper-light: var(--primary-light);
+      --steam: var(--accent);
+      --green: var(--success);
+      --red: var(--danger);
+      --amber: var(--warning);
+
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 16px;
       --radius-full: 999px;
 
-      --shadow-sm: 0 2px 10px rgba(0,0,0,.35);
-      --shadow-md: 0 10px 28px rgba(0,0,0,.45);
+      --shadow-sm: none;
+      --shadow-md: none;
 
       --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px;
       --ease: cubic-bezier(.22,.7,.32,1);
 
-      /* Font-size scale, named by rank (not by role) and derived from the
-         page's own existing hand-tuned values - not a new invented scale.
-         Centralizes what was ~35 scattered literals into one place without
-         changing any rendered size. */
-      --fs-1: 10.5px; --fs-2: 11px;   --fs-3: 11.5px; --fs-4: 12px;
-      --fs-5: 12.5px; --fs-6: 13px;   --fs-7: 14px;   --fs-8: 14.5px;
-      --fs-9: 15px;   --fs-10: 17px;  --fs-11: 19px;  --fs-12: 21px;
-      --fs-13: 22px;
+      --fs-caption: 11px;
+      --fs-label: 12.5px;
+      --fs-body: 15px;
+      --fs-title: 17px;
+      --fs-1: var(--fs-caption); --fs-2: var(--fs-caption); --fs-3: 11.5px;
+      --fs-4: 12px; --fs-5: var(--fs-label); --fs-6: 13px;
+      --fs-7: 14px; --fs-8: 14.5px; --fs-9: var(--fs-body);
+      --fs-10: var(--fs-title); --fs-11: 19px; --fs-12: 21px; --fs-13: 22px;
     }
     * { box-sizing: border-box; }
     html, body { margin: 0; }
@@ -181,19 +193,26 @@ const char *index_html = R"rawliteral(
     }
     .app { max-width: 720px; margin: 0 auto; padding: var(--sp-5) var(--sp-4) calc(96px + env(safe-area-inset-bottom)); }
 
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+      }
+    }
     .topbar {
       position: sticky; top: 0; z-index: 20;
       display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3);
       margin: calc(var(--sp-5) * -1) calc(var(--sp-4) * -1) var(--sp-4);
       padding: var(--sp-5) var(--sp-4) var(--sp-4);
-      background: linear-gradient(180deg, rgba(14,11,9,.97), rgba(14,11,9,.85) 70%, rgba(14,11,9,0));
-      backdrop-filter: blur(8px);
+      background: var(--bg);
     }
     .brand { display: flex; align-items: center; gap: var(--sp-3); }
     .logo {
-      width: 42px; height: 42px; border-radius: var(--radius-md); flex: none;
-      background: linear-gradient(135deg, var(--copper-light), var(--copper-deep));
-      display: grid; place-items: center; font-size: var(--fs-13); box-shadow: var(--shadow-sm);
+      width: 40px; height: 40px; border-radius: var(--radius-md); flex: none;
+      background: var(--primary); color: #1a1206;
+      display: grid; place-items: center; font-size: var(--fs-13);
     }
     .brand-text h1 { font-size: var(--fs-10); margin: 0; letter-spacing: .2px; }
     .brand-text small { display: block; color: var(--text-dim); font-size: var(--fs-3); font-weight: 500; }
@@ -220,15 +239,20 @@ const char *index_html = R"rawliteral(
     .banner-error { background: rgba(229,84,75,.14); border: 1px solid rgba(229,84,75,.4); color: #f3c6c2; }
     .banner-info { background: rgba(79,163,216,.14); border: 1px solid rgba(79,163,216,.4); color: #cfe8f7; }
     .banner-warn { background: rgba(224,161,58,.14); border: 1px solid rgba(224,161,58,.4); color: #f3dcc2; }
+    .app.degraded .gauge-value, .app.degraded .shot-time, .app.degraded .stat-value { opacity: .55; }
+    .sr-only {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+    }
     .btn-chip {
       border: 1px solid var(--steam); background: var(--steam); color: #071824;
       padding: 6px 13px; border-radius: var(--radius-sm); font-size: var(--fs-4); font-weight: 700; cursor: pointer; flex: none;
     }
 
     .card {
-      background: linear-gradient(180deg, var(--surface-2), var(--surface));
+      background: var(--surface);
       border: 1px solid var(--border-soft); border-radius: var(--radius-lg);
-      box-shadow: var(--shadow-md); padding: var(--sp-5); margin-bottom: var(--sp-4);
+      padding: var(--sp-5); margin-bottom: var(--sp-4);
     }
 
     .hero-card { text-align: center; }
@@ -244,9 +268,9 @@ const char *index_html = R"rawliteral(
        climbing to target, green once at/near it (readable without parsing
        the number - also covers a shot's temperature sag, which is just
        "below target" again), red once over. */
-    .gauge-fill.heating { stroke: var(--steam); filter: drop-shadow(0 0 10px rgba(79,163,216,.55)); }
-    .gauge-fill.ready { stroke: var(--green); filter: drop-shadow(0 0 10px rgba(72,181,131,.55)); }
-    .gauge-fill.over { stroke: var(--red); filter: drop-shadow(0 0 10px rgba(229,84,75,.55)); }
+    .gauge-fill.heating { stroke: var(--accent); }
+    .gauge-fill.ready { stroke: var(--success); }
+    .gauge-fill.over { stroke: var(--danger); }
     /* Pressure ring reuses the same heating/ready/over classes as the temp
        ring above - fill amount is a fixed 0-16 bar scale (this machine's
        safety-valve rating, a real manometer reading), but color answers a
@@ -292,7 +316,8 @@ const char *index_html = R"rawliteral(
 
     .bar { height: 9px; border-radius: var(--radius-full); background: #100d0b; border: 1px solid var(--border-soft); overflow: hidden; margin-top: 9px; }
     .bar > span { display: block; height: 100%; width: 0%; border-radius: var(--radius-full); transition: width .5s ease; }
-    .bar.heat > span { background: linear-gradient(90deg, var(--copper-deep), var(--copper)); }
+    .bar.heat > span { background: var(--primary); }
+    .bar.pump > span { background: var(--accent); }
 
     /* Generic chart card - reused today for the temp sparkline; a future
        pressure graph (roadmap item 7) is meant to drop in as a second
@@ -330,18 +355,36 @@ const char *index_html = R"rawliteral(
     .btn-preset.active { color: var(--copper-light); border-color: var(--copper); background: rgba(217,140,63,.12); }
 
     .btn-autotune {
-      width: 100%; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: var(--sp-2);
-      padding: 15px 16px; border-radius: var(--radius-md); font-size: var(--fs-8); font-weight: 700; color: #1a1206;
-      background: linear-gradient(135deg, var(--copper-light), var(--copper-deep));
-      box-shadow: 0 6px 18px rgba(217,140,63,.28); transition: transform .05s ease, opacity .15s ease;
+      width: 100%; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: var(--sp-2);
+      padding: 15px 16px; border-radius: var(--radius-md); font-size: var(--fs-8); font-weight: 700;
+      color: var(--primary-light); background: transparent; border: 1px solid var(--primary);
+      transition: transform .05s ease, opacity .15s ease, background .15s ease, color .15s ease;
     }
     .btn-autotune:active:not(:disabled) { transform: translateY(1px); }
-    .btn-autotune:disabled { opacity: .4; cursor: default; box-shadow: none; }
-    .btn-autotune.running { background: var(--red); color: #1a0d0c; box-shadow: 0 6px 18px rgba(229,84,75,.32); }
+    .btn-autotune:disabled { opacity: .4; cursor: default; }
+    .btn-autotune.running { background: var(--danger); border-color: var(--danger); color: #1a0d0c; }
     .autotune-status { display: block; margin-top: var(--sp-3); font-size: var(--fs-5); color: var(--text-dim); text-align: center; }
 
     .tab-section-title { font-size: var(--fs-4); font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: var(--sp-3); }
     .tab-section-title.mt { margin-top: var(--sp-5); }
+    .group-title {
+      font-size: var(--fs-caption); font-weight: 700; color: var(--text-faint);
+      text-transform: uppercase; letter-spacing: 1px; margin: var(--sp-5) 0 var(--sp-3);
+    }
+    .group-title:first-child { margin-top: 0; }
+    .disclosure {
+      border: 1px solid var(--border-soft); border-radius: var(--radius-md);
+      padding: 0 var(--sp-4) var(--sp-4); margin: var(--sp-4) 0 0; background: var(--elevated);
+    }
+    .disclosure > summary {
+      cursor: pointer; font-size: var(--fs-label); font-weight: 700; color: var(--text-muted);
+      padding: var(--sp-4) 0; list-style: none;
+    }
+    .disclosure > summary::-webkit-details-marker { display: none; }
+    .disclosure > summary::after {
+      content: "Show"; float: right; color: var(--primary); font-weight: 600;
+    }
+    .disclosure[open] > summary::after { content: "Hide"; }
     .hint { font-size: var(--fs-4); color: var(--text-dim); margin: 0 0 var(--sp-3); line-height: 1.5; }
     .hint-link { display: inline-block; margin-top: var(--sp-3); font-size: var(--fs-6); color: var(--copper); text-decoration: none; font-weight: 600; }
 
@@ -363,7 +406,7 @@ const char *index_html = R"rawliteral(
     select { width: 100%; padding: 12px 13px; border-radius: var(--radius-sm); font-size: var(--fs-9); background: #100d0b; border: 1px solid var(--border); color: var(--text); outline: none; }
 
     .submit, .btn-secondary, .btn-danger { width: 100%; border: none; cursor: pointer; padding: 14px; border-radius: var(--radius-md); font-size: var(--fs-8); font-weight: 700; margin-top: var(--sp-1); }
-    .submit { color: #1a1206; background: linear-gradient(135deg, var(--copper-light), var(--copper-deep)); box-shadow: 0 6px 18px rgba(217,140,63,.28); }
+    .submit { color: #1a1206; background: var(--primary); }
     .submit:active { transform: translateY(1px); }
     .btn-secondary { color: var(--text); background: var(--surface); border: 1px solid var(--border); margin-top: var(--sp-4); }
     .btn-danger { color: #1a0d0c; background: var(--red); }
@@ -428,16 +471,19 @@ const char *index_html = R"rawliteral(
       position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
       display: flex; justify-content: center; gap: var(--sp-2);
       padding: var(--sp-2) var(--sp-3) calc(var(--sp-2) + env(safe-area-inset-bottom));
-      background: linear-gradient(0deg, rgba(14,11,9,.97), rgba(14,11,9,.9) 75%, rgba(14,11,9,0));
-      backdrop-filter: blur(10px);
+      background: var(--bg);
+      border-top: 1px solid var(--border-soft);
     }
     .tab {
       flex: 1; max-width: 200px; display: flex; flex-direction: column; align-items: center; gap: 3px;
-      border: none; background: none; color: var(--text-faint); font-size: var(--fs-1); font-weight: 700;
-      padding: 8px 4px 6px; cursor: pointer; border-radius: var(--radius-md); transition: color .15s ease;
+      border: none; background: none; color: var(--text-faint); font-size: var(--fs-caption); font-weight: 700;
+      padding: 8px 4px 6px; min-height: 48px; cursor: pointer; border-radius: var(--radius-md); transition: color .15s ease;
     }
-    .tab-icon { font-size: var(--fs-11); }
-    .tab.active { color: var(--copper-light); }
+    .tab-icon { font-size: var(--fs-11); filter: grayscale(1); opacity: .65; }
+    .tab.active,
+    .tab[aria-selected="true"] { color: var(--copper-light); }
+    .tab.active .tab-icon,
+    .tab[aria-selected="true"] .tab-icon { filter: none; opacity: 1; }
 
     /* Compact landscape layout for the "Now" tab only (live status at a
        glance on a tablet mounted sideways) - gated on max-height, not just
@@ -459,8 +505,8 @@ const char *index_html = R"rawliteral(
         align-items: start;
       }
       .view[data-view="now"] > .hero-card { grid-area: hero; margin: 0; }
-      .view[data-view="now"] > .card:nth-of-type(2) { grid-area: shot; margin: 0; }
-      .view[data-view="now"] > .card:nth-of-type(3) { grid-area: stats; margin: 0; }
+      .view[data-view="now"] > .card-shot { grid-area: shot; margin: 0; }
+      .view[data-view="now"] > .card-stats { grid-area: stats; margin: 0; }
 
       /* The narrow hero column (190-260px) can't fit two side-by-side
          circles at their portrait size - .gauge-row's existing flex-wrap
@@ -478,56 +524,54 @@ const char *index_html = R"rawliteral(
 
       /* The two charts sit side-by-side instead of stacked, roughly halving
          the vertical space this card needs. */
-      .view[data-view="now"] > .card:nth-of-type(3) {
+      .view[data-view="now"] > .card-stats {
         display: grid;
         grid-template-columns: 1fr 1fr;
         grid-template-areas: "stat stat" "chart1 chart2";
         gap: var(--sp-3);
       }
-      .view[data-view="now"] > .card:nth-of-type(3) > .stat-grid { grid-area: stat; margin-top: 0; }
-      /* :nth-of-type counts by tag (div), not by class - .stat-grid is the
-         1st div here, so ":nth-of-type" can't pick out "the 1st/2nd
-         .chart-card" directly. Use the adjacent-sibling combinator instead:
-         every .chart-card defaults to chart1, then the one immediately
-         preceded by another .chart-card (i.e. the second one) overrides to
-         chart2 - correct regardless of what precedes the pair. */
-      .view[data-view="now"] > .card:nth-of-type(3) > .chart-card { grid-area: chart1; margin-top: 0; }
-      .view[data-view="now"] > .card:nth-of-type(3) > .chart-card + .chart-card { grid-area: chart2; }
+      .view[data-view="now"] > .card-stats > .stat-grid { grid-area: stat; margin-top: 0; }
+      .view[data-view="now"] > .card-stats > .chart-card { grid-area: chart1; margin-top: 0; }
+      .view[data-view="now"] > .card-stats > .chart-card + .chart-card { grid-area: chart2; }
     }
   </style>
 </head>
 <body>
-  <div class="app">
+  <div class="app" id="app_root">
     <header class="topbar">
       <div class="brand">
-        <div class="logo">&#9749;</div>
+        <div class="logo" aria-hidden="true">&#9749;</div>
         <div class="brand-text">
           <h1>BrewMaster</h1>
           <small>Gaggia Espresso Color</small>
         </div>
       </div>
       <div class="brand-status">
-        <div id="status_pill" class="pill off"><span class="dot"></span><span id="mode_status">--</span></div>
+        <div id="status_pill" class="pill off" aria-live="polite"><span class="dot" aria-hidden="true"></span><span id="mode_status">--</span></div>
         <div id="last_updated" class="last-updated">--</div>
       </div>
     </header>
 
-    <div class="alerts">
-      <div id="fault_banner" class="banner banner-error">&#9888; Sensor fault &mdash; check wiring</div>
+    <div class="alerts" role="status">
+      <div id="offline_banner" class="banner banner-error">Controller unreachable &mdash; showing last known values. Check Wi-Fi.</div>
+      <div id="fault_banner" class="banner banner-error">Sensor fault &mdash; heater held off. Check the PT100 wiring.</div>
+      <div id="pressure_banner" class="banner banner-error"></div>
+      <div id="pump_banner" class="banner banner-warn"></div>
       <div id="sleep_banner" class="banner banner-info">
-        <span id="sleep_banner_text">&#9866; Asleep (eco timeout) &mdash; heater off</span>
-        <button onclick="wake()" class="btn-chip">Wake Up</button>
-        <button onclick="dismissSleepBanner()" class="btn-chip-sm" aria-label="Dismiss">&times;</button>
+        <span id="sleep_banner_text">Asleep (eco timeout) &mdash; heater off</span>
+        <button type="button" onclick="wake()" class="btn-chip">Wake Up</button>
+        <button type="button" onclick="dismissSleepBanner()" class="btn-chip-sm" aria-label="Dismiss sleep notice">&times;</button>
       </div>
-      <div id="descale_banner_top" class="banner banner-warn">&#9888; Descale recommended &mdash; see History tab</div>
+      <div id="descale_banner_top" class="banner banner-warn">Descale recommended &mdash; see History</div>
     </div>
 
-    <main class="view" data-view="now" id="view-now" role="tabpanel" aria-labelledby="tab-now">
+    <main>
+    <div class="view" data-view="now" id="view-now" role="tabpanel" aria-labelledby="tab-now">
       <div class="card hero-card">
         <div class="gauge-row">
           <div class="gauge-col">
             <div class="gauge-wrap">
-              <svg class="gauge" viewBox="0 0 220 220">
+              <svg class="gauge" viewBox="0 0 220 220" aria-hidden="true">
                 <circle class="gauge-track" cx="110" cy="110" r="96"></circle>
                 <circle id="temp_ring_fill" class="gauge-fill" cx="110" cy="110" r="96"
                         stroke-dasharray="603" stroke-dashoffset="603"></circle>
@@ -541,7 +585,7 @@ const char *index_html = R"rawliteral(
 
           <div class="gauge-col">
             <div class="gauge-wrap">
-              <svg class="gauge" viewBox="0 0 220 220">
+              <svg class="gauge" viewBox="0 0 220 220" aria-hidden="true">
                 <circle class="gauge-track" cx="110" cy="110" r="96"></circle>
                 <circle id="pressure_ring_fill" class="gauge-fill" cx="110" cy="110" r="96"
                         stroke-dasharray="603" stroke-dashoffset="603"></circle>
@@ -550,85 +594,94 @@ const char *index_html = R"rawliteral(
                 <div class="gauge-value"><span id="pressure_gauge_val" class="skeleton">--</span><span class="gauge-unit">bar</span></div>
               </div>
             </div>
-            <div class="gauge-target">Pressure</div>
+            <div class="gauge-target" id="pressure_target_caption">Pressure</div>
           </div>
         </div>
 
-        <div class="mode-switch" role="group" aria-label="Mode">
-          <button onclick="setMode('off')" id="btn_off" class="mode-btn mode-off">Off</button>
-          <button onclick="setMode('brew')" id="btn_brew" class="mode-btn mode-brew">Brew</button>
-          <button onclick="setMode('steam')" id="btn_steam" class="mode-btn mode-steam">Steam</button>
+        <div class="mode-switch" role="group" aria-label="Boiler mode">
+          <button type="button" onclick="setMode('off')" id="btn_off" class="mode-btn mode-off" aria-pressed="false">Off</button>
+          <button type="button" onclick="setMode('brew')" id="btn_brew" class="mode-btn mode-brew" aria-pressed="false">Brew</button>
+          <button type="button" onclick="setMode('steam')" id="btn_steam" class="mode-btn mode-steam" aria-pressed="false">Steam</button>
         </div>
       </div>
 
-      <!-- Start/Stop Shot sits directly under Mode - the most-tapped control
-           during an actual pull, so it stays within reach of the top of the
-           page (temp -> mode -> shot) without scrolling past the secondary
-           output/chart telemetry below. -->
-      <div class="card">
+      <div class="card card-shot">
         <div class="shot-head">
           <div>
-            <div id="shot_time" class="shot-time">0:00</div>
+            <div id="shot_time" class="shot-time" aria-live="polite">0:00</div>
             <div id="shot_auto_stop_label" class="shot-sub">--</div>
           </div>
-          <button onclick="toggleShot()" id="btn_shot" class="btn-shot">Start Shot</button>
+          <button type="button" onclick="toggleShot()" id="btn_shot" class="btn-shot">Start Shot</button>
         </div>
         <div class="shot-progress"><span id="shot_progress_bar"></span></div>
-        <div class="preset-row" id="profile_chip_row"><!-- populated from GET /profiles --></div>
+        <div class="preset-row" id="profile_chip_row"></div>
       </div>
 
-      <div class="card">
+      <div class="card card-stats">
         <div class="stat-grid">
           <div class="stat-tile">
-            <span class="stat-label">Heater Output</span>
+            <span class="stat-label">Heater</span>
             <span class="stat-value"><span id="output" class="skeleton">--</span><small>%</small></span>
             <div class="bar heat"><span id="output_bar"></span></div>
+          </div>
+          <div class="stat-tile">
+            <span class="stat-label">Pump</span>
+            <span class="stat-value"><span id="pump_power" class="skeleton">--</span><small>%</small></span>
+            <div class="bar pump"><span id="pump_bar"></span></div>
           </div>
         </div>
 
         <div class="chart-card">
           <div class="chart-label"><span>Temp &middot; last 2 min</span><span>&deg;C</span></div>
-          <canvas id="temp_chart" width="300" height="60"></canvas>
+          <canvas id="temp_chart" width="300" height="60" aria-hidden="true"></canvas>
         </div>
 
         <div class="chart-card">
           <div class="chart-label"><span>Pressure &middot; last 2 min</span><span id="pressure_label">-- bar</span></div>
-          <canvas id="pressure_chart" width="300" height="60"></canvas>
+          <canvas id="pressure_chart" width="300" height="60" aria-hidden="true"></canvas>
         </div>
       </div>
+    </div>
 
-    </main>
-
-    <main class="view" data-view="tune" id="view-tune" role="tabpanel" aria-labelledby="tab-tune" hidden>
+    <div class="view" data-view="tune" id="view-tune" role="tabpanel" aria-labelledby="tab-tune" hidden>
       <div class="card">
-        <div class="tab-section-title">Brew</div>
+        <div class="tab-section-title">Brew temperature</div>
         <form action="/update" method="GET">
           <div class="field">
-            <label for="input_brew_target">Target temperature (&deg;C)</label>
+            <label for="input_brew_target">Target (&deg;C)</label>
             <input type="number" step="0.1" name="brew_target" id="input_brew_target" value="">
           </div>
-          <div class="field-row-3">
-            <div class="field"><label for="input_brew_kp">Kp</label><input type="number" step="any" name="brew_kp" id="input_brew_kp" value=""></div>
-            <div class="field"><label for="input_brew_ki">Ki</label><input type="number" step="any" name="brew_ki" id="input_brew_ki" value=""></div>
-            <div class="field"><label for="input_brew_kd">Kd</label><input type="number" step="any" name="brew_kd" id="input_brew_kd" value=""></div>
-          </div>
-          <button type="submit" class="submit">Save Brew</button>
+          <button type="submit" class="submit">Save target</button>
         </form>
-
-        <div class="tab-section-title mt">Brew &mdash; active during a shot</div>
-        <p class="hint">Switches in automatically the instant a shot starts (Start Shot), reverts to the values above the instant it stops. Deliberately more aggressive &mdash; fights the temperature drop from real flow, which the gentle gains above are too slow for.</p>
-        <form action="/update" method="GET">
-          <div class="field-row-3">
-            <div class="field"><label for="input_brew_akp">Kp</label><input type="number" step="any" name="brew_akp" id="input_brew_akp" value=""></div>
-            <div class="field"><label for="input_brew_aki">Ki</label><input type="number" step="any" name="brew_aki" id="input_brew_aki" value=""></div>
-            <div class="field"><label for="input_brew_akd">Kd</label><input type="number" step="any" name="brew_akd" id="input_brew_akd" value=""></div>
-          </div>
-          <button type="submit" class="submit">Save Active-Brew Gains</button>
-        </form>
+        <details class="disclosure">
+          <summary>Idle PID gains</summary>
+          <form action="/update" method="GET">
+            <div class="field-row-3">
+              <div class="field"><label for="input_brew_kp">Kp</label><input type="number" step="any" name="brew_kp" id="input_brew_kp" value=""></div>
+              <div class="field"><label for="input_brew_ki">Ki</label><input type="number" step="any" name="brew_ki" id="input_brew_ki" value=""></div>
+              <div class="field"><label for="input_brew_kd">Kd</label><input type="number" step="any" name="brew_kd" id="input_brew_kd" value=""></div>
+            </div>
+            <button type="submit" class="submit">Save idle gains</button>
+          </form>
+        </details>
+        <details class="disclosure">
+          <summary>Gains during a shot</summary>
+          <p class="hint">Switches in when a shot starts, reverts when it stops. More aggressive so flow does not pull boiler temperature down.</p>
+          <form action="/update" method="GET">
+            <div class="field-row-3">
+              <div class="field"><label for="input_brew_akp">Kp</label><input type="number" step="any" name="brew_akp" id="input_brew_akp" value=""></div>
+              <div class="field"><label for="input_brew_aki">Ki</label><input type="number" step="any" name="brew_aki" id="input_brew_aki" value=""></div>
+              <div class="field"><label for="input_brew_akd">Kd</label><input type="number" step="any" name="brew_akd" id="input_brew_akd" value=""></div>
+            </div>
+            <button type="submit" class="submit">Save shot gains</button>
+          </form>
+        </details>
       </div>
 
       <div class="card">
-        <button onclick="startAutotune()" id="btn_autotune" class="btn-autotune">&#9889; Start Auto-Tune</button>
+        <div class="tab-section-title">Auto-tune</div>
+        <p class="hint">Cycles the heater around the current Brew or Steam target for several minutes. Stay by the machine.</p>
+        <button type="button" onclick="startAutotune()" id="btn_autotune" class="btn-autotune">Start Auto-Tune</button>
         <span id="autotune_status" class="autotune-status"></span>
       </div>
 
@@ -639,40 +692,46 @@ const char *index_html = R"rawliteral(
             <label for="input_steam_target">Target temperature (&deg;C)</label>
             <input type="number" step="0.1" name="steam_target" id="input_steam_target" value="">
           </div>
-          <div class="field-row-3">
-            <div class="field"><label for="input_steam_kp">Kp</label><input type="number" step="any" name="steam_kp" id="input_steam_kp" value=""></div>
-            <div class="field"><label for="input_steam_ki">Ki</label><input type="number" step="any" name="steam_ki" id="input_steam_ki" value=""></div>
-            <div class="field"><label for="input_steam_kd">Kd</label><input type="number" step="any" name="steam_kd" id="input_steam_kd" value=""></div>
-          </div>
-          <div class="field">
-            <label for="input_steam_max_safety">Max safety ceiling (&deg;C)</label>
-            <input type="number" step="1" min="100" max="150" name="steam_max_safety" id="input_steam_max_safety" value="">
-          </div>
+          <details class="disclosure">
+            <summary>Steam PID and safety ceiling</summary>
+            <div class="field-row-3">
+              <div class="field"><label for="input_steam_kp">Kp</label><input type="number" step="any" name="steam_kp" id="input_steam_kp" value=""></div>
+              <div class="field"><label for="input_steam_ki">Ki</label><input type="number" step="any" name="steam_ki" id="input_steam_ki" value=""></div>
+              <div class="field"><label for="input_steam_kd">Kd</label><input type="number" step="any" name="steam_kd" id="input_steam_kd" value=""></div>
+            </div>
+            <div class="field">
+              <label for="input_steam_max_safety">Max safety ceiling (&deg;C)</label>
+              <input type="number" step="1" min="100" max="150" name="steam_max_safety" id="input_steam_max_safety" value="">
+            </div>
+          </details>
           <button type="submit" class="submit">Save Steam</button>
         </form>
       </div>
 
       <div class="card">
-        <div class="tab-section-title">Pump Pressure</div>
-        <form action="/update" method="GET">
-          <p class="hint">Closed-loop control for the pressure ramp/decline stages of a shot profile (HARDWARE_ROADMAP.md item 8). Has no effect on plain on/off pre-infusion pulses.</p>
-          <div class="field-row-3">
-            <div class="field"><label for="input_press_kp">Kp</label><input type="number" step="any" name="press_kp" id="input_press_kp" value=""></div>
-            <div class="field"><label for="input_press_ki">Ki</label><input type="number" step="0.01" name="press_ki" id="input_press_ki" value=""></div>
-            <div class="field"><label for="input_press_kd">Kd</label><input type="number" step="any" name="press_kd" id="input_press_kd" value=""></div>
-          </div>
-          <button type="submit" class="submit">Save Pump Pressure</button>
-        </form>
+        <div class="tab-section-title">Pump pressure PID</div>
+        <p class="hint">Used only during a profile's pressure ramp/decline stages. Pre-infusion pulses stay on/off.</p>
+        <details class="disclosure">
+          <summary>Kp / Ki / Kd</summary>
+          <form action="/update" method="GET">
+            <div class="field-row-3">
+              <div class="field"><label for="input_press_kp">Kp</label><input type="number" step="any" name="press_kp" id="input_press_kp" value=""></div>
+              <div class="field"><label for="input_press_ki">Ki</label><input type="number" step="0.01" name="press_ki" id="input_press_ki" value=""></div>
+              <div class="field"><label for="input_press_kd">Kd</label><input type="number" step="any" name="press_kd" id="input_press_kd" value=""></div>
+            </div>
+            <button type="submit" class="submit">Save pump pressure</button>
+          </form>
+        </details>
       </div>
 
       <div class="card">
-        <div class="tab-section-title">Shot Profiles</div>
-        <p class="hint">Each profile is a saved (temperature, auto-stop time, pre-infusion pattern) bundle - quick-select chips on the Now tab load one into the live Brew settings above. Loading a profile doesn't lock you to it; editing Brew target/auto-stop directly still works as always.</p>
-        <div id="profile_list_body"><!-- populated from GET /profiles --></div>
-        <button onclick="newProfileForm()" class="btn-secondary">+ New Profile</button>
+        <div class="tab-section-title">Shot profiles</div>
+        <p class="hint">Chips on Now load a saved temperature, auto-stop, pre-infusion, and pressure pattern into the live Brew settings.</p>
+        <div id="profile_list_body"></div>
+        <button type="button" onclick="newProfileForm()" class="btn-secondary">New profile</button>
       </div>
 
-      <div class="card" id="profile_editor_card">
+      <div class="card" id="profile_editor_card" hidden>
         <div class="tab-section-title" id="profile_form_title">New Profile</div>
         <form onsubmit="submitProfileForm(event)">
           <input type="hidden" id="input_profile_index" value="-1">
@@ -685,14 +744,14 @@ const char *index_html = R"rawliteral(
             <div class="field"><label for="input_profile_autostop">Auto-stop (sec)</label><input type="number" step="1" min="5" max="90" id="input_profile_autostop" value="27" oninput="drawProfilePreview()"></div>
           </div>
           <label class="check-row"><input type="checkbox" id="input_profile_pi_enabled" onchange="drawProfilePreview()"> Pulsed pre-infusion</label>
-          <p class="hint" style="margin-top:var(--sp-2)">Cycles the pump on/off a few times before switching to continuous power - approximates the puck-saturation benefit of true low-pressure pre-infusion. Needs the dimmer wired (HARDWARE_ROADMAP.md item 8) to have any physical effect.</p>
+          <p class="hint" style="margin-top:var(--sp-2)">Pulses the pump on/off before continuous extraction to wet the puck.</p>
           <div class="field-row-3" style="margin-top:var(--sp-3)">
             <div class="field"><label for="input_profile_pi_pulses">Pulses</label><input type="number" step="1" min="0" max="10" id="input_profile_pi_pulses" value="3" oninput="drawProfilePreview()"></div>
             <div class="field"><label for="input_profile_pi_on">On (sec)</label><input type="number" step="0.1" min="0.2" max="5" id="input_profile_pi_on" value="1" oninput="drawProfilePreview()"></div>
             <div class="field"><label for="input_profile_pi_off">Off (sec)</label><input type="number" step="0.1" min="0.2" max="5" id="input_profile_pi_off" value="2" oninput="drawProfilePreview()"></div>
           </div>
           <label class="check-row"><input type="checkbox" id="input_profile_press_enabled"> Pressure profile</label>
-          <p class="hint" style="margin-top:var(--sp-2)">Closed-loop pressure ramp, held for a duration, then an optional decline near the end of the shot. Needs the transducer + dimmer wired (HARDWARE_ROADMAP.md items 7/8).</p>
+          <p class="hint" style="margin-top:var(--sp-2)">Closed-loop ramp, hold, then optional decline. Needs the transducer plumbed in.</p>
           <div class="field-row-3" style="margin-top:var(--sp-3)">
             <div class="field"><label for="input_profile_press_ramp_bar">Ramp target (bar)</label><input type="number" step="0.1" min="0" max="11.9" id="input_profile_press_ramp_bar" value="9"></div>
             <div class="field"><label for="input_profile_press_ramp_sec">Ramp/hold (sec)</label><input type="number" step="1" min="1" id="input_profile_press_ramp_sec" value="20"></div>
@@ -704,20 +763,21 @@ const char *index_html = R"rawliteral(
           </div>
           <div class="chart-card">
             <div class="chart-label"><span>Pump pattern preview</span><span id="profile_preview_label">&nbsp;</span></div>
-            <canvas id="profile_preview_chart" width="300" height="40"></canvas>
+            <canvas id="profile_preview_chart" width="300" height="40" aria-hidden="true"></canvas>
           </div>
           <button type="submit" id="profile_form_submit" class="submit">Add Profile</button>
+          <button type="button" onclick="cancelProfileForm()" class="btn-secondary">Cancel</button>
         </form>
       </div>
-    </main>
+    </div>
 
-    <main class="view" data-view="history" id="view-history" role="tabpanel" aria-labelledby="tab-history" hidden>
+    <div class="view" data-view="history" id="view-history" role="tabpanel" aria-labelledby="tab-history" hidden>
       <div class="card">
         <div class="tab-section-title">Shot History</div>
         <div id="shot_history_empty" class="empty-hint">No shots logged yet.</div>
         <div class="table-scroll">
           <table class="history" id="shot_history_table" style="display:none">
-            <thead><tr><th>When</th><th>Duration</th><th>Peak &deg;C</th><th>End &deg;C</th><th>Weight</th><th>Notes</th></tr></thead>
+            <thead><tr><th>When</th><th>Duration</th><th>Peak &deg;C</th><th>End &deg;C</th><th id="shot_weight_th" hidden>Weight</th><th>Notes</th></tr></thead>
             <tbody id="shot_history_body"></tbody>
           </table>
         </div>
@@ -769,25 +829,27 @@ const char *index_html = R"rawliteral(
           </div>
           <button type="submit" class="submit">Save Thresholds</button>
         </form>
-        <button onclick="markDescaled()" class="btn-secondary">Mark Descaled Today</button>
+        <button type="button" onclick="markDescaled()" class="btn-secondary">Mark Descaled Today</button>
       </div>
-    </main>
+    </div>
 
-    <main class="view" data-view="settings" id="view-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
+    <div class="view" data-view="settings" id="view-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
+      <div class="group-title">Brewing</div>
       <div class="card">
-        <div class="tab-section-title">Shot Timer</div>
+        <div class="tab-section-title">Shot auto-stop</div>
         <form action="/update" method="GET">
           <div class="field">
-            <label for="input_shot_auto_stop">Auto-stop after (seconds, 0 = disabled)</label>
+            <label for="input_shot_auto_stop">Stop pump after (seconds, 0 = manual only)</label>
             <input type="number" step="1" min="0" name="shot_auto_stop_sec" id="input_shot_auto_stop" value="">
           </div>
           <button type="submit" class="submit">Save</button>
         </form>
-        <p class="hint" style="margin-top:var(--sp-3)">Ends the shot timer/log automatically once reached - no need to tap Stop Shot. Does not physically stop the pump yet (no hardware for that - see the roadmap); release the machine's own Brew switch as usual.</p>
+        <p class="hint" style="margin-top:var(--sp-3)">Cuts the pump via the dimmer when the timer hits this duration. Loading a profile overwrites this with that profile's own auto-stop. The physical Brew switch must still be on for the dimmer to have power.</p>
       </div>
 
+      <div class="group-title">Power</div>
       <div class="card">
-        <div class="tab-section-title">Power &amp; Eco</div>
+        <div class="tab-section-title">Eco / auto-off</div>
         <form action="/update" method="GET">
           <div class="field">
             <label for="input_eco_min">Brew auto-sleep after (minutes, 0 = disabled)</label>
@@ -799,11 +861,12 @@ const char *index_html = R"rawliteral(
           </div>
           <button type="submit" class="submit">Save</button>
         </form>
-        <p class="hint" style="margin-top:var(--sp-3)">Heater force-OFF after this long with no Web UI activity (mode/tuning changes) - separate timeouts for Brew and Steam, since Steam is normally brief and runs hotter. Neither counts passive status polling.</p>
+        <p class="hint" style="margin-top:var(--sp-3)">Heater force-OFF after this long with no Web UI activity (mode/tuning changes). Steam uses a shorter default because it runs hotter. Status polling does not count as activity.</p>
       </div>
 
       <div class="card">
-        <div class="tab-section-title">Scheduled Warm-Up</div>
+        <div class="tab-section-title">Scheduled warm-up</div>
+        <div id="ntp_banner" class="banner banner-warn" style="margin-bottom:var(--sp-3)">Clock not synced yet &mdash; scheduled warm-up will not fire until NTP succeeds.</div>
         <form action="/update" method="GET">
           <div class="sched-slot">
             <label class="check-row"><input type="checkbox" id="input_sched0_en_cb" onchange="setSchedEnabled(0,this.checked)"> Slot 1 enabled</label>
@@ -836,43 +899,47 @@ const char *index_html = R"rawliteral(
             </div>
           </div>
           <input type="hidden" name="sched_tz_min" id="input_sched_tz_min" value="0">
-          <button type="submit" class="submit">Save Schedule Times</button>
+          <button type="submit" class="submit">Save schedule times</button>
         </form>
-        <p class="hint" style="margin-top:var(--sp-3)">Up to 3 independent times (e.g. a weekday morning and a separate weekend one). The controller only keeps UTC time (no timezone database) - your browser's timezone (<span id="sched_tz_display">--</span>) is detected automatically and kept in sync, so just enter real local wall-clock times above. Each fires once per calendar day.</p>
+        <p class="hint" style="margin-top:var(--sp-3)">Up to 3 times. Browser timezone (<span id="sched_tz_display">--</span>) is kept in sync automatically. Each slot fires once per calendar day.</p>
       </div>
 
+      <div class="group-title">Network</div>
       <div class="card">
-        <div class="tab-section-title">Network</div>
-        <button onclick="wifiReset()" class="btn-danger">Reset WiFi Settings</button>
-        <p class="hint" style="margin-top:var(--sp-3)">Reboots into the <b>GaggiaBrewMasterESP_Setup</b> setup network so you can join a different WiFi without reflashing.</p>
-        <a href="/firmware" class="hint-link">Firmware update (OTA) &rarr;</a>
+        <div class="tab-section-title">Wi-Fi</div>
+        <button type="button" onclick="wifiReset()" class="btn-danger">Reset WiFi settings</button>
+        <p class="hint" style="margin-top:var(--sp-3)">Reboots into the <b>GaggiaBrewMasterESP_Setup</b> network so you can join a different Wi-Fi without reflashing.</p>
+        <a href="/firmware" class="hint-link">Firmware update (OTA)</a>
       </div>
 
       <div class="card">
         <div class="tab-section-title">MQTT / Home Assistant</div>
-        <form action="/update" method="GET">
+        <form action="/update" method="GET" id="mqtt_form">
           <div class="field-row">
             <div class="field"><label for="input_mqtt_server">Server</label><input type="text" name="mqtt_server" id="input_mqtt_server" placeholder="192.168.1.100"></div>
             <div class="field"><label for="input_mqtt_port">Port</label><input type="number" name="mqtt_port" id="input_mqtt_port" value="1883"></div>
           </div>
           <div class="field-row">
             <div class="field"><label for="input_mqtt_user">User</label><input type="text" name="mqtt_user" id="input_mqtt_user"></div>
-            <div class="field"><label for="input_mqtt_pass">Password</label><input type="password" name="mqtt_pass" id="input_mqtt_pass"></div>
+            <div class="field"><label for="input_mqtt_pass">Password</label><input type="password" name="mqtt_pass" id="input_mqtt_pass" placeholder="Unchanged if blank" autocomplete="off"></div>
           </div>
-          <button type="submit" class="submit">Save &amp; Restart</button>
+          <p class="hint" id="mqtt_pass_hint" hidden>A password is already stored. Leave blank to keep it.</p>
+          <button type="submit" class="submit">Save and restart</button>
         </form>
-        <p class="hint" style="margin-top:var(--sp-3)">Saving MQTT settings reboots the controller. Auto-discovers a mode select, Brew/Steam target+Kp/Ki/Kd numbers, temp/output sensors, and shot/fault/descale binary sensors in Home Assistant.</p>
+        <p class="hint" style="margin-top:var(--sp-3)">Saving MQTT settings reboots the controller. Home Assistant auto-discovers mode, targets, sensors, and shot/fault/descale binaries.</p>
       </div>
 
+      <div class="group-title">Backup</div>
       <div class="card">
-        <div class="tab-section-title">Backup &amp; Restore</div>
-        <a href="/settings_export" class="btn-secondary" style="display:block;text-align:center;text-decoration:none;margin-top:0">Download Backup</a>
+        <div class="tab-section-title">Settings file</div>
+        <a href="/settings_export" class="btn-secondary" style="display:block;text-align:center;text-decoration:none;margin-top:0">Download backup</a>
         <label class="btn-secondary" style="display:block;text-align:center;cursor:pointer">
-          Restore From File
+          Restore from file
           <input type="file" accept=".txt" onchange="restoreSettings(this)" style="display:none">
         </label>
-        <p class="hint" style="margin-top:var(--sp-3)">Backs up every Brew/Steam/preset/schedule/MQTT setting to a plain text file. Restoring overwrites current settings and reboots if MQTT config is included - cheap insurance before an autotune run or firmware experiment.</p>
+        <p class="hint" style="margin-top:var(--sp-3)">Brew/Steam/schedule/MQTT settings. Named shot profiles live in a separate file and are not included here.</p>
       </div>
+    </div>
     </main>
 
     <footer class="footer">
@@ -881,10 +948,10 @@ const char *index_html = R"rawliteral(
   </div>
 
   <nav class="tabbar" role="tablist" aria-label="Sections">
-    <button class="tab active" role="tab" aria-selected="true" aria-controls="view-now" id="tab-now" data-tab="now"><span class="tab-icon">&#9749;</span><span>Now</span></button>
-    <button class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="view-tune" id="tab-tune" data-tab="tune"><span class="tab-icon">&#9881;</span><span>Tune</span></button>
-    <button class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="view-history" id="tab-history" data-tab="history"><span class="tab-icon">&#8987;</span><span>History</span></button>
-    <button class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="view-settings" id="tab-settings" data-tab="settings"><span class="tab-icon">&#9776;</span><span>Settings</span></button>
+    <button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="view-now" id="tab-now" data-tab="now"><span class="tab-icon" aria-hidden="true">&#9749;</span><span>Now</span></button>
+    <button type="button" class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="view-tune" id="tab-tune" data-tab="tune"><span class="tab-icon" aria-hidden="true">&#9881;</span><span>Tune</span></button>
+    <button type="button" class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="view-history" id="tab-history" data-tab="history"><span class="tab-icon" aria-hidden="true">&#8987;</span><span>History</span></button>
+    <button type="button" class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="view-settings" id="tab-settings" data-tab="settings"><span class="tab-icon" aria-hidden="true">&#9776;</span><span>Settings</span></button>
   </nav>
 
 <script>
@@ -896,6 +963,29 @@ function setVal(id, v) {
   }
 }
 function clamp(x) { return Math.max(0, Math.min(100, x)); }
+function setText(id, v) {
+  var el = document.getElementById(id);
+  if (el) el.textContent = v;
+}
+function showBanner(id, on, text) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  if (text !== undefined && text !== null) el.textContent = text;
+  el.style.display = on ? "flex" : "none";
+}
+function xhr(url, done) {
+  var req = new XMLHttpRequest();
+  req.timeout = 8000;
+  req.onreadystatechange = function () {
+    if (req.readyState !== 4) return;
+    if (done) done(req.status, req.responseText);
+  };
+  req.ontimeout = function () { if (done) done(0, ""); };
+  req.onerror = function () { if (done) done(0, ""); };
+  req.open("GET", url, true);
+  req.send();
+  return req;
+}
 
 // Every plain settings form (action="/update", method="GET") is
 // intercepted here and sent via XHR instead, so saving no longer does a
@@ -914,21 +1004,16 @@ document.addEventListener("submit", function (e) {
   for (var i = 0; i < form.elements.length; i++) {
     var el = form.elements[i];
     if (!el.name) continue;
+    if (el.name === "mqtt_pass" && !el.value) continue;
     parts.push(encodeURIComponent(el.name) + "=" + encodeURIComponent(el.value));
   }
   var btn = form.querySelector("button[type=submit]");
   var isMqtt = !!form.querySelector("#input_mqtt_server");
-  var xhttp = new XMLHttpRequest();
-  if (isMqtt) {
-    showSaveConfirm(btn, "Restarting...", false);
-  } else {
-    xhttp.onreadystatechange = function () {
-      if (xhttp.readyState !== 4) return;
-      showSaveConfirm(btn, xhttp.status === 200 ? "Saved" : "Save failed", xhttp.status !== 200);
-    };
-  }
-  xhttp.open("GET", "/update?" + parts.join("&"), true);
-  xhttp.send();
+  if (isMqtt) showSaveConfirm(btn, "Restarting...", false);
+  xhr("/update?" + parts.join("&"), function (status) {
+    if (isMqtt) return;
+    showSaveConfirm(btn, status === 200 ? "Saved" : "Save failed", status !== 200);
+  });
 });
 
 function showSaveConfirm(btn, text, isError) {
@@ -967,6 +1052,23 @@ function showTab(name) {
   var tabs = document.querySelectorAll(".tab");
   for (var i = 0; i < tabs.length; i++) {
     tabs[i].addEventListener("click", (function (t) { return function () { showTab(t.dataset.tab); }; })(tabs[i]));
+  }
+  var tablist = document.querySelector(".tabbar");
+  if (tablist) {
+    tablist.addEventListener("keydown", function (e) {
+      var list = Array.prototype.slice.call(document.querySelectorAll(".tab"));
+      var idx = list.indexOf(document.activeElement);
+      if (idx < 0) return;
+      var next = idx;
+      if (e.key === "ArrowRight" || e.key === "ArrowDown") next = (idx + 1) % list.length;
+      else if (e.key === "ArrowLeft" || e.key === "ArrowUp") next = (idx - 1 + list.length) % list.length;
+      else if (e.key === "Home") next = 0;
+      else if (e.key === "End") next = list.length - 1;
+      else return;
+      e.preventDefault();
+      showTab(list[next].dataset.tab);
+      list[next].focus();
+    });
   }
 })();
 showTab(location.hash.slice(1));
@@ -1082,6 +1184,7 @@ function formatElapsed(ms) {
 
 var lastUpdateTime = null;
 var lastAutotuneState = null; // tracks transitions, so the force-refresh below fires once
+var pageLoadedAt = Date.now();
 
 // Shot timer: shotRunning/shotElapsedBaseMs are refreshed from each /status
 // poll; the 1s ticker below interpolates smoothly between polls rather than
@@ -1129,47 +1232,54 @@ setInterval(function () {
 var shotsCache = [];
 
 function shotNotesSummary(s) {
-  if (!s.bean && !s.rating && !s.notes) return "<span class='hint-link'>+ Add</span>";
-  var stars = s.rating > 0 ? "&#9733;".repeat(s.rating) : "";
-  return "<b>" + stars + "</b> " + (s.bean || "");
+  if (!s.bean && !s.rating && !s.notes) return "+ Add";
+  var stars = s.rating > 0 ? "★".repeat(s.rating) : "";
+  return (stars ? stars + " " : "") + (s.bean || "Notes");
 }
 
 function fetchShotHistory() {
-  var xhttp = new XMLHttpRequest();
-  xhttp.onreadystatechange = function () {
-    if (this.readyState == 4 && this.status == 200) {
-      shotsCache = JSON.parse(this.responseText);
-      var body = document.getElementById("shot_history_body");
-      var table = document.getElementById("shot_history_table");
-      var empty = document.getElementById("shot_history_empty");
-      if (!shotsCache.length) {
-        table.style.display = "none";
-        empty.style.display = "block";
-        return;
-      }
-      empty.style.display = "none";
-      table.style.display = "table";
-      body.innerHTML = "";
-      // Pair each shot with its original (oldest-first) index BEFORE
-      // reversing for newest-first display, so edits write back to the
-      // right row on the device.
-      shotsCache.map(function (s, i) { return { s: s, idx: i }; })
-        .reverse().slice(0, 15).forEach(function (entry) {
-        var s = entry.s;
-        var tr = document.createElement("tr");
-        var when = new Date(s.ts * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-        var dur = formatElapsed(s.duration_ms);
-        var weight = s.weight > 0 ? s.weight.toFixed(1) + "g" : "&mdash;";
-        var endTemp = s.end_temp > 0 ? s.end_temp.toFixed(1) : "&mdash;";
-        tr.innerHTML = "<td>" + when + "</td><td class='num'>" + dur + "</td><td class='num'>" + s.peak_temp.toFixed(1) + "</td><td class='num'>" + endTemp + "</td><td class='num'>" + weight + "</td>" +
-          "<td onclick='editShotNotes(" + entry.idx + ")' style='cursor:pointer'>" + shotNotesSummary(s) + "</td>";
-        body.appendChild(tr);
-      });
-      drawShotTrendChart(shotsCache.slice(-20)); // oldest-first, most recent 20
+  xhr("/shots", function (status, text) {
+    if (status !== 200) return;
+    try { shotsCache = JSON.parse(text); } catch (err) { return; }
+    var body = document.getElementById("shot_history_body");
+    var table = document.getElementById("shot_history_table");
+    var empty = document.getElementById("shot_history_empty");
+    var weightTh = document.getElementById("shot_weight_th");
+    if (!shotsCache.length) {
+      table.style.display = "none";
+      empty.style.display = "block";
+      return;
     }
-  };
-  xhttp.open("GET", "/shots", true);
-  xhttp.send();
+    empty.style.display = "none";
+    table.style.display = "table";
+    var showWeight = shotsCache.some(function (s) { return s.weight > 0; });
+    if (weightTh) weightTh.hidden = !showWeight;
+    body.textContent = "";
+    shotsCache.map(function (s, i) { return { s: s, idx: i }; })
+      .reverse().slice(0, 15).forEach(function (entry) {
+      var s = entry.s;
+      var tr = document.createElement("tr");
+      function td(text, cls) {
+        var cell = document.createElement("td");
+        if (cls) cell.className = cls;
+        cell.textContent = text;
+        return cell;
+      }
+      var when = new Date(s.ts * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+      tr.appendChild(td(when));
+      tr.appendChild(td(formatElapsed(s.duration_ms), "num"));
+      tr.appendChild(td(s.peak_temp.toFixed(1), "num"));
+      tr.appendChild(td(s.end_temp > 0 ? s.end_temp.toFixed(1) : "—", "num"));
+      if (showWeight) tr.appendChild(td(s.weight > 0 ? s.weight.toFixed(1) + "g" : "—", "num"));
+      var notesTd = document.createElement("td");
+      notesTd.style.cursor = "pointer";
+      notesTd.textContent = shotNotesSummary(s);
+      notesTd.addEventListener("click", function () { editShotNotes(entry.idx); });
+      tr.appendChild(notesTd);
+      body.appendChild(tr);
+    });
+    drawShotTrendChart(shotsCache.slice(-20));
+  });
 }
 fetchShotHistory();
 
@@ -1197,15 +1307,10 @@ function submitShotNotes(ev) {
   q += "&shot_note_grind=" + encodeURIComponent(document.getElementById("input_shot_note_grind").value);
   q += "&shot_note_rating=" + document.getElementById("input_shot_note_rating").value;
   q += "&shot_note_text=" + encodeURIComponent(document.getElementById("input_shot_note_text").value);
-  var xhttp = new XMLHttpRequest();
-  xhttp.open("GET", "/update?" + q, true);
-  xhttp.onreadystatechange = function () {
-    if (this.readyState == 4) {
-      document.getElementById("shot_notes_card").hidden = true;
-      fetchShotHistory();
-    }
-  };
-  xhttp.send();
+  xhr("/update?" + q, function () {
+    document.getElementById("shot_notes_card").hidden = true;
+    fetchShotHistory();
+  });
 }
 
 // Last known Brew target, refreshed by the main /status poll below - drawn
@@ -1233,9 +1338,7 @@ function syncSchedTz(serverValue) {
   if (schedTzSyncedOnce || serverValue === browserTzOffsetMin) return;
   schedTzSyncedOnce = true;
   if (serverValue !== browserTzOffsetMin) {
-    var xhttp = new XMLHttpRequest();
-    xhttp.open("GET", "/update?sched_tz_min=" + browserTzOffsetMin, true);
-    xhttp.send();
+    xhr("/update?sched_tz_min=" + browserTzOffsetMin);
   }
 }
 
@@ -1318,255 +1421,287 @@ function drawShotTrendChart(shots) {
 setInterval(function () {
   var el = document.getElementById("last_updated");
   if (!el) return;
-  if (lastUpdateTime === null) { el.textContent = "--"; return; }
+  if (lastUpdateTime === null) {
+    el.textContent = "--";
+    var waited = Math.round((Date.now() - pageLoadedAt) / 1000);
+    var neverConnected = waited > 6;
+    showBanner("offline_banner", neverConnected);
+    var appBoot = document.getElementById("app_root");
+    if (appBoot) appBoot.classList.toggle("degraded", neverConnected);
+    return;
+  }
   var secs = Math.round((Date.now() - lastUpdateTime) / 1000);
   el.textContent = secs + "s ago";
-  el.style.color = secs > 6 ? "var(--red)" : "var(--text-dim)";
+  el.style.color = secs > 6 ? "var(--danger)" : "var(--text-dim)";
+  var stale = lastUpdateTime !== null && secs > 6;
+  showBanner("offline_banner", stale);
+  var app = document.getElementById("app_root");
+  if (app) app.classList.toggle("degraded", stale);
 }, 1000);
 
-setInterval(function () {
-  var xhttp = new XMLHttpRequest();
-  xhttp.onreadystatechange = function() {
-    if (this.readyState == 4 && this.status == 200) {
-      lastUpdateTime = Date.now();
-      var json = JSON.parse(this.responseText);
-      var temp = json.temp, target = json.target, output = json.output;
-      // Output is on a 0-1000 scale (ms within the 1000ms SSR window) -
-      // divide by 10 to get an actual 0-100% duty cycle for display.
-      var outputPct = output / 10;
-      // "off" means no target at all, full stop - regardless of what the
-      // backend's Setpoint variable happens to still hold. setOpMode(OFF)
-      // stops the heater but never resets Setpoint, so `target` in the JSON
-      // is stale leftover from the last active profile, not a real target -
-      // gate every target-driven display on the mode itself, not just
-      // whether that stale value happens to be nonzero.
-      var mode = json.opmode; // "off" | "brew" | "steam"
-      var hasTarget = mode !== "off" && target > 0;
+var statusInflight = false;
+var lastZcCount = null;
+var lastZcAt = null;
+var zcHz = 0;
 
-      if (!firstStatusReceived) {
-        firstStatusReceived = true;
-        var skeletons = document.querySelectorAll(".skeleton");
-        for (var s = 0; s < skeletons.length; s++) skeletons[s].classList.remove("skeleton");
-      }
+function applyModeButtons(mode) {
+  document.getElementById("btn_off").classList.toggle("active", mode === "off");
+  document.getElementById("btn_brew").classList.toggle("active", mode === "brew");
+  document.getElementById("btn_steam").classList.toggle("active", mode === "steam");
+  document.getElementById("btn_off").setAttribute("aria-pressed", mode === "off" ? "true" : "false");
+  document.getElementById("btn_brew").setAttribute("aria-pressed", mode === "brew" ? "true" : "false");
+  document.getElementById("btn_steam").setAttribute("aria-pressed", mode === "steam" ? "true" : "false");
+}
 
-      document.getElementById("fault_banner").style.display = json.fault ? "flex" : "none";
-      document.getElementById("temp").innerHTML = json.fault ? "--" : temp.toFixed(1);
-      document.getElementById("target").innerHTML = hasTarget ? target.toFixed(1) : "--";
-      document.getElementById("output").innerHTML = outputPct.toFixed(0);
-      trackPhaseMarkers(json.shot_phase, json.shot_in_progress);
-      drawSparkline(json.history, hasTarget ? target : null);
-      // Only "pressure" phase exposes a ramp/hold target via this JSON API
-      // (a later decline sub-stage isn't distinguished from "pressure" here) -
-      // no target line outside that phase or when no pressure profile ran.
-      var pressureTarget = (json.press_enabled && json.shot_phase === "pressure") ? json.press_ramp_bar : null;
-      drawPressureSparkline(json.pressure_history, pressureTarget);
-      var pLabel = document.getElementById("pressure_label");
-      if (pLabel) pLabel.textContent = (json.pressure_fault ? "fault" : json.pressure.toFixed(2) + " bar");
+function applyShotButton(running) {
+  var btnShot = document.getElementById("btn_shot");
+  btnShot.textContent = running ? "Stop Shot" : "Start Shot";
+  btnShot.classList.toggle("running", running);
+}
 
-      // Temperature ring - fill amount reuses the same ratio the linear bar
-      // used before; color is the functional "heating / ready / over" signal,
-      // readable at a glance without parsing the number.
-      var tempPct = (temp > 0 && hasTarget) ? clamp((temp / target) * 100) : 0;
-      var ring = document.getElementById("temp_ring_fill");
-      var RING_CIRCUMFERENCE = 603; // 2*pi*96, matches the SVG circle's r=96
-      ring.style.strokeDashoffset = RING_CIRCUMFERENCE * (1 - tempPct / 100);
-      ring.classList.remove("heating", "ready", "over");
-      if (!json.fault && temp > 0 && hasTarget) {
-        var READY_MARGIN_C = 1.0;
-        if (temp < target - READY_MARGIN_C) ring.classList.add("heating");
-        else if (temp > target + READY_MARGIN_C) ring.classList.add("over");
-        else ring.classList.add("ready");
-      }
+function applyStatus(json) {
+  lastUpdateTime = Date.now();
+  showBanner("offline_banner", false);
+  var app = document.getElementById("app_root");
+  if (app) app.classList.remove("degraded");
 
-      // Pressure ring - fill is a fixed 0-16 bar scale (this machine's
-      // safety-valve rating - a real manometer reading, not %-of-target,
-      // since 9 bar would only ever show ~56% full and never look "done").
-      // Color instead answers "how close to the 9 bar brew target", and
-      // only while a shot is actually running - otherwise it's just idle,
-      // same as the temp ring with no active target.
-      var PRESSURE_GAUGE_MAX_BAR = 16;
-      var PRESSURE_BREW_TARGET_BAR = 9;
-      var pressureVal = json.pressure;
-      var pressurePct = json.pressure_fault ? 0 : clamp((pressureVal / PRESSURE_GAUGE_MAX_BAR) * 100);
-      var pRing = document.getElementById("pressure_ring_fill");
-      if (pRing) {
-        pRing.style.strokeDashoffset = RING_CIRCUMFERENCE * (1 - pressurePct / 100);
-        pRing.classList.remove("heating", "ready", "over");
-        if (!json.pressure_fault && json.shot_in_progress) {
-          var PRESSURE_READY_MARGIN_BAR = 1.5;
-          if (pressureVal < PRESSURE_BREW_TARGET_BAR - PRESSURE_READY_MARGIN_BAR) pRing.classList.add("heating");
-          else if (pressureVal > PRESSURE_BREW_TARGET_BAR + PRESSURE_READY_MARGIN_BAR) pRing.classList.add("over");
-          else pRing.classList.add("ready");
-        }
-      }
-      var pGaugeVal = document.getElementById("pressure_gauge_val");
-      if (pGaugeVal) pGaugeVal.innerHTML = json.pressure_fault ? "--" : pressureVal.toFixed(1);
+  var temp = json.temp, target = json.target, output = json.output;
+  var outputPct = output / 10;
+  var mode = json.opmode;
+  var hasTarget = mode !== "off" && target > 0;
+  var pumpPct = typeof json.pump_power === "number" ? json.pump_power : 0;
 
-      document.getElementById("output_bar").style.width = clamp(outputPct) + "%";
+  if (!firstStatusReceived) {
+    firstStatusReceived = true;
+    var skeletons = document.querySelectorAll(".skeleton");
+    for (var s = 0; s < skeletons.length; s++) skeletons[s].classList.remove("skeleton");
+  }
 
-      // Status
-      var pill = document.getElementById("status_pill");
-      var label = json.fault ? "Fault" : mode === "brew" ? "Brewing" : mode === "steam" ? "Steaming" : "Off";
-      document.getElementById("mode_status").innerHTML = label;
-      pill.className = "pill " + mode + (json.fault ? " fault" : "");
-      document.getElementById("btn_off").classList.toggle("active", mode === "off");
-      document.getElementById("btn_brew").classList.toggle("active", mode === "brew");
-      document.getElementById("btn_steam").classList.toggle("active", mode === "steam");
+  showBanner("fault_banner", !!json.fault);
+  setText("temp", json.fault ? "--" : temp.toFixed(1));
+  setText("target", hasTarget ? target.toFixed(1) : "--");
+  setText("output", outputPct.toFixed(0));
+  setText("pump_power", pumpPct.toFixed(0));
+  var pumpBar = document.getElementById("pump_bar");
+  if (pumpBar) pumpBar.style.width = clamp(pumpPct) + "%";
 
-      lastBrewTarget = json.brew_target;
+  trackPhaseMarkers(json.shot_phase, json.shot_in_progress);
+  drawSparkline(json.history, hasTarget ? target : null);
+  var pressureTarget = (json.press_enabled && json.shot_phase === "pressure") ? json.press_ramp_bar : null;
+  drawPressureSparkline(json.pressure_history, pressureTarget);
+  var pLabel = document.getElementById("pressure_label");
+  if (pLabel) pLabel.textContent = (json.pressure_fault ? "fault" : json.pressure.toFixed(2) + " bar");
 
-      // Sync form fields (once, unless user is editing)
-      setVal("input_brew_target", json.brew_target);
-      setVal("input_brew_kp", json.brew_kp);
-      setVal("input_brew_ki", json.brew_ki);
-      setVal("input_brew_kd", json.brew_kd);
-      setVal("input_brew_akp", json.brew_akp);
-      setVal("input_brew_aki", json.brew_aki);
-      setVal("input_brew_akd", json.brew_akd);
-      setVal("input_steam_target", json.steam_target);
-      setVal("input_steam_kp", json.steam_kp);
-      setVal("input_steam_ki", json.steam_ki);
-      setVal("input_steam_kd", json.steam_kd);
-      setVal("input_steam_max_safety", json.steam_max_safety);
-      setVal("input_press_kp", json.press_kp);
-      setVal("input_press_ki", json.press_ki);
-      setVal("input_press_kd", json.press_kd);
-      setVal("input_mqtt_server", json.mqtt_server || "");
-      setVal("input_mqtt_port", json.mqtt_port);
-      setVal("input_mqtt_user", json.mqtt_user || "");
-      setVal("input_mqtt_pass", json.mqtt_pass || "");
-      setVal("input_eco_min", json.eco_timeout_min);
-      setVal("input_steam_off_min", json.steam_auto_off_min);
-      setVal("input_shot_auto_stop", json.shot_auto_stop_sec);
+  var tempPct = (temp > 0 && hasTarget) ? clamp((temp / target) * 100) : 0;
+  var ring = document.getElementById("temp_ring_fill");
+  var RING_CIRCUMFERENCE = 603;
+  ring.style.strokeDashoffset = RING_CIRCUMFERENCE * (1 - tempPct / 100);
+  ring.classList.remove("heating", "ready", "over");
+  if (!json.fault && temp > 0 && hasTarget) {
+    var READY_MARGIN_C = 1.0;
+    if (temp < target - READY_MARGIN_C) ring.classList.add("heating");
+    else if (temp > target + READY_MARGIN_C) ring.classList.add("over");
+    else ring.classList.add("ready");
+  }
 
-      // Shot sub-label reflects the actual configured auto-stop, not a
-      // hardcoded window - "disabled" reads plainly when set to 0. While a
-      // shot is running, show the current phase instead (pre-infusion vs.
-      // extraction) - more useful in the moment than a static duration.
-      var shotLabel = document.getElementById("shot_auto_stop_label");
-      if (shotRunning && json.shot_phase === "preinfusion") {
-        shotLabel.innerHTML = "Pre-infusing&hellip;";
-      } else if (shotRunning && json.shot_phase === "extraction") {
-        shotLabel.innerHTML = "Extracting&hellip;";
-      } else {
-        shotLabel.innerHTML = json.shot_auto_stop_sec > 0 ? "Auto-stops at " + json.shot_auto_stop_sec + "s" : "Auto-stop disabled";
-      }
-
-      shotAutoStopSec = json.shot_auto_stop_sec;
-      activeProfileIndex = json.active_profile;
-      renderProfileChips();
-      renderProfileList();
-
-      // Scheduled warm-up - checkbox/select use .checked/.value directly
-      // (setVal() targets plain text/number inputs' .value + its "synced
-      // once" guard, which doesn't apply the same way to these two).
-      if (json.sched) {
-        json.sched.forEach(function (s, i) {
-          var cb = document.getElementById("input_sched" + i + "_en_cb");
-          if (cb && document.activeElement !== cb) cb.checked = s.en;
-          var timeStr = (s.hr < 10 ? "0" : "") + s.hr + ":" + (s.mn < 10 ? "0" : "") + s.mn;
-          setVal("input_sched" + i + "_time", timeStr);
-          var steamSel = document.getElementById("input_sched" + i + "_steam");
-          if (steamSel && document.activeElement !== steamSel) steamSel.value = s.st ? "1" : "0";
-        });
-      }
-      // Timezone offset is auto-detected from the browser (see syncSchedTz()
-      // below), not user-entered - this hidden field just carries that
-      // detected value along whenever "Save Schedule Times" submits the
-      // time/mode fields, so it's never accidentally overwritten by a stale
-      // value.
-      document.getElementById("input_sched_tz_min").value = browserTzOffsetMin;
-      syncSchedTz(json.sched_tz_min);
-
-      // Eco / auto-sleep banner - label matches whichever mode's timeout
-      // actually fired (Brew's eco timeout vs Steam's much-shorter auto-off).
-      // Dismissing it (dismissSleepBanner()) is separate from waking the
-      // heater back up - sleepBannerDismissed resets the moment the device
-      // isn't asleep any more, so a genuinely new sleep event still shows.
-      if (!json.auto_sleeping) sleepBannerDismissed = false;
-      document.getElementById("sleep_banner").style.display =
-        (json.auto_sleeping && !sleepBannerDismissed) ? "flex" : "none";
-      if (json.auto_sleeping) {
-        document.getElementById("sleep_banner_text").innerHTML = json.asleep_from === "steam"
-          ? "&#9866; Steam off &middot; Heater off &mdash; idle timeout"
-          : "&#9866; Asleep (eco timeout) &mdash; heater off";
-      }
-
-      // Autotune status
-      var atBtn = document.getElementById("btn_autotune");
-      var atStatus = document.getElementById("autotune_status");
-      if (json.autotune_state === "running") {
-        atBtn.disabled = false;
-        atBtn.textContent = "⏹ Stop Auto-Tune";
-        atBtn.onclick = stopAutotune;
-        atBtn.classList.add("running");
-        atStatus.textContent = "Autotuning... " + (json.autotune_message || "");
-      } else {
-        atBtn.disabled = (mode === "off");
-        atBtn.textContent = "⚡ Start Auto-Tune";
-        atBtn.onclick = startAutotune;
-        atBtn.classList.remove("running");
-        if (json.autotune_state === "done_ok") {
-          atStatus.textContent = json.autotune_message || "Autotune complete";
-        } else if (json.autotune_state === "done_fail") {
-          atStatus.textContent = json.autotune_message || "Autotune failed";
-        } else {
-          atStatus.textContent = "";
-        }
-      }
-
-      // The moment autotune finishes successfully, force the tuned profile's
-      // Kp/Ki/Kd input boxes to actually show the new numbers - setVal()'s
-      // "sync once" guard (so a field being actively edited isn't clobbered)
-      // would otherwise leave them showing the stale pre-autotune values,
-      // even though the status message above already prints the new ones.
-      if (json.autotune_state === "done_ok" && lastAutotuneState !== "done_ok") {
-        var p = (mode === "steam") ? "steam" : "brew"; // autotune always runs against the currently-active mode
-        document.getElementById("input_" + p + "_kp").value = json[p + "_kp"];
-        document.getElementById("input_" + p + "_ki").value = json[p + "_ki"];
-        document.getElementById("input_" + p + "_kd").value = json[p + "_kd"];
-      }
-      lastAutotuneState = json.autotune_state;
-
-      // Shot timer (shotAutoStopSec is set earlier, alongside the profile sync)
-      shotRunning = json.shot_in_progress;
-      shotElapsedBaseMs = json.shot_elapsed_ms;
-      shotElapsedCapturedAt = Date.now();
-      var btnShot = document.getElementById("btn_shot");
-      btnShot.textContent = shotRunning ? "Stop Shot" : "Start Shot";
-      btnShot.classList.toggle("running", shotRunning);
-      if (prevShotRunning && !shotRunning) fetchShotHistory(); // shot just ended
-      prevShotRunning = shotRunning;
-
-      // Maintenance / descale
-      setVal("input_descale_shots", json.descale_shot_threshold);
-      setVal("input_descale_days", json.descale_day_threshold);
-      document.getElementById("descale_shots").textContent = json.shot_count;
-      document.getElementById("descale_days").textContent = json.days_since_descale >= 0 ? json.days_since_descale : "--";
-      document.getElementById("descale_banner_top").style.display = json.descale_due ? "flex" : "none";
-
-      document.getElementById("fw_build").textContent = json.fw_build;
+  var PRESSURE_GAUGE_MAX_BAR = 16;
+  var pressureGoal = (json.press_enabled && json.press_ramp_bar > 0) ? json.press_ramp_bar : 9;
+  var pressureVal = json.pressure;
+  var pressurePct = json.pressure_fault ? 0 : clamp((pressureVal / PRESSURE_GAUGE_MAX_BAR) * 100);
+  var pRing = document.getElementById("pressure_ring_fill");
+  if (pRing) {
+    pRing.style.strokeDashoffset = RING_CIRCUMFERENCE * (1 - pressurePct / 100);
+    pRing.classList.remove("heating", "ready", "over");
+    if (!json.pressure_fault && json.shot_in_progress) {
+      var PRESSURE_READY_MARGIN_BAR = 1.5;
+      if (pressureVal < pressureGoal - PRESSURE_READY_MARGIN_BAR) pRing.classList.add("heating");
+      else if (pressureVal > pressureGoal + PRESSURE_READY_MARGIN_BAR) pRing.classList.add("over");
+      else pRing.classList.add("ready");
     }
-  };
-  xhttp.open("GET", "/status", true);
-  xhttp.send();
-}, 2000);
+  }
+  setText("pressure_gauge_val", json.pressure_fault ? "--" : pressureVal.toFixed(1));
+  var pCap = document.getElementById("pressure_target_caption");
+  if (pCap) {
+    pCap.textContent = json.shot_in_progress && json.press_enabled
+      ? "Target " + pressureGoal.toFixed(1) + " bar"
+      : "Pressure";
+  }
+
+  document.getElementById("output_bar").style.width = clamp(outputPct) + "%";
+
+  var pill = document.getElementById("status_pill");
+  var label = json.fault ? "Fault" : mode === "brew" ? "Brewing" : mode === "steam" ? "Steaming" : "Off";
+  setText("mode_status", label);
+  pill.className = "pill " + mode + (json.fault ? " fault" : "");
+  applyModeButtons(mode);
+
+  lastBrewTarget = json.brew_target;
+
+  setVal("input_brew_target", json.brew_target);
+  setVal("input_brew_kp", json.brew_kp);
+  setVal("input_brew_ki", json.brew_ki);
+  setVal("input_brew_kd", json.brew_kd);
+  setVal("input_brew_akp", json.brew_akp);
+  setVal("input_brew_aki", json.brew_aki);
+  setVal("input_brew_akd", json.brew_akd);
+  setVal("input_steam_target", json.steam_target);
+  setVal("input_steam_kp", json.steam_kp);
+  setVal("input_steam_ki", json.steam_ki);
+  setVal("input_steam_kd", json.steam_kd);
+  setVal("input_steam_max_safety", json.steam_max_safety);
+  setVal("input_press_kp", json.press_kp);
+  setVal("input_press_ki", json.press_ki);
+  setVal("input_press_kd", json.press_kd);
+  setVal("input_mqtt_server", json.mqtt_server || "");
+  setVal("input_mqtt_port", json.mqtt_port);
+  setVal("input_mqtt_user", json.mqtt_user || "");
+  setVal("input_eco_min", json.eco_timeout_min);
+  setVal("input_steam_off_min", json.steam_auto_off_min);
+  setVal("input_shot_auto_stop", json.shot_auto_stop_sec);
+  var passHint = document.getElementById("mqtt_pass_hint");
+  if (passHint) passHint.hidden = !json.mqtt_pass_set;
+
+  var ntpBanner = document.getElementById("ntp_banner");
+  if (ntpBanner) ntpBanner.style.display = json.ntp_synced ? "none" : "flex";
+
+  var now = Date.now();
+  if (typeof json.dimmer_zc_count === "number") {
+    if (lastZcCount !== null && lastZcAt !== null) {
+      var dt = (now - lastZcAt) / 1000;
+      if (dt > 0) zcHz = (json.dimmer_zc_count - lastZcCount) / dt;
+    }
+    lastZcCount = json.dimmer_zc_count;
+    lastZcAt = now;
+  }
+
+  var pumpMsg = "";
+  if (json.pressure_ceiling_tripped) {
+    pumpMsg = json.pressure_fault
+      ? "Pump cut — pressure sensor fault or reading over the safety ceiling."
+      : "Pump cut — pressure over the safety ceiling.";
+    showBanner("pressure_banner", true, pumpMsg);
+  } else if (json.pressure_fault && json.shot_in_progress) {
+    showBanner("pressure_banner", true, "Pressure sensor fault — closed-loop pressure control is disabled.");
+  } else {
+    showBanner("pressure_banner", false);
+  }
+
+  var brewSwitchOff = json.shot_in_progress && zcHz < 20 && lastZcCount !== null;
+  if (brewSwitchOff) {
+    showBanner("pump_banner", true, "Flip the machine's Brew switch — the dimmer has no mains power.");
+  } else if (json.shot_in_progress && pumpPct < 1 && zcHz >= 20 && !json.pressure_ceiling_tripped) {
+    showBanner("pump_banner", true, "Pump commanded off while the Brew switch is on.");
+  } else {
+    showBanner("pump_banner", false);
+  }
+
+  var shotLabel = document.getElementById("shot_auto_stop_label");
+  if (json.shot_in_progress && json.shot_phase === "preinfusion") {
+    shotLabel.textContent = "Pre-infusing…";
+  } else if (json.shot_in_progress && json.shot_phase === "pressure") {
+    shotLabel.textContent = "Pressure " + (json.press_ramp_bar ? json.press_ramp_bar.toFixed(1) + " bar" : "hold");
+  } else if (json.shot_in_progress && json.shot_phase === "extraction") {
+    shotLabel.textContent = "Extracting…";
+  } else {
+    shotLabel.textContent = json.shot_auto_stop_sec > 0 ? "Auto-stops at " + json.shot_auto_stop_sec + "s" : "Auto-stop disabled";
+  }
+
+  shotAutoStopSec = json.shot_auto_stop_sec;
+  if (json.active_profile !== activeProfileIndex) {
+    activeProfileIndex = json.active_profile;
+    markActiveProfile();
+  }
+
+  if (json.sched) {
+    json.sched.forEach(function (s, i) {
+      var cb = document.getElementById("input_sched" + i + "_en_cb");
+      if (cb && document.activeElement !== cb) cb.checked = s.en;
+      var timeStr = (s.hr < 10 ? "0" : "") + s.hr + ":" + (s.mn < 10 ? "0" : "") + s.mn;
+      setVal("input_sched" + i + "_time", timeStr);
+      var steamSel = document.getElementById("input_sched" + i + "_steam");
+      if (steamSel && document.activeElement !== steamSel) steamSel.value = s.st ? "1" : "0";
+    });
+  }
+  document.getElementById("input_sched_tz_min").value = browserTzOffsetMin;
+  syncSchedTz(json.sched_tz_min);
+
+  if (!json.auto_sleeping) sleepBannerDismissed = false;
+  document.getElementById("sleep_banner").style.display =
+    (json.auto_sleeping && !sleepBannerDismissed) ? "flex" : "none";
+  if (json.auto_sleeping) {
+    setText("sleep_banner_text", json.asleep_from === "steam"
+      ? "Steam off · Heater off — idle timeout"
+      : "Asleep (eco timeout) — heater off");
+  }
+
+  var atBtn = document.getElementById("btn_autotune");
+  var atStatus = document.getElementById("autotune_status");
+  if (json.autotune_state === "running") {
+    atBtn.disabled = false;
+    atBtn.textContent = "Stop Auto-Tune";
+    atBtn.onclick = stopAutotune;
+    atBtn.classList.add("running");
+    atStatus.textContent = "Autotuning… " + (json.autotune_message || "");
+  } else {
+    atBtn.disabled = (mode === "off");
+    atBtn.textContent = "Start Auto-Tune";
+    atBtn.onclick = startAutotune;
+    atBtn.classList.remove("running");
+    if (json.autotune_state === "done_ok") {
+      atStatus.textContent = json.autotune_message || "Autotune complete";
+    } else if (json.autotune_state === "done_fail") {
+      atStatus.textContent = json.autotune_message || "Autotune failed";
+    } else {
+      atStatus.textContent = "";
+    }
+  }
+
+  if (json.autotune_state === "done_ok" && lastAutotuneState !== "done_ok") {
+    var p = (mode === "steam") ? "steam" : "brew";
+    document.getElementById("input_" + p + "_kp").value = json[p + "_kp"];
+    document.getElementById("input_" + p + "_ki").value = json[p + "_ki"];
+    document.getElementById("input_" + p + "_kd").value = json[p + "_kd"];
+  }
+  lastAutotuneState = json.autotune_state;
+
+  shotRunning = json.shot_in_progress;
+  shotElapsedBaseMs = json.shot_elapsed_ms;
+  shotElapsedCapturedAt = Date.now();
+  applyShotButton(shotRunning);
+  if (prevShotRunning && !shotRunning) fetchShotHistory();
+  prevShotRunning = shotRunning;
+
+  setVal("input_descale_shots", json.descale_shot_threshold);
+  setVal("input_descale_days", json.descale_day_threshold);
+  setText("descale_shots", json.shot_count);
+  setText("descale_days", json.days_since_descale >= 0 ? json.days_since_descale : "--");
+  showBanner("descale_banner_top", !!json.descale_due);
+  setText("fw_build", json.fw_build);
+}
+
+function pollStatus() {
+  if (statusInflight) return;
+  statusInflight = true;
+  xhr("/status", function (status, text) {
+    statusInflight = false;
+    if (status !== 200) return;
+    var json;
+    try { json = JSON.parse(text); } catch (err) { return; }
+    applyStatus(json);
+  });
+}
+pollStatus();
+setInterval(pollStatus, 2000);
 
 function setMode(mode) {
-  var xhttp = new XMLHttpRequest();
-  xhttp.open("GET", "/update?mode=" + mode, true);
-  xhttp.send();
+  applyModeButtons(mode);
+  xhr("/update?mode=" + mode);
 }
 
 function wake() {
-  var xhttp = new XMLHttpRequest();
-  xhttp.open("GET", "/update?wake=1", true);
-  xhttp.send();
+  xhr("/update?wake=1");
 }
 
-// Dismissing the sleep banner just hides it - unlike Wake Up, it does NOT
-// resume heating. Client-side only (no request sent); see the /status poll
-// handler for where this flag gets reset once a new sleep event starts.
 var sleepBannerDismissed = false;
 function dismissSleepBanner() {
   sleepBannerDismissed = true;
@@ -1575,21 +1710,22 @@ function dismissSleepBanner() {
 
 function startAutotune() {
   if (!confirm("Start PID auto-tune for the current mode? The heater will cycle on/off repeatedly for several minutes. Stay nearby.")) return;
-  var xhttp = new XMLHttpRequest();
-  xhttp.open("GET", "/update?autotune=start", true);
-  xhttp.send();
+  xhr("/update?autotune=start");
 }
 
 function stopAutotune() {
-  var xhttp = new XMLHttpRequest();
-  xhttp.open("GET", "/update?autotune=stop", true);
-  xhttp.send();
+  xhr("/update?autotune=stop");
 }
 
 function toggleShot() {
-  var xhttp = new XMLHttpRequest();
-  xhttp.open("GET", "/update?shot=" + (shotRunning ? "stop" : "start"), true);
-  xhttp.send();
+  var next = !shotRunning;
+  shotRunning = next;
+  if (next) {
+    shotElapsedBaseMs = 0;
+    shotElapsedCapturedAt = Date.now();
+  }
+  applyShotButton(next);
+  xhr("/update?shot=" + (next ? "start" : "stop"));
 }
 
 // ============================================================================
@@ -1597,20 +1733,29 @@ function toggleShot() {
 // ============================================================================
 var profilesCache = [];
 var activeProfileIndex = 0;
+var lastProfilesJson = "";
 
 function piSummary(p) {
-  return p.preinfusion ? p.pulses + "&times; " + (p.on_ms / 1000) + "s/" + (p.off_ms / 1000) + "s" : "None";
+  return p.preinfusion ? p.pulses + "× " + (p.on_ms / 1000) + "s/" + (p.off_ms / 1000) + "s" : "None";
+}
+
+function markActiveProfile() {
+  var chips = document.querySelectorAll("#profile_chip_row .btn-preset");
+  for (var i = 0; i < chips.length; i++) chips[i].classList.toggle("active", i === activeProfileIndex);
+  var rows = document.querySelectorAll("#profile_list_body .profile-row");
+  for (var j = 0; j < rows.length; j++) rows[j].classList.toggle("active", j === activeProfileIndex);
 }
 
 function renderProfileChips() {
   var row = document.getElementById("profile_chip_row");
-  if (!row || !profilesCache.length) return;
-  row.innerHTML = "";
+  if (!row) return;
+  row.textContent = "";
   profilesCache.forEach(function (p, i) {
     var btn = document.createElement("button");
+    btn.type = "button";
     btn.className = "btn-preset" + (i === activeProfileIndex ? " active" : "");
     btn.textContent = p.name;
-    btn.onclick = function () { applyProfile(i); };
+    btn.addEventListener("click", function () { applyProfile(i); });
     row.appendChild(btn);
   });
 }
@@ -1618,41 +1763,54 @@ function renderProfileChips() {
 function renderProfileList() {
   var body = document.getElementById("profile_list_body");
   if (!body) return;
-  body.innerHTML = "";
+  body.textContent = "";
   profilesCache.forEach(function (p, i) {
     var row = document.createElement("div");
     row.className = "profile-row" + (i === activeProfileIndex ? " active" : "");
-    row.innerHTML =
-      "<div class='profile-row-main'><b>" + p.name + "</b>" +
-      "<span>" + p.temp.toFixed(1) + "&deg;C &middot; " + p.auto_stop_sec + "s &middot; pre-infusion: " + piSummary(p) + "</span></div>" +
-      "<div class='profile-row-actions'>" +
-      "<button onclick='editProfile(" + i + ")' class='btn-chip-sm'>Edit</button>" +
-      "<button onclick='armDeleteProfile(this, " + i + ")' class='btn-chip-sm danger'>Delete</button>" +
-      "</div>";
+    var main = document.createElement("div");
+    main.className = "profile-row-main";
+    var nameEl = document.createElement("b");
+    nameEl.textContent = p.name;
+    var meta = document.createElement("span");
+    var extra = p.pressure_enabled ? " · " + p.pressure_ramp_bar + " bar" : "";
+    meta.textContent = p.temp.toFixed(1) + "°C · " + p.auto_stop_sec + "s · pre-infusion: " + piSummary(p) + extra;
+    main.appendChild(nameEl);
+    main.appendChild(meta);
+    var actions = document.createElement("div");
+    actions.className = "profile-row-actions";
+    var editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "btn-chip-sm";
+    editBtn.textContent = "Edit";
+    editBtn.addEventListener("click", function () { editProfile(i); });
+    var delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "btn-chip-sm danger";
+    delBtn.textContent = "Delete";
+    delBtn.addEventListener("click", function () { armDeleteProfile(delBtn, i); });
+    actions.appendChild(editBtn);
+    actions.appendChild(delBtn);
+    row.appendChild(main);
+    row.appendChild(actions);
     body.appendChild(row);
   });
 }
 
 function fetchProfiles() {
-  var xhttp = new XMLHttpRequest();
-  xhttp.onreadystatechange = function () {
-    if (this.readyState == 4 && this.status == 200) {
-      profilesCache = JSON.parse(this.responseText);
-      renderProfileChips();
-      renderProfileList();
-    }
-  };
-  xhttp.open("GET", "/profiles", true);
-  xhttp.send();
+  xhr("/profiles", function (status, text) {
+    if (status !== 200 || text === lastProfilesJson) return;
+    lastProfilesJson = text;
+    try { profilesCache = JSON.parse(text); } catch (err) { return; }
+    renderProfileChips();
+    renderProfileList();
+  });
 }
 fetchProfiles();
-drawProfilePreview();
 
 function applyProfile(idx) {
-  var xhttp = new XMLHttpRequest();
-  xhttp.open("GET", "/update?profile_apply=" + idx, true);
-  xhttp.onreadystatechange = function () { if (this.readyState == 4) fetchProfiles(); };
-  xhttp.send();
+  activeProfileIndex = idx;
+  markActiveProfile();
+  xhr("/update?profile_apply=" + idx, function () { lastProfilesJson = ""; fetchProfiles(); });
 }
 
 // Pump pattern preview - a step chart of pulses (from the form fields, live
@@ -1717,6 +1875,7 @@ function editProfile(idx) {
   document.getElementById("input_profile_press_decline_sec").value = p.pressure_decline_ms / 1000;
   document.getElementById("profile_form_title").textContent = "Edit \"" + p.name + "\"";
   document.getElementById("profile_form_submit").textContent = "Save Changes";
+  document.getElementById("profile_editor_card").hidden = false;
   document.getElementById("profile_editor_card").scrollIntoView({ behavior: "smooth", block: "center" });
   drawProfilePreview();
 }
@@ -1738,7 +1897,13 @@ function newProfileForm() {
   document.getElementById("input_profile_press_decline_sec").value = 8;
   document.getElementById("profile_form_title").textContent = "New Profile";
   document.getElementById("profile_form_submit").textContent = "Add Profile";
+  document.getElementById("profile_editor_card").hidden = false;
+  document.getElementById("profile_editor_card").scrollIntoView({ behavior: "smooth", block: "center" });
   drawProfilePreview();
+}
+
+function cancelProfileForm() {
+  document.getElementById("profile_editor_card").hidden = true;
 }
 
 // Arm-then-confirm instead of a native confirm() popup - first click arms
@@ -1756,10 +1921,7 @@ function armDeleteProfile(btn, idx) {
   if (profilesCache.length <= 1) { alert("Can't delete the last remaining profile."); return; }
   if (btn === armedDeleteBtn) {
     disarmDeleteProfile();
-    var xhttp = new XMLHttpRequest();
-    xhttp.open("GET", "/update?profile_delete=" + idx, true);
-    xhttp.onreadystatechange = function () { if (this.readyState == 4) fetchProfiles(); };
-    xhttp.send();
+    xhr("/update?profile_delete=" + idx, function () { lastProfilesJson = ""; fetchProfiles(); });
     return;
   }
   disarmDeleteProfile();
@@ -1794,34 +1956,31 @@ function submitProfileForm(ev) {
   var priorLabel = btn.textContent;
   btn.disabled = true;
   btn.textContent = "Saving…";
-  var xhttp = new XMLHttpRequest();
-  xhttp.open("GET", "/update?" + q, true);
-  xhttp.onreadystatechange = function () {
-    if (this.readyState != 4) return;
+  xhr("/update?" + q, function (status) {
+    lastProfilesJson = "";
     fetchProfiles();
-    btn.textContent = "Saved ✓";
-    setTimeout(function () { btn.disabled = false; btn.textContent = priorLabel; }, 1500);
-  };
-  xhttp.send();
+    btn.textContent = status === 200 ? "Saved" : "Save failed";
+    setTimeout(function () {
+      btn.disabled = false;
+      btn.textContent = priorLabel;
+      if (status === 200) document.getElementById("profile_editor_card").hidden = true;
+    }, 900);
+  });
 }
 
 function setSchedEnabled(i, checked) {
-  var xhttp = new XMLHttpRequest();
-  xhttp.open("GET", "/update?sched" + i + "_en=" + (checked ? "1" : "0"), true);
-  xhttp.send();
+  xhr("/update?sched" + i + "_en=" + (checked ? "1" : "0"));
 }
 
 function restoreSettings(input) {
   if (!input.files || !input.files.length) return;
-  if (!confirm("Restore settings from this backup file? This overwrites your current Brew/Steam/preset/schedule/MQTT settings and reboots if MQTT config is included.")) {
+  if (!confirm("Restore settings from this backup file? This overwrites your current Brew/Steam/schedule/MQTT settings and reboots if MQTT config is included.")) {
     input.value = "";
     return;
   }
   var reader = new FileReader();
   reader.onload = function () {
-    var xhttp = new XMLHttpRequest();
-    xhttp.open("GET", "/update?" + reader.result.trim(), true);
-    xhttp.send();
+    xhr("/update?" + reader.result.trim());
   };
   reader.readAsText(input.files[0]);
   input.value = "";
@@ -1829,16 +1988,12 @@ function restoreSettings(input) {
 
 function markDescaled() {
   if (!confirm("Reset the descale counters? Confirm you've just descaled the machine.")) return;
-  var xhttp = new XMLHttpRequest();
-  xhttp.open("GET", "/update?mark_descaled=1", true);
-  xhttp.send();
+  xhr("/update?mark_descaled=1");
 }
 
 function wifiReset() {
   if (!confirm("Reset WiFi settings and reboot? You'll need to rejoin the GaggiaBrewMasterESP_Setup network to reconfigure.")) return;
-  var xhttp = new XMLHttpRequest();
-  xhttp.open("GET", "/wifi_reset", true);
-  xhttp.send();
+  xhr("/wifi_reset");
 }
 
 document.getElementById("host").textContent = location.host;
@@ -1864,6 +2019,89 @@ const char *manifest_json = R"rawliteral({
 "theme_color":"#0e0b09",
 "icons":[{"src":"/icon.svg","sizes":"any","type":"image/svg+xml"}]
 })rawliteral";
+
+const char *firmware_html = R"fwhtml(
+<!DOCTYPE HTML><html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Firmware update</title>
+<style>
+  :root { --bg:#0e0b09; --surface:#1a1512; --border:#392e26; --text:#f6efe6; --muted:#b3a294; --primary:#d98c3f; --danger:#e5544b; --success:#48b583; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; padding:24px 16px; }
+  .wrap { max-width:440px; margin:0 auto; }
+  a { color:var(--primary); text-decoration:none; font-weight:600; }
+  h1 { font-size:17px; margin:0 0 8px; }
+  p { color:var(--muted); font-size:14px; line-height:1.5; }
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:24px; margin-top:16px; }
+  input[type=file] { width:100%; margin:12px 0 16px; color:var(--text); }
+  button, .submit { width:100%; border:0; cursor:pointer; padding:14px; border-radius:12px; font-size:15px; font-weight:700; color:#1a1206; background:var(--primary); }
+  button:disabled { opacity:.45; cursor:default; }
+  .bar { height:8px; border-radius:99px; background:#100d0b; border:1px solid var(--border); overflow:hidden; margin-top:16px; display:none; }
+  .bar > span { display:block; height:100%; width:0; background:var(--primary); }
+  .status { margin-top:12px; font-size:14px; font-weight:700; }
+  .status.err { color:var(--danger); }
+  .status.ok { color:var(--success); }
+  :focus { outline:2px solid #f2b46f; outline-offset:2px; }
+</style>
+</head><body>
+<div class="wrap">
+  <a href="/">Back to BrewMaster</a>
+  <div class="card">
+    <h1>Firmware update</h1>
+    <p>Upload a <code>firmware.bin</code> from a PlatformIO build. The heater is forced off for the transfer. Stay on this page until it reboots.</p>
+    <form id="fwform">
+      <label for="fwfile">Firmware file</label>
+      <input id="fwfile" type="file" name="update" accept=".bin" required>
+      <button type="submit" id="fwbtn" class="submit">Update firmware</button>
+    </form>
+    <div class="bar" id="fwbar"><span id="fwfill"></span></div>
+    <div class="status" id="fwstatus"></div>
+  </div>
+</div>
+<script>
+document.getElementById("fwform").addEventListener("submit", function (e) {
+  e.preventDefault();
+  var file = document.getElementById("fwfile").files[0];
+  if (!file) return;
+  var btn = document.getElementById("fwbtn");
+  var bar = document.getElementById("fwbar");
+  var fill = document.getElementById("fwfill");
+  var status = document.getElementById("fwstatus");
+  btn.disabled = true;
+  bar.style.display = "block";
+  status.textContent = "Uploading…";
+  status.className = "status";
+  var fd = new FormData();
+  fd.append("update", file);
+  var req = new XMLHttpRequest();
+  req.timeout = 180000;
+  req.upload.onprogress = function (ev) {
+    if (!ev.lengthComputable) return;
+    fill.style.width = Math.round((ev.loaded / ev.total) * 100) + "%";
+  };
+  req.onreadystatechange = function () {
+    if (req.readyState !== 4) return;
+    if (req.status === 200) {
+      status.textContent = req.responseText || "Update success. Restarting…";
+      status.className = "status ok";
+    } else {
+      status.textContent = "Update failed. Stay here and retry, or flash over USB.";
+      status.className = "status err";
+      btn.disabled = false;
+    }
+  };
+  req.onerror = req.ontimeout = function () {
+    status.textContent = "Connection lost during upload. If the board rebooted, wait and return to the dashboard. Otherwise retry.";
+    status.className = "status err";
+    btn.disabled = false;
+  };
+  req.open("POST", "/update_fw");
+  req.send(fd);
+});
+</script>
+</body></html>
+)fwhtml";
 
 // Snapshots every control-task-owned field under the lock first (see
 // config.h "Shared-state lock"), then builds JSON from the local copies
@@ -1973,7 +2211,7 @@ static void handleStatus(AsyncWebServerRequest *request) {
       ",\"mqtt_server\":\"" + preferences.getString("mqtt_server", "") + "\"";
   json += ",\"mqtt_port\":" + String(preferences.getInt("mqtt_port", 1883));
   json += ",\"mqtt_user\":\"" + preferences.getString("mqtt_user", "") + "\"";
-  json += ",\"mqtt_pass\":\"" + preferences.getString("mqtt_pass", "") + "\"";
+  json += ",\"mqtt_pass_set\":" + String(preferences.getString("mqtt_pass", "").length() > 0 ? "true" : "false");
   preferences.end();
 
   json += ",\"fw_build\":\"" + String(FIRMWARE_BUILD_TIMESTAMP) + "\"";
@@ -2372,7 +2610,7 @@ static void handleUpdate(AsyncWebServerRequest *request) {
   if (hasArg("mqtt_user")) {
     preferences.putString("mqtt_user", arg("mqtt_user"));
   }
-  if (hasArg("mqtt_pass")) {
+  if (hasArg("mqtt_pass") && arg("mqtt_pass").length() > 0) {
     preferences.putString("mqtt_pass", arg("mqtt_pass"));
   }
 
@@ -2578,13 +2816,9 @@ void setupWeb() {
 
   // OTA Update Form
   server.on("/firmware", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
-    String html = "<html><body><h2>OTA Update</h2>";
-    html += "<form method='POST' action='/update_fw' "
-            "enctype='multipart/form-data'>";
-    html += "<input type='file' name='update'>";
-    html += "<input type='submit' value='Update Firmware'>";
-    html += "</form></body></html>";
-    request->send(200, "text/html", html);
+    AsyncWebServerResponse *response = request->beginResponse(200, "text/html", firmware_html);
+    response->addHeader("Cache-Control", "no-store");
+    request->send(response);
   });
 
   // OTA Update Handler. Async by construction - unlike the old synchronous
