@@ -750,8 +750,8 @@ const char *index_html = R"rawliteral(
             <div class="field"><label for="input_profile_autostop">Auto-stop (sec)</label><input type="number" step="1" min="5" max="90" id="input_profile_autostop" value="27" oninput="drawProfilePreview()"></div>
           </div>
           <label class="check-row"><input type="checkbox" id="input_profile_pi_enabled" onchange="drawProfilePreview()"> Pulsed pre-infusion</label>
-          <p class="hint" style="margin-top:var(--sp-2)">Fills the basket gently until the puck is saturated, then extracts. Fill pressure, max time and soak are set in Settings &rarr; Pump power.</p>
-          <div class="field-row-3" style="margin-top:var(--sp-3)" hidden>
+          <p class="hint" style="margin-top:var(--sp-2)">Pulses the pump before extraction to wet the puck: each pulse runs at the pre-infusion pump power (Settings &rarr; Pump power) for "On", then stops for "Off". Remember to load the profile after saving it.</p>
+          <div class="field-row-3" style="margin-top:var(--sp-3)">
             <div class="field"><label for="input_profile_pi_pulses">Pulses</label><input type="number" step="1" min="0" max="10" id="input_profile_pi_pulses" value="3" oninput="drawProfilePreview()"></div>
             <div class="field"><label for="input_profile_pi_on">On (sec)</label><input type="number" step="0.1" min="0.2" max="5" id="input_profile_pi_on" value="1" oninput="drawProfilePreview()"></div>
             <div class="field"><label for="input_profile_pi_off">Off (sec)</label><input type="number" step="0.1" min="0.2" max="5" id="input_profile_pi_off" value="2" oninput="drawProfilePreview()"></div>
@@ -863,6 +863,7 @@ const char *index_html = R"rawliteral(
             <label for="input_pump_pi_pct">Pre-infusion pump power (%)</label>
             <input type="number" step="1" min="10" max="100" name="pump_pi_pct" id="input_pump_pi_pct" value="">
           </div>
+          <div id="pi_fill_fields" hidden>
           <div class="field">
             <label for="input_pi_fill_bar">Pre-infusion: fill until (bar)</label>
             <input type="number" step="0.1" min="1" max="4.5" name="pi_fill_bar" id="input_pi_fill_bar" value="">
@@ -875,9 +876,10 @@ const char *index_html = R"rawliteral(
             <label for="input_pi_soak_s">Pre-infusion: soak, pump off (s, 0 = none)</label>
             <input type="number" step="1" min="0" max="15" name="pi_soak_s" id="input_pi_soak_s" value="">
           </div>
+          </div>
           <button type="submit" class="submit">Save</button>
         </form>
-        <p class="hint" style="margin-top:var(--sp-3)">Percent of pump strokes allowed. This sets flow, not pressure: with a standard basket, 45% brew lands near 9 bar for a well-dialed shot (~36 g in 25-30 s). Too fast: grind finer; too slow: grind coarser - adjust grind before power. Pre-infusion (turned on per profile) fills at its own power until the sensor reads the fill pressure (at least 4 s, at most the max time), then soaks if set. Pressure readings are approximate (0-5 bar sensor).</p>
+        <p class="hint" style="margin-top:var(--sp-3)">Percent of pump strokes allowed. This sets flow, not pressure: with a standard basket, 45% brew lands near 9 bar for a well-dialed shot (~36 g in 25-30 s). Too fast: grind finer; too slow: grind coarser - adjust grind before power. Pre-infusion pulses (set per profile) run at the pre-infusion power. The current 0-5 bar sensor can't read brew pressure, so its reading shows near its ceiling during a shot.</p>
       </div>
 
       <div class="group-title">Power</div>
@@ -1600,6 +1602,8 @@ function applyStatus(json) {
   if (typeof json.pi_fill_bar === "number") setVal("input_pi_fill_bar", json.pi_fill_bar);
   if (typeof json.pi_fill_max_s === "number") setVal("input_pi_fill_max_s", json.pi_fill_max_s);
   if (typeof json.pi_soak_s === "number") setVal("input_pi_soak_s", json.pi_soak_s);
+  var piFill = document.getElementById("pi_fill_fields");
+  if (piFill) piFill.hidden = json.press_available === false;
   var passHint = document.getElementById("mqtt_pass_hint");
   if (passHint) passHint.hidden = !json.mqtt_pass_set;
 

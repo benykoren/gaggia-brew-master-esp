@@ -148,13 +148,18 @@
 #define PUMP_BREW_POWER_PCT_DEFAULT 45
 #define PUMP_PREINFUSION_POWER_PCT_DEFAULT 40
 
-// Pre-infusion fill (2026-10-01) - replaces the old on/off pulse pattern:
-// pump continuously at PUMP_PREINFUSION_POWER_PCT until the pressure sensor
-// sees the puck saturate (>= fill bar), then an optional soak (pump off),
-// then extraction. Same shape as Gaggiuino's "fill until 4 bar" and
-// GaggiMate's "fill until 3 bar" defaults, and it's the one place the 0-5
-// bar sensor is actually in range. Pulses moved too little water (4 x 1 s
-// ~= 16 ml) to even fill the headspace above the puck.
+// Pre-infusion has two modes, picked by PRESSURE_CLOSED_LOOP_AVAILABLE
+// (i.e. "is the fitted sensor good enough to trust"):
+//  - false (current 0-5 bar sensor): the profile's own pulses - "on" at
+//    PUMP_PREINFUSION_POWER_PCT for on_ms, pump off for off_ms, repeated.
+//    Tested 2026-10-01 with an EMPTY basket: the pump-outlet reading hit
+//    the sensor's ~1.6V ceiling within 0.3 s (pump stroke spikes exceed
+//    5 bar even with no puck), so a pressure exit fired at its 4 s minimum
+//    every time and could never detect puck saturation.
+//  - true (a 0-16 bar sensor): a pressure-terminated fill - pump at
+//    pre-infusion power until the reading reaches the fill bar, then an
+//    optional soak, like Gaggiuino's "fill until 4 bar" / GaggiMate's
+//    "fill until 3 bar" defaults.
 //  - FILL_MIN_MS: never exit before this, so the restriction pressure of
 //    water first pushing through the shower screen can't end it early.
 //  - Max fill: hard time limit - also the only exit if the sensor faults.

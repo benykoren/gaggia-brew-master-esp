@@ -848,6 +848,24 @@ everything again.
 
 ## 10. Change Log
 
+### 2026-10-01 — Claude Code (Opus 5.5) — Pre-infusion back to profile pulses; pressure fill gated off for the 5-bar sensor
+
+- **The pressure-terminated fill (entry below) doesn't work with the 0-5
+  bar sensor.** Empty-basket test: the pump-outlet reading hit the
+  sensor's ~1.6V ceiling within 0.3 s (vibration-pump stroke spikes exceed
+  5 bar even with no puck), so the fill always ended at its 4 s minimum.
+  With coffee, users also see ~4.3 "bar" during pre-infusion - that's the
+  ceiling, not puck pressure.
+- **Pre-infusion is now the profile's own pulses again** (count / on /
+  off), with "on" at the pre-infusion pump power (40%) and "off" = pump
+  stopped. The fill path stays in code, used only when
+  `PRESSURE_CLOSED_LOOP_AVAILABLE` is true (a 0-16 bar sensor); its
+  Settings fields are hidden until then. Pulse fields are visible in the
+  profile editor again.
+- UX note found while testing: saving a profile does not load it - the
+  user's new pulse profile wasn't active. Profile editor hint now says so.
+- Built but **not flashed** (user stopped the OTA) - pushed to PR #23 only.
+
 ### 2026-10-01 — Claude Code (Opus 5.5) — Pre-infusion fill ends on pressure; brew power 45% from the EP5 pump curve
 
 - **Brew pump power default 80% -> 45%.** Worked out from the ULKA EP5

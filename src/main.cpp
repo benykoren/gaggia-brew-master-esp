@@ -646,14 +646,23 @@ static void applyShotStagePumpOutput(const ShotStage &stage) {
 // control isn't enabled for this profile).
 static void buildShotStages() {
   activeStageCount = 0;
-  // The profile's pre-infusion checkbox turns the fill on; its legacy
-  // pulse count/on/off fields are no longer used (see config.h).
-  if (activePreinfusionEnabled) {
+  // Pre-infusion mode depends on whether the fitted sensor can be trusted
+  // (see config.h): a pressure-terminated fill with a real-range sensor,
+  // otherwise the profile's own timed pulses. Pulse "on" runs at the
+  // pre-infusion pump power (applyShotStagePumpOutput), "off" stops it.
+  if (activePreinfusionEnabled && PRESSURE_CLOSED_LOOP_AVAILABLE) {
     activeShotStages[activeStageCount++] = {ShotStage::Type::FILL,
                                              (unsigned long)preinfusionFillMaxSec * 1000UL, 0.0f};
     if (preinfusionSoakSec > 0) {
       activeShotStages[activeStageCount++] = {ShotStage::Type::PUMP_OFF,
                                                (unsigned long)preinfusionSoakSec * 1000UL, 0.0f};
+    }
+  } else if (activePreinfusionEnabled && activePreinfusionPulses > 0) {
+    for (int i = 0; i < activePreinfusionPulses; i++) {
+      activeShotStages[activeStageCount++] = {ShotStage::Type::PUMP_ON, (unsigned long)activePreinfusionOnMs, 0.0f};
+      if (i < activePreinfusionPulses - 1) {
+        activeShotStages[activeStageCount++] = {ShotStage::Type::PUMP_OFF, (unsigned long)activePreinfusionOffMs, 0.0f};
+      }
     }
   }
 
