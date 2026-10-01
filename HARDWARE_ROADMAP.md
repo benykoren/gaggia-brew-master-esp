@@ -391,15 +391,37 @@ mechanically, don't trust a single read.
 
 ## Item 7 — Real-time pressure transducer + live pressure graph
 
-**Status:** electrically wired and bench-verified (2026-09-15) - reads
-`pressure: 0.0`, `pressure_fault: false` at rest, powered from 3V3 (the
-board's "5V IN" pin turned out to be input-only; see `AGENTS.md`'s
-2026-09-15 change log entry) with `config.h`'s calibration constants
-recalibrated to match. **Not yet physically plumbed into the machine's
-hydraulic circuit** - still needs the T-fitting installed at the pump
-outlet and a real calibration against a known pressure reference
-(bring-up Task 11). **Depends on:** nothing (item 8 later depends on
-this). (Originally "item 6.")
+**Status (2026-10-01): plumbed at the pump outlet, but NOT calibratable
+on its current 3V3 supply - the sensor saturates.** Part confirmed as a
+**0-1.6 MPa (16 bar), 5V-supply, G1/4** transducer (iSentrol/Ultisolar
+"USP"; nominal 0.5-4.5V output on 5V). Calibration attempt using the
+`/status` `pressure_mv` raw reading (added 2026-10-01):
+- Zero (pump off): **~155-160 mV** - matches `PRESSURE_SENSOR_ZERO_MV`.
+- Free flow, no portafilter (3 runs): pulsing ~1200-1640 mV, **peak
+  never above ~1640 mV**.
+- Choked puck (fine grind, ~no drip): **max 1619 mV** - no higher than
+  free flow, which is physically impossible for a real reading; and right
+  after Stop, trapped pressure read **flat at 1611-1618 mV** before
+  decaying. Conclusion: **on 3V3 the sensor's output clips at ~1.62-1.64V**,
+  so everything above roughly 8-9 bar (if the datasheet slope holds) reads
+  the same.
+- The existing `PRESSURE_SENSOR_MV_PER_BAR = 82.5` is wrong by ~2x (free
+  flow would read 13-18 bar); the datasheet slope scaled to 3.3V is
+  ~165 mV/bar. Neither has been verified against a real reference.
+- **Consequence for safety**: `PUMP_MAX_SAFETY_BAR` (12) cannot be
+  detected by a clipped sensor; with the wrong 82.5 scale it instead
+  false-trips during normal plain-duty shots (the ceiling check isn't
+  gated on closed-loop mode). The 16-bar mechanical safety valve remains
+  the real limit, same as the stock machine.
+- **Fix before any 9-bar work**: give the sensor its rated 5V (e.g. a small
+  3.3V->5V boost module off the 3V3 pin - the sensor draws only a few mA -
+  since the board's 5V pin doesn't output on USB power), and scale the
+  0.5-4.5V output into the ADC with the on-hand **4.3k (series) / 10k (to
+  GND)** divider (x0.699 -> 4.5V becomes ~3.15V). Then calibrate: expected
+  `ZERO_MV` ~350, `MV_PER_BAR` ~175 (datasheet), verified by a choked-puck
+  plateau (~15-16 bar) or ideally a portafilter gauge. Remove the GPIO1
+  `INPUT_PULLDOWN` at the same time (the 10k does that job and the internal
+  pull-down would skew the divider).
 
 **What it's for:** a standalone monitoring/graph feature on its own, and
 the hard prerequisite for pressure profiling in item 8. **0-1.2 to

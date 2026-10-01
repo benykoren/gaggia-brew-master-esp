@@ -11,6 +11,10 @@
 // high, not a genuine spike.
 static const float PRESSURE_PLAUSIBLE_MAX_BAR = PUMP_MAX_SAFETY_BAR * 1.5f;
 
+static volatile uint32_t lastMv = 0;
+
+uint32_t pressureSensorLastMv() { return lastMv; }
+
 void pressureSensorInit() {
   // Pulled down, not a plain floating input: an unconnected ADC1 pin floats
   // and reads noisy mid-scale voltages, which the calibration formula below
@@ -32,6 +36,7 @@ PressureSensorStatus pressureSensorRead(float &outBar) {
   // raw-count-to-mV linear scale - improves accuracy for the bench
   // calibration step (Milestone B).
   uint32_t mv = analogReadMilliVolts(PIN_PRESSURE_ADC);
+  lastMv = mv;
 
   float bar = ((float)mv - PRESSURE_SENSOR_ZERO_MV) / PRESSURE_SENSOR_MV_PER_BAR;
 

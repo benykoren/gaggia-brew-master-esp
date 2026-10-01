@@ -11,6 +11,7 @@
 #include <time.h>
 
 #include "dimmer.h"
+#include "pressure_sensor.h"
 #include "profiles.h"
 #include "shot_log.h"
 
@@ -2167,6 +2168,7 @@ static void handleStatus(AsyncWebServerRequest *request) {
   // Temporary bring-up diagnostic (2026-09-15) - see dimmerGetZcCount()'s
   // declaration comment. Remove alongside it once bring-up is complete.
   uint32_t snapDimmerZcCount = dimmerGetZcCount();
+  uint32_t snapPressureMv = pressureSensorLastMv();
   bool snapPressureCeilingTripped = (pressureFault || currentPressure > PUMP_MAX_SAFETY_BAR);
   int snapPressHistoryCount = pressureHistoryCount, snapPressHistoryHead = pressureHistoryHead;
   float snapPressHistory[TEMP_HISTORY_LEN];
@@ -2272,6 +2274,7 @@ static void handleStatus(AsyncWebServerRequest *request) {
   json += ",\"pressure_fault\":" + String(snapPressureFault ? "true" : "false");
   json += ",\"pump_power\":" + String(snapPumpPower, 1);
   json += ",\"dimmer_zc_count\":" + String(snapDimmerZcCount);
+  json += ",\"pressure_mv\":" + String(snapPressureMv);
   json += ",\"pressure_ceiling_tripped\":" + String(snapPressureCeilingTripped ? "true" : "false");
   json += ",\"press_enabled\":" + String(snapPressEnabled ? "true" : "false");
   json += ",\"press_ramp_bar\":" + String(snapPressRampBar);

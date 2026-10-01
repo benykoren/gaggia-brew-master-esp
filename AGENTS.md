@@ -848,6 +848,44 @@ everything again.
 
 ## 10. Change Log
 
+### 2026-10-01 — Claude Code (Opus 5.5) — Pressure calibration attempt: sensor clips on 3V3; uncommanded pump run investigated
+
+- **Added `pressure_mv` to `/status`** (`pressureSensorLastMv()`, raw ADC
+  millivolts before the bar conversion/plausibility clamp) so the
+  transducer can be calibrated against physical reference points.
+- **Sensor identified**: 0-1.6 MPa, 5V supply, G1/4 (order variant
+  "G41 1.6Mpa IN5V"). Still powered from 3V3.
+- **Result: the sensor's output clips at ~1.62-1.64V on 3V3.** Free flow
+  (3 runs) and a choked puck both topped out at the same ~1620-1640 mV,
+  and trapped pressure after Stop read flat at that ceiling. Calibration on
+  3V3 is therefore impossible above roughly 8-9 bar. Full numbers and the
+  fix (3.3->5V boost module + on-hand 4.3k/10k divider) in
+  `HARDWARE_ROADMAP.md` item 7. **No calibration constants were changed.**
+- **Safety ceiling handling, explicit user approval**: for the choked-puck
+  test the user personally edited `PUMP_MAX_SAFETY_BAR` 12 -> 30 (the
+  agent was blocked from weakening it); restored to 12.0 and flashed
+  (fw `Oct 1 2026 18:28:05`) right after. Noted: with the current wrong
+  82.5 mV/bar scale, the unconditional ceiling check can false-trip during
+  normal plain-duty shots, and with a clipped sensor it can't see a real
+  12 bar either.
+- **Incident - pump ran ~50s at `pump_power` 0 with the Brew switch on**,
+  zero-cross counter not advancing. Checked unplugged: fuse OK, dimmer
+  `IN`-`OUT` open, all mains and control wires continuous, pump circuit
+  OK in diode mode (conducts one way - the ULKA's internal diode; Ω mode
+  read open both ways, which is misleading for this pump). Firmware ruled
+  out: only `dimmer.cpp` drives GPIO5, and only from the zero-cross ISR
+  when target > 0. After the user restarted the machine (ESP32 included),
+  behavior was normal again: Brew on/no shot = silent with ZC ~100/s, and
+  Stop really stops the pump. **Root cause not confirmed** - leading
+  theory is TRIAC self-triggering on the inductive pump load (no RC
+  snubber on this module); an ESP-side stuck state can't be fully excluded
+  since a restart cleared it. Recommended: add an RC snubber across
+  `IN`-`OUT` (pending the TRIAC's part number), and keep the Brew switch as
+  the manual kill.
+- Also noted for next time: an OTA was pushed while a shot was in progress
+  (agent error - status showed `shot_in_progress: true`); the reboot ended
+  the shot cleanly. Check that field before any OTA.
+
 ### 2026-10-01 — Claude Code (Opus 5.5) — Replacement dimmer installed with a fuse; Milestone A re-confirmed
 
 - **Replacement dimmer module installed** (after the first one's TRIAC was
