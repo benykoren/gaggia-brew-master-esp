@@ -391,37 +391,34 @@ mechanically, don't trust a single read.
 
 ## Item 7 — Real-time pressure transducer + live pressure graph
 
-**Status (2026-10-01): plumbed at the pump outlet, but NOT calibratable
-on its current 3V3 supply - the sensor saturates.** Part confirmed as a
-**0-1.6 MPa (16 bar), 5V-supply, G1/4** transducer (iSentrol/Ultisolar
-"USP"; nominal 0.5-4.5V output on 5V). Calibration attempt using the
-`/status` `pressure_mv` raw reading (added 2026-10-01):
-- Zero (pump off): **~155-160 mV** - matches `PRESSURE_SENSOR_ZERO_MV`.
-- Free flow, no portafilter (3 runs): pulsing ~1200-1640 mV, **peak
-  never above ~1640 mV**.
-- Choked puck (fine grind, ~no drip): **max 1619 mV** - no higher than
-  free flow, which is physically impossible for a real reading; and right
-  after Stop, trapped pressure read **flat at 1611-1618 mV** before
-  decaying. Conclusion: **on 3V3 the sensor's output clips at ~1.62-1.64V**,
-  so everything above roughly 8-9 bar (if the datasheet slope holds) reads
-  the same.
-- The existing `PRESSURE_SENSOR_MV_PER_BAR = 82.5` is wrong by ~2x (free
-  flow would read 13-18 bar); the datasheet slope scaled to 3.3V is
-  ~165 mV/bar. Neither has been verified against a real reference.
-- **Consequence for safety**: `PUMP_MAX_SAFETY_BAR` (12) cannot be
-  detected by a clipped sensor; with the wrong 82.5 scale it instead
-  false-trips during normal plain-duty shots (the ceiling check isn't
-  gated on closed-loop mode). The 16-bar mechanical safety valve remains
-  the real limit, same as the stock machine.
-- **Fix before any 9-bar work**: give the sensor its rated 5V (e.g. a small
-  3.3V->5V boost module off the 3V3 pin - the sensor draws only a few mA -
-  since the board's 5V pin doesn't output on USB power), and scale the
-  0.5-4.5V output into the ADC with the on-hand **4.3k (series) / 10k (to
-  GND)** divider (x0.699 -> 4.5V becomes ~3.15V). Then calibrate: expected
-  `ZERO_MV` ~350, `MV_PER_BAR` ~175 (datasheet), verified by a choked-puck
-  plateau (~15-16 bar) or ideally a portafilter gauge. Remove the GPIO1
-  `INPUT_PULLDOWN` at the same time (the 10k does that job and the internal
-  pull-down would skew the divider).
+**Status (2026-10-01): plumbed at the pump outlet - but the fitted part is
+a 0-0.5 MPa (0-5 bar) sensor, below espresso brew pressure.** Body marking
+"G41 0.5Mpa IN5V" (5V supply, G1/4), confirmed by the user after an earlier
+mix-up with the listing's 1.6 MPa variant. Powered from 3V3 (the board's
+5V pin doesn't output on USB power). What that means:
+- **It can't measure brew pressure.** On 3V3 its output clips at
+  ~1620-1640 mV both in free flow and with a choked puck (raw `pressure_mv`
+  logs, 2026-10-01); zero is ~155-160 mV. Firmware now treats it as a
+  0-5 bar sensor: `PRESSURE_SENSOR_MV_PER_BAR` = 290 (**estimate** -
+  assumes the clip is ~full scale, unverified), readings clamped at 5 bar
+  (UI shows "5+"), plausibility window derived from the 5-bar range.
+- **Closed-loop pressure control is disabled** (`PRESSURE_CLOSED_LOOP_AVAILABLE
+  false` in `config.h`): profile pressure stages are ignored, shots run at
+  a fixed pump power instead (item 8, pulse-skip %).
+- **`PUMP_MAX_SAFETY_BAR` (12) can't trip** - it's above the sensor's range.
+  The mechanical 16-bar safety valve is the effective limit, as on the
+  stock machine.
+- **Over-pressure risk to the sensor itself**: it sits at the pump outlet
+  and sees full brew pressure (and ~15-16 bar with a choked puck) - 2-3x
+  its rating. Such sensors are typically rated ~1.5-2x overload; watch the
+  fitting for leaks, and replace it with the right part soon.
+- **Replacement**: a **0-1.6 MPa (16 bar)** transducer, same G1/4 thread and
+  3-wire hookup. To read its full range it also needs a real 5V supply
+  (3.3->5V boost module off 3V3) and the on-hand **4.3k (series) / 10k (to
+  GND)** divider into GPIO1 (4.5V -> ~3.15V); then expected `ZERO_MV` ~350,
+  `MV_PER_BAR` ~175, remove GPIO1's `INPUT_PULLDOWN`, set
+  `PRESSURE_SENSOR_MAX_BAR` 16 and `PRESSURE_CLOSED_LOOP_AVAILABLE` true,
+  and verify with a choked-puck plateau (~15-16 bar) or a portafilter gauge.
 
 **What it's for:** a standalone monitoring/graph feature on its own, and
 the hard prerequisite for pressure profiling in item 8. **0-1.2 to
@@ -510,6 +507,13 @@ prerequisite for the closed-loop pressure-target half only, see below.
 pump on/off) — item 4 was dropped as a separate build on 2026-08-29 once
 it was clear this item's dimmer subsumes on/off; see item 4 above for the
 fail-off tradeoff this accepts.
+
+**Pump power is pulse-skip modulation since 2026-10-01** (whole mains
+cycles fired near zero-cross or skipped, Bresenham-spread; same approach
+as Gaggiuino/GaggiMate's PSM library) instead of phase-angle. Plain-duty
+shots use two Web-UI settings (Settings -> Pump power): **brew 80%**,
+**pre-infusion 40%** by default. % sets flow, not pressure - the bar you
+get depends on the puck.
 
 **Two things, one build:**
 1. **Plain pump on/off** (former item 4's whole scope) — time-based

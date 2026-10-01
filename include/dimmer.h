@@ -2,10 +2,13 @@
 
 #include <stdint.h>
 
-// AC phase-control dimmer driver (HARDWARE_ROADMAP.md item 8) - zero-cross
-// detection + TRIAC gate firing via a hardware one-shot timer, so firing
-// timing survives WiFi/BT scheduling jitter (a plain delayMicroseconds() in
-// the zero-cross ISR does not - see config.h).
+// AC dimmer driver (HARDWARE_ROADMAP.md item 8) - zero-cross detection +
+// TRIAC gate firing via a hardware one-shot timer, so firing timing survives
+// WiFi/BT scheduling jitter (a plain delayMicroseconds() in the zero-cross
+// ISR does not - see config.h). Power is pulse-skip modulation (PSM): whole
+// mains cycles are either fired near the zero-cross or skipped, which is
+// what a diode-fed vibration pump actually responds to (see config.h's
+// PUMP_BREW_POWER_PCT_DEFAULT comment).
 
 // Configures PIN_DIMMER_ZC as an interrupt input and PIN_DIMMER_GATE as an
 // output, and creates the internal esp_timer used for gate firing. Call
@@ -13,8 +16,8 @@
 void dimmerInit();
 
 // Sets the target power level (0-100), clamped to that range. 0 = TRIAC
-// never fires (pump off); 100 = fires as close to the zero-cross as
-// DIMMER_MIN_FIRING_DELAY_US allows (full pass-through). Safe to call from
+// never fires (pump off); 100 = every mains cycle fired (full pass-through);
+// N = N% of mains cycles fired, spread evenly (Bresenham accumulator). Safe to call from
 // any task - internally stored as a plain volatile integer (tenths of a
 // percent), not behind main.cpp's stateMutex, because it's also read from
 // the zero-cross ISR, where taking a FreeRTOS mutex isn't safe (and where

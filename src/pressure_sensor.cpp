@@ -4,12 +4,13 @@
 
 #include "config.h"
 
-// A reading is only plausible up to 1.5x the safety ceiling - real bar
-// values on this machine should never approach the transducer's full range
-// (the safety valve caps physical pressure well below that), so a raw
-// reading this high almost certainly means a disconnected sensor floating
-// high, not a genuine spike.
-static const float PRESSURE_PLAUSIBLE_MAX_BAR = PUMP_MAX_SAFETY_BAR * 1.5f;
+// A reading is only plausible up to 1.5x the transducer's rated full scale
+// (PRESSURE_SENSOR_MAX_BAR) - its output clips near full scale, so a raw
+// reading well past that almost certainly means a wiring fault / sensor
+// floating high, not a genuine spike. (Was derived from
+// PUMP_MAX_SAFETY_BAR before the installed sensor turned out to be a 5-bar
+// part, which is below that ceiling.)
+static const float PRESSURE_PLAUSIBLE_MAX_BAR = PRESSURE_SENSOR_MAX_BAR * 1.5f;
 
 static volatile uint32_t lastMv = 0;
 
@@ -45,6 +46,9 @@ PressureSensorStatus pressureSensorRead(float &outBar) {
     return PressureSensorStatus::OUT_OF_RANGE;
   }
   if (bar < 0.0f) bar = 0.0f; // small negative noise around true zero
+  // Anything above rated full scale is "at least full scale", not a real
+  // number - report the ceiling rather than an extrapolated value.
+  if (bar > PRESSURE_SENSOR_MAX_BAR) bar = PRESSURE_SENSOR_MAX_BAR;
   outBar = bar;
   return PressureSensorStatus::OK;
 }

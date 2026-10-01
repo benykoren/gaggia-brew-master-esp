@@ -29,20 +29,17 @@ static volatile int64_t lastZcUs = 0;
 // integer increment - ISR-safe, no float involved.
 static volatile uint32_t zcCount = 0;
 
-// Converts tenths-of-a-percent (0-1000) into a firing delay after the
-// zero-cross, in microseconds - pure integer arithmetic, callable from ISR
-// context (see the ISR-safety note above). Linear percent-to-delay mapping
-// (not the more accurate cosine/RMS-power curve real dimmers use) - a
-// reasonable first pass per HARDWARE_ROADMAP.md item 8; the pressure PID
-// trims around whatever curve this produces during closed-loop tuning
-// (bring-up Task 12), the same "tune against real hardware" pattern already
-// used for temperature PID.
-static uint32_t percentX10ToDelayUs(int32_t percentX10) {
-  if (percentX10 >= 1000) return DIMMER_MIN_FIRING_DELAY_US;
-  int64_t delay = (int64_t)DIMMER_AC_HALF_CYCLE_US * (1000 - percentX10) / 1000;
-  if (delay < DIMMER_MIN_FIRING_DELAY_US) delay = DIMMER_MIN_FIRING_DELAY_US;
-  return (uint32_t)delay;
-}
+// Pulse-skip state - touched only from onZeroCross() (ISR context), so no
+// locking needed. A "cycle" is two consecutive accepted zero-crossings; the
+// fire/skip decision is made on the first and held for the second, so a
+// fired cycle always contains both half-cycles (one of which is the
+// polarity the pump's internal diode conducts on - we can't tell which from
+// the zero-cross signal, and don't need to). If a crossing is ever missed
+// the pairing just shifts by one half-cycle; every fired pair still spans
+// exactly one useful half-cycle, so power stays correct.
+static int32_t psmAccumulator = 0;
+static bool psmFireThisCycle = false;
+static bool psmSecondHalf = false;
 
 static void IRAM_ATTR fireGate(void *arg) {
   digitalWrite(PIN_DIMMER_GATE, HIGH);
@@ -53,7 +50,8 @@ static void IRAM_ATTR fireGate(void *arg) {
 // Fires on every zero-cross transition. Debounced by elapsed time rather
 // than a manual re-arm flag - a real zero-cross module can chatter multiple
 // transitions around the same physical crossing; ignore anything closer
-// than half a half-cycle to the last accepted crossing.
+// than half a half-cycle to the last accepted crossing. Integer-only (see
+// the ISR-safety note at the top of this file).
 static void IRAM_ATTR onZeroCross(void *arg) {
   int64_t now = esp_timer_get_time();
   if (now - lastZcUs < (DIMMER_AC_HALF_CYCLE_US / 2)) return;
@@ -61,10 +59,32 @@ static void IRAM_ATTR onZeroCross(void *arg) {
   zcCount++;
 
   int32_t percentX10 = targetPercentX10;
-  if (percentX10 <= 0) return; // stay off - no timer scheduled at all
+  if (percentX10 <= 0) {
+    // Stay off - no timer scheduled at all - and reset the pulse-skip
+    // state so the next start begins from a clean, predictable pattern.
+    psmAccumulator = 0;
+    psmFireThisCycle = false;
+    psmSecondHalf = false;
+    return;
+  }
 
+  if (!psmSecondHalf) {
+    // Bresenham: add the requested fraction each cycle, fire whenever the
+    // accumulator overflows - spreads N% of cycles as evenly as possible
+    // (e.g. 80% = fire 4 of every 5 cycles) instead of bunching them.
+    psmAccumulator += percentX10;
+    if (psmAccumulator >= 1000) {
+      psmAccumulator -= 1000;
+      psmFireThisCycle = true;
+    } else {
+      psmFireThisCycle = false;
+    }
+  }
+  psmSecondHalf = !psmSecondHalf;
+
+  if (!psmFireThisCycle) return;
   esp_timer_stop(fireTimer);
-  esp_timer_start_once(fireTimer, percentX10ToDelayUs(percentX10));
+  esp_timer_start_once(fireTimer, DIMMER_MIN_FIRING_DELAY_US);
 }
 
 void dimmerInit() {

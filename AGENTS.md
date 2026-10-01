@@ -848,6 +848,40 @@ everything again.
 
 ## 10. Change Log
 
+### 2026-10-01 — Claude Code (Opus 5.5) — 5-bar sensor: closed loop disabled, pump power via pulse-skip (80% brew / 40% pre-infusion)
+
+- **Correction to the entry below**: the fitted pressure sensor is a
+  **0-0.5 MPa (0-5 bar)** part ("G41 0.5Mpa IN5V"), not 1.6 MPa - the
+  earlier figure came from the listing's variant name. That also explains
+  the ~1.63V clipping. Details and the replacement plan in
+  `HARDWARE_ROADMAP.md` item 7.
+- **`config.h`**: `PRESSURE_SENSOR_MAX_BAR` 5, `PRESSURE_SENSOR_ZERO_MV` 158
+  (measured), `PRESSURE_SENSOR_MV_PER_BAR` 290 (estimate, unverified),
+  readings clamped at full scale, plausibility window from the sensor range
+  (`pressure_sensor.cpp`). `PRESSURE_CLOSED_LOOP_AVAILABLE false` makes
+  `buildShotStages()` ignore profile pressure stages. This also fixes the
+  false 12-bar ceiling trips the old 82.5 mV/bar scale caused on normal
+  shots. `PUMP_MAX_SAFETY_BAR` unchanged (12) - noted it can't trip with a
+  5-bar sensor; the 16-bar valve is the effective limit.
+- **Dimmer switched from phase-angle to pulse-skip modulation**
+  (`dimmer.cpp`): fire whole mains cycles near zero-cross or skip them,
+  Bresenham-spread, integer-only ISR. Matches how Gaggiuino/GaggiMate drive
+  vibration pumps (`reference/`); the old linear-delay phase mapping made
+  "80%" ~95% RMS and fired an unsnubbered TRIAC mid-cycle on an inductive
+  load. 100% behaves exactly as before.
+- **New plain-duty pump powers**, persisted + Web UI (Settings -> Pump
+  power) + `/status` (`pump_brew_pct`, `pump_pi_pct`) + settings export:
+  extraction 80%, pre-infusion "on" pulses 40%. Also `/status` gains
+  `pressure_max_bar` and `press_available`; the pressure gauge scales to
+  the sensor and drops the 9-bar goal coloring while closed loop is off.
+- **Why 80% isn't "9 bar"**: with a vibration pump, % sets flow and the
+  puck sets pressure - no fixed % maps to a bar value. 80% is a starting
+  point below stock full power, tunable by shot time.
+- Flashed via OTA (fw `Oct 1 2026 19:06:04`), verified new `/status`
+  fields; **not shot-tested** (user away - no unattended pump runs). The
+  active profile still has pre-infusion disabled (`pi_enabled: false`);
+  enable it in the profile editor to use the 40% soak.
+
 ### 2026-10-01 — Claude Code (Opus 5.5) — Pressure calibration attempt: sensor clips on 3V3; uncommanded pump run investigated
 
 - **Added `pressure_mv` to `/status`** (`pressureSensorLastMv()`, raw ADC

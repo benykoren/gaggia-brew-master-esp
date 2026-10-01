@@ -60,6 +60,8 @@ extern void stopAutotune();
 extern bool shotInProgress;
 extern unsigned long shotStartMillis;
 extern unsigned long shotAutoStopSec;
+extern int pumpBrewPowerPct;
+extern int pumpPreinfusionPowerPct;
 extern void startShot();
 extern void stopShot();
 extern ShotPhase currentShotPhase;
@@ -745,14 +747,14 @@ const char *index_html = R"rawliteral(
             <div class="field"><label for="input_profile_autostop">Auto-stop (sec)</label><input type="number" step="1" min="5" max="90" id="input_profile_autostop" value="27" oninput="drawProfilePreview()"></div>
           </div>
           <label class="check-row"><input type="checkbox" id="input_profile_pi_enabled" onchange="drawProfilePreview()"> Pulsed pre-infusion</label>
-          <p class="hint" style="margin-top:var(--sp-2)">Pulses the pump on/off before continuous extraction to wet the puck.</p>
+          <p class="hint" style="margin-top:var(--sp-2)">Pulses the pump on/off before continuous extraction to wet the puck. "On" runs at the pre-infusion pump power (Settings &rarr; Pump power).</p>
           <div class="field-row-3" style="margin-top:var(--sp-3)">
             <div class="field"><label for="input_profile_pi_pulses">Pulses</label><input type="number" step="1" min="0" max="10" id="input_profile_pi_pulses" value="3" oninput="drawProfilePreview()"></div>
             <div class="field"><label for="input_profile_pi_on">On (sec)</label><input type="number" step="0.1" min="0.2" max="5" id="input_profile_pi_on" value="1" oninput="drawProfilePreview()"></div>
             <div class="field"><label for="input_profile_pi_off">Off (sec)</label><input type="number" step="0.1" min="0.2" max="5" id="input_profile_pi_off" value="2" oninput="drawProfilePreview()"></div>
           </div>
           <label class="check-row"><input type="checkbox" id="input_profile_press_enabled"> Pressure profile</label>
-          <p class="hint" style="margin-top:var(--sp-2)">Closed-loop ramp, hold, then optional decline. Needs the transducer plumbed in.</p>
+          <p class="hint" style="margin-top:var(--sp-2)">Closed-loop ramp, hold, then optional decline. Needs a pressure sensor that reads above the target (0-16 bar); ignored while the current 0-5 bar sensor is fitted - shots run at the brew pump power instead.</p>
           <div class="field-row-3" style="margin-top:var(--sp-3)">
             <div class="field"><label for="input_profile_press_ramp_bar">Ramp target (bar)</label><input type="number" step="0.1" min="0" max="11.9" id="input_profile_press_ramp_bar" value="9"></div>
             <div class="field"><label for="input_profile_press_ramp_sec">Ramp/hold (sec)</label><input type="number" step="1" min="1" id="input_profile_press_ramp_sec" value="20"></div>
@@ -846,6 +848,21 @@ const char *index_html = R"rawliteral(
           <button type="submit" class="submit">Save</button>
         </form>
         <p class="hint" style="margin-top:var(--sp-3)">Cuts the pump via the dimmer when the timer hits this duration. Loading a profile overwrites this with that profile's own auto-stop. The physical Brew switch must still be on for the dimmer to have power.</p>
+      </div>
+      <div class="card">
+        <div class="tab-section-title">Pump power</div>
+        <form action="/update" method="GET">
+          <div class="field">
+            <label for="input_pump_brew_pct">Brew pump power (%)</label>
+            <input type="number" step="1" min="10" max="100" name="pump_brew_pct" id="input_pump_brew_pct" value="">
+          </div>
+          <div class="field">
+            <label for="input_pump_pi_pct">Pre-infusion pump power (%)</label>
+            <input type="number" step="1" min="10" max="100" name="pump_pi_pct" id="input_pump_pi_pct" value="">
+          </div>
+          <button type="submit" class="submit">Save</button>
+        </form>
+        <p class="hint" style="margin-top:var(--sp-3)">Percent of pump strokes allowed. This sets flow, not pressure: the bar you get depends on grind, dose and tamp. Lower brew power for a gentler, lower-pressure shot; if the shot runs too slow, grind coarser before raising it.</p>
       </div>
 
       <div class="group-title">Power</div>
@@ -1488,10 +1505,10 @@ function applyStatus(json) {
 
   trackPhaseMarkers(json.shot_phase, json.shot_in_progress);
   drawSparkline(json.history, hasTarget ? target : null);
-  var pressureTarget = (json.press_enabled && json.shot_phase === "pressure") ? json.press_ramp_bar : null;
+  var pressureTarget = (json.press_available !== false && json.press_enabled && json.shot_phase === "pressure") ? json.press_ramp_bar : null;
   drawPressureSparkline(json.pressure_history, pressureTarget);
   var pLabel = document.getElementById("pressure_label");
-  if (pLabel) pLabel.textContent = (json.pressure_fault ? "fault" : json.pressure.toFixed(2) + " bar");
+  if (pLabel) pLabel.textContent = (json.pressure_fault ? "fault" : (json.pressure_max_bar && json.pressure >= json.pressure_max_bar ? json.pressure_max_bar.toFixed(0) + "+" : json.pressure.toFixed(2)) + " bar");
 
   var tempPct = (temp > 0 && hasTarget) ? clamp((temp / target) * 100) : 0;
   var ring = document.getElementById("temp_ring_fill");
@@ -1505,27 +1522,31 @@ function applyStatus(json) {
     else ring.classList.add("ready");
   }
 
-  var PRESSURE_GAUGE_MAX_BAR = 16;
-  var pressureGoal = (json.press_enabled && json.press_ramp_bar > 0) ? json.press_ramp_bar : 9;
+  // Scale the gauge to the fitted sensor's real range; with no closed-loop
+  // pressure control there's no goal to color against.
+  var PRESSURE_GAUGE_MAX_BAR = json.pressure_max_bar || 16;
+  var pressureLoop = json.press_available !== false && json.press_enabled;
+  var pressureGoal = (pressureLoop && json.press_ramp_bar > 0) ? json.press_ramp_bar : null;
   var pressureVal = json.pressure;
+  var pressureAtMax = json.pressure_max_bar && pressureVal >= json.pressure_max_bar;
   var pressurePct = json.pressure_fault ? 0 : clamp((pressureVal / PRESSURE_GAUGE_MAX_BAR) * 100);
   var pRing = document.getElementById("pressure_ring_fill");
   if (pRing) {
     pRing.style.strokeDashoffset = RING_CIRCUMFERENCE * (1 - pressurePct / 100);
     pRing.classList.remove("heating", "ready", "over");
-    if (!json.pressure_fault && json.shot_in_progress) {
+    if (!json.pressure_fault && json.shot_in_progress && pressureGoal !== null) {
       var PRESSURE_READY_MARGIN_BAR = 1.5;
       if (pressureVal < pressureGoal - PRESSURE_READY_MARGIN_BAR) pRing.classList.add("heating");
       else if (pressureVal > pressureGoal + PRESSURE_READY_MARGIN_BAR) pRing.classList.add("over");
       else pRing.classList.add("ready");
     }
   }
-  setText("pressure_gauge_val", json.pressure_fault ? "--" : pressureVal.toFixed(1));
+  setText("pressure_gauge_val", json.pressure_fault ? "--" : pressureAtMax ? pressureVal.toFixed(0) + "+" : pressureVal.toFixed(1));
   var pCap = document.getElementById("pressure_target_caption");
   if (pCap) {
-    pCap.textContent = json.shot_in_progress && json.press_enabled
+    pCap.textContent = json.shot_in_progress && pressureGoal !== null
       ? "Target " + pressureGoal.toFixed(1) + " bar"
-      : "Pressure";
+      : json.press_available === false ? "Pressure (0-" + PRESSURE_GAUGE_MAX_BAR + " bar sensor)" : "Pressure";
   }
 
   document.getElementById("output_bar").style.width = clamp(outputPct) + "%";
@@ -1559,6 +1580,8 @@ function applyStatus(json) {
   setVal("input_eco_min", json.eco_timeout_min);
   setVal("input_steam_off_min", json.steam_auto_off_min);
   setVal("input_shot_auto_stop", json.shot_auto_stop_sec);
+  if (typeof json.pump_brew_pct === "number") setVal("input_pump_brew_pct", json.pump_brew_pct);
+  if (typeof json.pump_pi_pct === "number") setVal("input_pump_pi_pct", json.pump_pi_pct);
   var passHint = document.getElementById("mqtt_pass_hint");
   if (passHint) passHint.hidden = !json.mqtt_pass_set;
 
@@ -2123,6 +2146,7 @@ static void handleStatus(AsyncWebServerRequest *request) {
   bool snapAutoSleeping = autoSleeping;
   OpMode snapModeBeforeSleep = modeBeforeSleep;
   unsigned long snapShotAutoStopSec = shotAutoStopSec;
+  int snapPumpBrewPct = pumpBrewPowerPct, snapPumpPiPct = pumpPreinfusionPowerPct;
   AutotuneState snapAutotuneState = autotuneState;
   String snapAutotuneMessage = autotuneMessage;
   bool snapShotInProgress = shotInProgress;
@@ -2237,6 +2261,10 @@ static void handleStatus(AsyncWebServerRequest *request) {
   json += (snapModeBeforeSleep == OpMode::STEAM) ? "steam" : "brew";
   json += "\"";
   json += ",\"shot_auto_stop_sec\":" + String(snapShotAutoStopSec);
+  json += ",\"pump_brew_pct\":" + String(snapPumpBrewPct);
+  json += ",\"pump_pi_pct\":" + String(snapPumpPiPct);
+  json += ",\"pressure_max_bar\":" + String(PRESSURE_SENSOR_MAX_BAR, 1);
+  json += ",\"press_available\":" + String(PRESSURE_CLOSED_LOOP_AVAILABLE ? "true" : "false");
 
   json += ",\"autotune_state\":\"";
   switch (snapAutotuneState) {
@@ -2444,6 +2472,18 @@ static void handleUpdate(AsyncWebServerRequest *request) {
     long v = arg("shot_auto_stop_sec").toInt();
     shotAutoStopSec = (v <= 0) ? 0 : constrain(v, SHOT_AUTO_STOP_SEC_MIN, SHOT_AUTO_STOP_SEC_MAX);
     preferences.putULong("shot_auto_stop", shotAutoStopSec);
+  }
+
+  // Plain-duty pump power (pulse-skip %, see config.h). Clamped so a typo
+  // can't stall the pump (too low) or exceed 100%. Takes effect on the next
+  // stage change / shot start - a running shot keeps its current duty.
+  if (hasArg("pump_brew_pct")) {
+    pumpBrewPowerPct = constrain(arg("pump_brew_pct").toInt(), PUMP_POWER_PCT_MIN, PUMP_POWER_PCT_MAX);
+    preferences.putInt("pump_brew_pct", pumpBrewPowerPct);
+  }
+  if (hasArg("pump_pi_pct")) {
+    pumpPreinfusionPowerPct = constrain(arg("pump_pi_pct").toInt(), PUMP_POWER_PCT_MIN, PUMP_POWER_PCT_MAX);
+    preferences.putInt("pump_pi_pct", pumpPreinfusionPowerPct);
   }
 
   // Eco / auto-sleep
@@ -2767,6 +2807,8 @@ void setupWeb() {
     q += "&steam_kd=" + String(steamKd, 4);
     q += "&steam_max_safety=" + String(steamMaxSafety, 1);
     q += "&shot_auto_stop_sec=" + String(shotAutoStopSec);
+    q += "&pump_brew_pct=" + String(pumpBrewPowerPct);
+    q += "&pump_pi_pct=" + String(pumpPreinfusionPowerPct);
     q += "&eco_timeout_min=" + String(ecoTimeoutMin);
     q += "&steam_auto_off_min=" + String(steamAutoOffMin);
     q += "&descale_shot_threshold=" + String(descaleShotThreshold);

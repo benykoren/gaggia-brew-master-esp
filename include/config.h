@@ -119,19 +119,55 @@
 #define DIMMER_MIN_FIRING_DELAY_US 300
 #define DIMMER_GATE_PULSE_US 100
 
+// Pump power is pulse-skip modulation (PSM), not phase-angle (2026-10-01):
+// the TRIAC is fired near the zero-cross on a chosen fraction of whole
+// mains cycles and left off for the rest - the same approach Gaggiuino and
+// GaggiMate use for vibration pumps (reference/*: PSM library). A ULKA
+// pump has an internal diode and makes one piston stroke ("click") per
+// mains cycle, so N% power = N% of the ~50 clicks/s = roughly N% of the
+// zero-pressure flow. Phase-angle firing a diode-fed inductive pump
+// mid-half-cycle was both nonlinear (a linear-delay "80%" was really ~95%
+// RMS) and harder on an unsnubbered TRIAC.
+//
+// Pump power used by plain-duty shot stages (no closed-loop pressure
+// control) - both live-editable from the Web UI and persisted in NVS.
+// NOTE: power sets FLOW, not pressure. With a vibration pump the brew
+// pressure is whatever the puck's resistance makes of that flow, so the
+// same % gives different bar with a different grind/dose/tamp. 80% is a
+// starting point to bring the stock ~12-15 bar down; tune it by shot time
+// (finer grind / higher % = more pressure) until a real-range pressure
+// sensor allows closed-loop control.
+#define PUMP_BREW_POWER_PCT_DEFAULT 80
+#define PUMP_PREINFUSION_POWER_PCT_DEFAULT 40
+#define PUMP_POWER_PCT_MIN 10
+#define PUMP_POWER_PCT_MAX 100
+
 // Pressure transducer calibration - linear mapping from ADC millivolts to
 // bar: bar = (mv - PRESSURE_SENSOR_ZERO_MV) / PRESSURE_SENSOR_MV_PER_BAR.
-// Recalibrated 2026-09-15 for this specific bench setup: the transducer is
-// rated for a 5V supply but this board's "5V IN" pin turned out to be
-// input-only (doesn't back-feed when USB-powered), so it's actually
-// running on 3V3 instead - the same underpowered-but-working approach
-// already used for the temp sensor module. ZERO_MV is the real bench-
-// measured zero-pressure reading at the ADC pin (0.16V); MV_PER_BAR is
-// scaled down from the original 5V-based value by the 3.3/5 supply ratio
-// (125.0 * 0.66 = 82.5) - still an approximation until a real pressure
-// reference point is available (bring-up Task 11's full calibration).
-#define PRESSURE_SENSOR_ZERO_MV 160.0f
-#define PRESSURE_SENSOR_MV_PER_BAR 82.5f
+//
+// The installed transducer is a **0-0.5 MPa (0-5 bar)**, 5V-supply part
+// (body marking "G41 0.5Mpa IN5V", confirmed by the user 2026-10-01), run
+// from 3V3 because this board's 5V pin doesn't output on USB power. Its
+// range is BELOW espresso brew pressure, so it is only meaningful for
+// pre-infusion / low-pressure monitoring until a 0-1.6 MPa part replaces
+// it (see HARDWARE_ROADMAP.md item 7).
+//   ZERO_MV: measured 2026-10-01, pump off: 155-160 mV.
+//   MV_PER_BAR: ESTIMATE, not verified against a reference. On 3V3 the
+//   output was observed to clip at ~1620-1640 mV both in free flow and
+//   with a choked puck (pressure well above 5 bar); this assumes that
+//   ceiling is roughly the sensor's 5-bar full scale:
+//   (1630 - 158) / 5 ~= 290 mV/bar.
+#define PRESSURE_SENSOR_ZERO_MV 158.0f
+#define PRESSURE_SENSOR_MV_PER_BAR 290.0f
+// Rated full scale - readings are clamped here (the UI shows "5+" rather
+// than an invented number) and the plausibility window is derived from it.
+#define PRESSURE_SENSOR_MAX_BAR 5.0f
+// Closed-loop pressure control (profile ramp/decline stages) needs a sensor
+// that can actually read the target. False while the 5-bar part is fitted:
+// profile pressure stages are ignored and shots run at plain pump power
+// (PUMP_BREW_POWER_PCT) instead. Set true again once a 0-1.6 MPa sensor is
+// installed and calibrated.
+#define PRESSURE_CLOSED_LOOP_AVAILABLE false
 
 // Same rolling error-rate fault model as the temp sensor (see
 // SENSOR_FAULT_WINDOW above) - a separate window since pressure and temp
@@ -146,7 +182,10 @@
 
 // Hard safety ceiling - comfortably under the machine's 16-bar safety valve
 // rating (docs/oem-manuals/hydraulic-schematic-SAI0103.pdf), above the
-// ~9 bar working target. Forces the dimmer to 0% immediately if exceeded or
+// ~9 bar working target. NOTE (2026-10-01): with the current 0-5 bar sensor
+// this ceiling is above the sensor's range, so it cannot trip on a real
+// over-pressure - the machine's mechanical 16-bar safety valve is the
+// effective limit, exactly as on the stock machine. Forces the dimmer to 0% immediately if exceeded or
 // if the pressure sensor is faulted, independent of PID/profile output -
 // same "cutoff wins over everything" rule as activeMaxSafety for
 // temperature. Fixed, not Web-UI-configurable (mirrors BREW_MAX_SAFETY,
