@@ -511,8 +511,10 @@ fail-off tradeoff this accepts.
 **Pump power is pulse-skip modulation since 2026-10-01** (whole mains
 cycles fired near zero-cross or skipped, Bresenham-spread; same approach
 as Gaggiuino/GaggiMate's PSM library) instead of phase-angle. Plain-duty
-shots use two Web-UI settings (Settings -> Pump power): **brew 80%**,
-**pre-infusion 40%** by default. % sets flow, not pressure - the bar you
+shots use Web-UI settings (Settings -> Pump power): **brew 45%** (~9 bar
+with a dialed standard-basket puck, from the EP5 pump curve - see
+`config.h`), **pre-infusion 40%** as a fill that ends when the 0-5 bar
+sensor reads ~3 bar (min 4 s, max 15 s), optional soak. % sets flow, not pressure - the bar you
 get depends on the puck.
 
 **Two things, one build:**

@@ -62,6 +62,9 @@ extern unsigned long shotStartMillis;
 extern unsigned long shotAutoStopSec;
 extern int pumpBrewPowerPct;
 extern int pumpPreinfusionPowerPct;
+extern double preinfusionFillBar;
+extern int preinfusionFillMaxSec;
+extern int preinfusionSoakSec;
 extern void startShot();
 extern void stopShot();
 extern ShotPhase currentShotPhase;
@@ -747,8 +750,8 @@ const char *index_html = R"rawliteral(
             <div class="field"><label for="input_profile_autostop">Auto-stop (sec)</label><input type="number" step="1" min="5" max="90" id="input_profile_autostop" value="27" oninput="drawProfilePreview()"></div>
           </div>
           <label class="check-row"><input type="checkbox" id="input_profile_pi_enabled" onchange="drawProfilePreview()"> Pulsed pre-infusion</label>
-          <p class="hint" style="margin-top:var(--sp-2)">Pulses the pump on/off before continuous extraction to wet the puck. "On" runs at the pre-infusion pump power (Settings &rarr; Pump power).</p>
-          <div class="field-row-3" style="margin-top:var(--sp-3)">
+          <p class="hint" style="margin-top:var(--sp-2)">Fills the basket gently until the puck is saturated, then extracts. Fill pressure, max time and soak are set in Settings &rarr; Pump power.</p>
+          <div class="field-row-3" style="margin-top:var(--sp-3)" hidden>
             <div class="field"><label for="input_profile_pi_pulses">Pulses</label><input type="number" step="1" min="0" max="10" id="input_profile_pi_pulses" value="3" oninput="drawProfilePreview()"></div>
             <div class="field"><label for="input_profile_pi_on">On (sec)</label><input type="number" step="0.1" min="0.2" max="5" id="input_profile_pi_on" value="1" oninput="drawProfilePreview()"></div>
             <div class="field"><label for="input_profile_pi_off">Off (sec)</label><input type="number" step="0.1" min="0.2" max="5" id="input_profile_pi_off" value="2" oninput="drawProfilePreview()"></div>
@@ -860,9 +863,21 @@ const char *index_html = R"rawliteral(
             <label for="input_pump_pi_pct">Pre-infusion pump power (%)</label>
             <input type="number" step="1" min="10" max="100" name="pump_pi_pct" id="input_pump_pi_pct" value="">
           </div>
+          <div class="field">
+            <label for="input_pi_fill_bar">Pre-infusion: fill until (bar)</label>
+            <input type="number" step="0.1" min="1" max="4.5" name="pi_fill_bar" id="input_pi_fill_bar" value="">
+          </div>
+          <div class="field">
+            <label for="input_pi_fill_max_s">Pre-infusion: max fill time (s)</label>
+            <input type="number" step="1" min="5" max="30" name="pi_fill_max_s" id="input_pi_fill_max_s" value="">
+          </div>
+          <div class="field">
+            <label for="input_pi_soak_s">Pre-infusion: soak, pump off (s, 0 = none)</label>
+            <input type="number" step="1" min="0" max="15" name="pi_soak_s" id="input_pi_soak_s" value="">
+          </div>
           <button type="submit" class="submit">Save</button>
         </form>
-        <p class="hint" style="margin-top:var(--sp-3)">Percent of pump strokes allowed. This sets flow, not pressure: the bar you get depends on grind, dose and tamp. Lower brew power for a gentler, lower-pressure shot; if the shot runs too slow, grind coarser before raising it.</p>
+        <p class="hint" style="margin-top:var(--sp-3)">Percent of pump strokes allowed. This sets flow, not pressure: with a standard basket, 45% brew lands near 9 bar for a well-dialed shot (~36 g in 25-30 s). Too fast: grind finer; too slow: grind coarser - adjust grind before power. Pre-infusion (turned on per profile) fills at its own power until the sensor reads the fill pressure (at least 4 s, at most the max time), then soaks if set. Pressure readings are approximate (0-5 bar sensor).</p>
       </div>
 
       <div class="group-title">Power</div>
@@ -1582,6 +1597,9 @@ function applyStatus(json) {
   setVal("input_shot_auto_stop", json.shot_auto_stop_sec);
   if (typeof json.pump_brew_pct === "number") setVal("input_pump_brew_pct", json.pump_brew_pct);
   if (typeof json.pump_pi_pct === "number") setVal("input_pump_pi_pct", json.pump_pi_pct);
+  if (typeof json.pi_fill_bar === "number") setVal("input_pi_fill_bar", json.pi_fill_bar);
+  if (typeof json.pi_fill_max_s === "number") setVal("input_pi_fill_max_s", json.pi_fill_max_s);
+  if (typeof json.pi_soak_s === "number") setVal("input_pi_soak_s", json.pi_soak_s);
   var passHint = document.getElementById("mqtt_pass_hint");
   if (passHint) passHint.hidden = !json.mqtt_pass_set;
 
@@ -2147,6 +2165,8 @@ static void handleStatus(AsyncWebServerRequest *request) {
   OpMode snapModeBeforeSleep = modeBeforeSleep;
   unsigned long snapShotAutoStopSec = shotAutoStopSec;
   int snapPumpBrewPct = pumpBrewPowerPct, snapPumpPiPct = pumpPreinfusionPowerPct;
+  double snapPiFillBar = preinfusionFillBar;
+  int snapPiFillMaxS = preinfusionFillMaxSec, snapPiSoakS = preinfusionSoakSec;
   AutotuneState snapAutotuneState = autotuneState;
   String snapAutotuneMessage = autotuneMessage;
   bool snapShotInProgress = shotInProgress;
@@ -2263,6 +2283,9 @@ static void handleStatus(AsyncWebServerRequest *request) {
   json += ",\"shot_auto_stop_sec\":" + String(snapShotAutoStopSec);
   json += ",\"pump_brew_pct\":" + String(snapPumpBrewPct);
   json += ",\"pump_pi_pct\":" + String(snapPumpPiPct);
+  json += ",\"pi_fill_bar\":" + String(snapPiFillBar, 1);
+  json += ",\"pi_fill_max_s\":" + String(snapPiFillMaxS);
+  json += ",\"pi_soak_s\":" + String(snapPiSoakS);
   json += ",\"pressure_max_bar\":" + String(PRESSURE_SENSOR_MAX_BAR, 1);
   json += ",\"press_available\":" + String(PRESSURE_CLOSED_LOOP_AVAILABLE ? "true" : "false");
 
@@ -2484,6 +2507,18 @@ static void handleUpdate(AsyncWebServerRequest *request) {
   if (hasArg("pump_pi_pct")) {
     pumpPreinfusionPowerPct = constrain(arg("pump_pi_pct").toInt(), PUMP_POWER_PCT_MIN, PUMP_POWER_PCT_MAX);
     preferences.putInt("pump_pi_pct", pumpPreinfusionPowerPct);
+  }
+  if (hasArg("pi_fill_bar")) {
+    preinfusionFillBar = constrain(arg("pi_fill_bar").toDouble(), PREINFUSION_FILL_BAR_MIN, PREINFUSION_FILL_BAR_MAX);
+    preferences.putDouble("pi_fill_bar", preinfusionFillBar);
+  }
+  if (hasArg("pi_fill_max_s")) {
+    preinfusionFillMaxSec = constrain(arg("pi_fill_max_s").toInt(), PREINFUSION_FILL_MAX_S_MIN, PREINFUSION_FILL_MAX_S_MAX);
+    preferences.putInt("pi_fill_max_s", preinfusionFillMaxSec);
+  }
+  if (hasArg("pi_soak_s")) {
+    preinfusionSoakSec = constrain(arg("pi_soak_s").toInt(), 0, PREINFUSION_SOAK_S_MAX);
+    preferences.putInt("pi_soak_s", preinfusionSoakSec);
   }
 
   // Eco / auto-sleep
@@ -2809,6 +2844,9 @@ void setupWeb() {
     q += "&shot_auto_stop_sec=" + String(shotAutoStopSec);
     q += "&pump_brew_pct=" + String(pumpBrewPowerPct);
     q += "&pump_pi_pct=" + String(pumpPreinfusionPowerPct);
+    q += "&pi_fill_bar=" + String(preinfusionFillBar, 1);
+    q += "&pi_fill_max_s=" + String(preinfusionFillMaxSec);
+    q += "&pi_soak_s=" + String(preinfusionSoakSec);
     q += "&eco_timeout_min=" + String(ecoTimeoutMin);
     q += "&steam_auto_off_min=" + String(steamAutoOffMin);
     q += "&descale_shot_threshold=" + String(descaleShotThreshold);

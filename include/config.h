@@ -132,13 +132,41 @@
 // Pump power used by plain-duty shot stages (no closed-loop pressure
 // control) - both live-editable from the Web UI and persisted in NVS.
 // NOTE: power sets FLOW, not pressure. With a vibration pump the brew
-// pressure is whatever the puck's resistance makes of that flow, so the
-// same % gives different bar with a different grind/dose/tamp. 80% is a
-// starting point to bring the stock ~12-15 bar down; tune it by shot time
-// (finer grind / higher % = more pressure) until a real-range pressure
-// sensor allows closed-loop control.
-#define PUMP_BREW_POWER_PCT_DEFAULT 80
+// pressure is wherever pump flow and puck flow balance, so the same % gives
+// different bar with a different grind/dose/tamp.
+//
+// How the defaults were chosen (2026-10-01): ULKA EP5 datasheet curve is
+// ~650 ml/min @0 bar, ~300 @8, ~210 @10, 0 @15 - close to linear,
+// Q ~= 10.8 - 0.72*P ml/s at 100%; with PSM, N% scales that by N.
+// A properly dialed puck (~36 g in ~25 s) passes ~1.5-2 ml/s near 9 bar.
+// Balancing the two (linear and saturating puck models agree):
+//   100% ~11.5-12.5 bar, 80% ~11-12, 45% ~9-9.5, 35% ~8.
+// So 45% targets ~9 bar with a STANDARD (multi-hole) basket; with a
+// pressurized basket the single exit hole sets pressure instead.
+// Pre-infusion 40% ~= 4 ml/s at low pressure, matching Gaggiuino's default
+// 3-4 ml/s fill (reference/gaggiuino-fw default_profiles.h).
+#define PUMP_BREW_POWER_PCT_DEFAULT 45
 #define PUMP_PREINFUSION_POWER_PCT_DEFAULT 40
+
+// Pre-infusion fill (2026-10-01) - replaces the old on/off pulse pattern:
+// pump continuously at PUMP_PREINFUSION_POWER_PCT until the pressure sensor
+// sees the puck saturate (>= fill bar), then an optional soak (pump off),
+// then extraction. Same shape as Gaggiuino's "fill until 4 bar" and
+// GaggiMate's "fill until 3 bar" defaults, and it's the one place the 0-5
+// bar sensor is actually in range. Pulses moved too little water (4 x 1 s
+// ~= 16 ml) to even fill the headspace above the puck.
+//  - FILL_MIN_MS: never exit before this, so the restriction pressure of
+//    water first pushing through the shower screen can't end it early.
+//  - Max fill: hard time limit - also the only exit if the sensor faults.
+#define PREINFUSION_FILL_BAR_DEFAULT 3.0
+#define PREINFUSION_FILL_BAR_MIN 1.0
+#define PREINFUSION_FILL_BAR_MAX 4.5
+#define PREINFUSION_FILL_MIN_MS 4000
+#define PREINFUSION_FILL_MAX_S_DEFAULT 15
+#define PREINFUSION_FILL_MAX_S_MIN 5
+#define PREINFUSION_FILL_MAX_S_MAX 30
+#define PREINFUSION_SOAK_S_DEFAULT 0
+#define PREINFUSION_SOAK_S_MAX 15
 #define PUMP_POWER_PCT_MIN 10
 #define PUMP_POWER_PCT_MAX 100
 

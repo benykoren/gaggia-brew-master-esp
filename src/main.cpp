@@ -544,8 +544,11 @@ void applyProfile(int idx) {
 ShotPhase currentShotPhase = ShotPhase::NONE;
 
 struct ShotStage {
-  enum class Type { PUMP_ON, PUMP_OFF, PRESSURE_TARGET, EXTRACTION } type;
-  unsigned long durationMs; // unused for EXTRACTION - runs until shot stop
+  // FILL = pre-infusion fill: pump at pre-infusion power until the pressure
+  // reaches preinfusionFillBar (after PREINFUSION_FILL_MIN_MS) or
+  // durationMs elapses, whichever is first.
+  enum class Type { PUMP_ON, PUMP_OFF, FILL, PRESSURE_TARGET, EXTRACTION } type;
+  unsigned long durationMs; // unused for EXTRACTION - runs until shot stop; max time for FILL
   float targetPressureBar;  // only meaningful for PRESSURE_TARGET/EXTRACTION; 0 = no pressure target (plain duty)
 };
 
@@ -579,6 +582,10 @@ static float plainDutyPercent = 0.0f;
 // pressure control isn't in use.
 int pumpBrewPowerPct = PUMP_BREW_POWER_PCT_DEFAULT;
 int pumpPreinfusionPowerPct = PUMP_PREINFUSION_POWER_PCT_DEFAULT;
+// Pre-infusion fill settings (config.h) - global, persisted, Web UI.
+double preinfusionFillBar = PREINFUSION_FILL_BAR_DEFAULT;
+int preinfusionFillMaxSec = PREINFUSION_FILL_MAX_S_DEFAULT;
+int preinfusionSoakSec = PREINFUSION_SOAK_S_DEFAULT;
 
 float currentPressure = 0.0;
 bool pressureFault = false;
@@ -624,7 +631,8 @@ static void applyShotStagePumpOutput(const ShotStage &stage) {
     pressurePID.SetMode(MANUAL);
     switch (stage.type) {
       case ShotStage::Type::PUMP_OFF: plainDutyPercent = 0.0f; break;
-      case ShotStage::Type::PUMP_ON: plainDutyPercent = (float)pumpPreinfusionPowerPct; break;
+      case ShotStage::Type::PUMP_ON:
+      case ShotStage::Type::FILL: plainDutyPercent = (float)pumpPreinfusionPowerPct; break;
       default: plainDutyPercent = (float)pumpBrewPowerPct; break;
     }
     dimmerSetPowerPercent(plainDutyPercent);
@@ -638,12 +646,14 @@ static void applyShotStagePumpOutput(const ShotStage &stage) {
 // control isn't enabled for this profile).
 static void buildShotStages() {
   activeStageCount = 0;
-  if (activePreinfusionEnabled && activePreinfusionPulses > 0) {
-    for (int i = 0; i < activePreinfusionPulses; i++) {
-      activeShotStages[activeStageCount++] = {ShotStage::Type::PUMP_ON, (unsigned long)activePreinfusionOnMs, 0.0f};
-      if (i < activePreinfusionPulses - 1) {
-        activeShotStages[activeStageCount++] = {ShotStage::Type::PUMP_OFF, (unsigned long)activePreinfusionOffMs, 0.0f};
-      }
+  // The profile's pre-infusion checkbox turns the fill on; its legacy
+  // pulse count/on/off fields are no longer used (see config.h).
+  if (activePreinfusionEnabled) {
+    activeShotStages[activeStageCount++] = {ShotStage::Type::FILL,
+                                             (unsigned long)preinfusionFillMaxSec * 1000UL, 0.0f};
+    if (preinfusionSoakSec > 0) {
+      activeShotStages[activeStageCount++] = {ShotStage::Type::PUMP_OFF,
+                                               (unsigned long)preinfusionSoakSec * 1000UL, 0.0f};
     }
   }
 
@@ -673,7 +683,8 @@ static void buildShotStages() {
 
 static ShotPhase phaseForStageType(ShotStage::Type t) {
   switch (t) {
-    case ShotStage::Type::PUMP_ON: return ShotPhase::PREINFUSION_ON;
+    case ShotStage::Type::PUMP_ON:
+    case ShotStage::Type::FILL: return ShotPhase::PREINFUSION_ON;
     case ShotStage::Type::PUMP_OFF: return ShotPhase::PREINFUSION_OFF;
     case ShotStage::Type::PRESSURE_TARGET: return ShotPhase::PRESSURE;
     default: return ShotPhase::EXTRACTION;
@@ -690,7 +701,13 @@ static void tickShotStages(unsigned long now) {
   ShotStage &stage = activeShotStages[currentStageIndex];
   if (stage.type == ShotStage::Type::EXTRACTION) return; // open-ended, nothing to advance to
 
-  if (now - stageStartMillis < stage.durationMs) return;
+  unsigned long elapsed = now - stageStartMillis;
+  // A fill ends early once the puck is saturated - but only on a healthy
+  // reading and never before the minimum time (see config.h).
+  bool fillReached = stage.type == ShotStage::Type::FILL && !pressureFault &&
+                     elapsed >= PREINFUSION_FILL_MIN_MS &&
+                     currentPressure >= (float)preinfusionFillBar;
+  if (elapsed < stage.durationMs && !fillReached) return;
 
   currentStageIndex++; // EXTRACTION is always the last stage, so this always stays in-bounds
   ShotStage &next = activeShotStages[currentStageIndex];
@@ -882,6 +899,12 @@ void setup() {
                                PUMP_POWER_PCT_MIN, PUMP_POWER_PCT_MAX);
   pumpPreinfusionPowerPct = constrain(preferences.getInt("pump_pi_pct", PUMP_PREINFUSION_POWER_PCT_DEFAULT),
                                       PUMP_POWER_PCT_MIN, PUMP_POWER_PCT_MAX);
+  preinfusionFillBar = constrain(preferences.getDouble("pi_fill_bar", PREINFUSION_FILL_BAR_DEFAULT),
+                                 PREINFUSION_FILL_BAR_MIN, PREINFUSION_FILL_BAR_MAX);
+  preinfusionFillMaxSec = constrain(preferences.getInt("pi_fill_max_s", PREINFUSION_FILL_MAX_S_DEFAULT),
+                                    PREINFUSION_FILL_MAX_S_MIN, PREINFUSION_FILL_MAX_S_MAX);
+  preinfusionSoakSec = constrain(preferences.getInt("pi_soak_s", PREINFUSION_SOAK_S_DEFAULT),
+                                 0, PREINFUSION_SOAK_S_MAX);
   for (int i = 0; i < SCHED_MAX_COUNT; i++) {
     String p = "sched" + String(i) + "_";
     schedEnabled[i] = preferences.getBool((p + "en").c_str(), i == 0 ? SCHED_ENABLED_DEFAULT : false);

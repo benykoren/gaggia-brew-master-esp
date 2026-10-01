@@ -848,6 +848,32 @@ everything again.
 
 ## 10. Change Log
 
+### 2026-10-01 — Claude Code (Opus 5.5) — Pre-infusion fill ends on pressure; brew power 45% from the EP5 pump curve
+
+- **Brew pump power default 80% -> 45%.** Worked out from the ULKA EP5
+  datasheet curve (~650 ml/min @0 bar, ~300 @8, ~210 @10, 0 @15; roughly
+  Q = 10.8 - 0.72*P ml/s) against a dialed puck passing ~1.5-2 ml/s near
+  9 bar: 100% ~11.5-12.5 bar, 80% ~11-12, 45% ~9-9.5. Assumes a standard
+  (multi-hole) basket. Model numbers, not measurements - the sensor can't
+  read 9 bar. Research also confirmed this machine has no 9-bar OPV: the
+  pump (15 bar) and the 16-bar safety valve are the only limits.
+- **Pre-infusion is now a fill, not pulses**: pump at pre-infusion power
+  (40% ~= 4 ml/s, matching Gaggiuino's 3-4 ml/s fill) until the sensor
+  reads the fill pressure (default 3 bar, like GaggiMate's default),
+  never before 4 s, at most 15 s (also the only exit if the sensor
+  faults), then an optional soak (pump off, default 0 s). It's the one job
+  the 0-5 bar sensor can do in range. New `ShotStage::Type::FILL`.
+- Fill settings are **global** (Settings -> Pump power; NVS keys
+  `pi_fill_bar`, `pi_fill_max_s`, `pi_soak_s`; `/status`, `/update`,
+  settings export), not per profile - simpler than widening the profile
+  format for a single-machine setup. A profile's pre-infusion checkbox
+  still turns it on; the old pulse fields are hidden and ignored.
+- Caveat: "3 bar" depends on the unverified 290 mV/bar scale - it could
+  really be ~1.7-3 bar. Fine for "puck saturated", not an exact number.
+- Flashed via OTA (fw `Oct 1 2026 19:18:39`). The user pulled a shot right
+  after; it ran in extraction at 45% (pre-infusion is still off in the
+  active profile).
+
 ### 2026-10-01 — Claude Code (Opus 5.5) — 5-bar sensor: closed loop disabled, pump power via pulse-skip (80% brew / 40% pre-infusion)
 
 - **Correction to the entry below**: the fitted pressure sensor is a
