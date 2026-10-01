@@ -848,6 +848,148 @@ everything again.
 
 ## 10. Change Log
 
+### 2026-10-01 — Claude Code (Opus 5.5) — Pre-infusion back to profile pulses; pressure fill gated off for the 5-bar sensor
+
+- **The pressure-terminated fill (entry below) doesn't work with the 0-5
+  bar sensor.** Empty-basket test: the pump-outlet reading hit the
+  sensor's ~1.6V ceiling within 0.3 s (vibration-pump stroke spikes exceed
+  5 bar even with no puck), so the fill always ended at its 4 s minimum.
+  With coffee, users also see ~4.3 "bar" during pre-infusion - that's the
+  ceiling, not puck pressure.
+- **Pre-infusion is now the profile's own pulses again** (count / on /
+  off), with "on" at the pre-infusion pump power (40%) and "off" = pump
+  stopped. The fill path stays in code, used only when
+  `PRESSURE_CLOSED_LOOP_AVAILABLE` is true (a 0-16 bar sensor); its
+  Settings fields are hidden until then. Pulse fields are visible in the
+  profile editor again.
+- UX note found while testing: saving a profile does not load it - the
+  user's new pulse profile wasn't active. Profile editor hint now says so.
+- Built but **not flashed** (user stopped the OTA) - pushed to PR #23 only.
+
+### 2026-10-01 — Claude Code (Opus 5.5) — Pre-infusion fill ends on pressure; brew power 45% from the EP5 pump curve
+
+- **Brew pump power default 80% -> 45%.** Worked out from the ULKA EP5
+  datasheet curve (~650 ml/min @0 bar, ~300 @8, ~210 @10, 0 @15; roughly
+  Q = 10.8 - 0.72*P ml/s) against a dialed puck passing ~1.5-2 ml/s near
+  9 bar: 100% ~11.5-12.5 bar, 80% ~11-12, 45% ~9-9.5. Assumes a standard
+  (multi-hole) basket. Model numbers, not measurements - the sensor can't
+  read 9 bar. Research also confirmed this machine has no 9-bar OPV: the
+  pump (15 bar) and the 16-bar safety valve are the only limits.
+- **Pre-infusion is now a fill, not pulses**: pump at pre-infusion power
+  (40% ~= 4 ml/s, matching Gaggiuino's 3-4 ml/s fill) until the sensor
+  reads the fill pressure (default 3 bar, like GaggiMate's default),
+  never before 4 s, at most 15 s (also the only exit if the sensor
+  faults), then an optional soak (pump off, default 0 s). It's the one job
+  the 0-5 bar sensor can do in range. New `ShotStage::Type::FILL`.
+- Fill settings are **global** (Settings -> Pump power; NVS keys
+  `pi_fill_bar`, `pi_fill_max_s`, `pi_soak_s`; `/status`, `/update`,
+  settings export), not per profile - simpler than widening the profile
+  format for a single-machine setup. A profile's pre-infusion checkbox
+  still turns it on; the old pulse fields are hidden and ignored.
+- Caveat: "3 bar" depends on the unverified 290 mV/bar scale - it could
+  really be ~1.7-3 bar. Fine for "puck saturated", not an exact number.
+- Flashed via OTA (fw `Oct 1 2026 19:18:39`). The user pulled a shot right
+  after; it ran in extraction at 45% (pre-infusion is still off in the
+  active profile).
+
+### 2026-10-01 — Claude Code (Opus 5.5) — 5-bar sensor: closed loop disabled, pump power via pulse-skip (80% brew / 40% pre-infusion)
+
+- **Correction to the entry below**: the fitted pressure sensor is a
+  **0-0.5 MPa (0-5 bar)** part ("G41 0.5Mpa IN5V"), not 1.6 MPa - the
+  earlier figure came from the listing's variant name. That also explains
+  the ~1.63V clipping. Details and the replacement plan in
+  `HARDWARE_ROADMAP.md` item 7.
+- **`config.h`**: `PRESSURE_SENSOR_MAX_BAR` 5, `PRESSURE_SENSOR_ZERO_MV` 158
+  (measured), `PRESSURE_SENSOR_MV_PER_BAR` 290 (estimate, unverified),
+  readings clamped at full scale, plausibility window from the sensor range
+  (`pressure_sensor.cpp`). `PRESSURE_CLOSED_LOOP_AVAILABLE false` makes
+  `buildShotStages()` ignore profile pressure stages. This also fixes the
+  false 12-bar ceiling trips the old 82.5 mV/bar scale caused on normal
+  shots. `PUMP_MAX_SAFETY_BAR` unchanged (12) - noted it can't trip with a
+  5-bar sensor; the 16-bar valve is the effective limit.
+- **Dimmer switched from phase-angle to pulse-skip modulation**
+  (`dimmer.cpp`): fire whole mains cycles near zero-cross or skip them,
+  Bresenham-spread, integer-only ISR. Matches how Gaggiuino/GaggiMate drive
+  vibration pumps (`reference/`); the old linear-delay phase mapping made
+  "80%" ~95% RMS and fired an unsnubbered TRIAC mid-cycle on an inductive
+  load. 100% behaves exactly as before.
+- **New plain-duty pump powers**, persisted + Web UI (Settings -> Pump
+  power) + `/status` (`pump_brew_pct`, `pump_pi_pct`) + settings export:
+  extraction 80%, pre-infusion "on" pulses 40%. Also `/status` gains
+  `pressure_max_bar` and `press_available`; the pressure gauge scales to
+  the sensor and drops the 9-bar goal coloring while closed loop is off.
+- **Why 80% isn't "9 bar"**: with a vibration pump, % sets flow and the
+  puck sets pressure - no fixed % maps to a bar value. 80% is a starting
+  point below stock full power, tunable by shot time.
+- Flashed via OTA (fw `Oct 1 2026 19:06:04`), verified new `/status`
+  fields; **not shot-tested** (user away - no unattended pump runs). The
+  active profile still has pre-infusion disabled (`pi_enabled: false`);
+  enable it in the profile editor to use the 40% soak.
+
+### 2026-10-01 — Claude Code (Opus 5.5) — Pressure calibration attempt: sensor clips on 3V3; uncommanded pump run investigated
+
+- **Added `pressure_mv` to `/status`** (`pressureSensorLastMv()`, raw ADC
+  millivolts before the bar conversion/plausibility clamp) so the
+  transducer can be calibrated against physical reference points.
+- **Sensor identified**: 0-1.6 MPa, 5V supply, G1/4 (order variant
+  "G41 1.6Mpa IN5V"). Still powered from 3V3.
+- **Result: the sensor's output clips at ~1.62-1.64V on 3V3.** Free flow
+  (3 runs) and a choked puck both topped out at the same ~1620-1640 mV,
+  and trapped pressure after Stop read flat at that ceiling. Calibration on
+  3V3 is therefore impossible above roughly 8-9 bar. Full numbers and the
+  fix (3.3->5V boost module + on-hand 4.3k/10k divider) in
+  `HARDWARE_ROADMAP.md` item 7. **No calibration constants were changed.**
+- **Safety ceiling handling, explicit user approval**: for the choked-puck
+  test the user personally edited `PUMP_MAX_SAFETY_BAR` 12 -> 30 (the
+  agent was blocked from weakening it); restored to 12.0 and flashed
+  (fw `Oct 1 2026 18:28:05`) right after. Noted: with the current wrong
+  82.5 mV/bar scale, the unconditional ceiling check can false-trip during
+  normal plain-duty shots, and with a clipped sensor it can't see a real
+  12 bar either.
+- **Incident - pump ran ~50s at `pump_power` 0 with the Brew switch on**,
+  zero-cross counter not advancing. Checked unplugged: fuse OK, dimmer
+  `IN`-`OUT` open, all mains and control wires continuous, pump circuit
+  OK in diode mode (conducts one way - the ULKA's internal diode; Ω mode
+  read open both ways, which is misleading for this pump). Firmware ruled
+  out: only `dimmer.cpp` drives GPIO5, and only from the zero-cross ISR
+  when target > 0. After the user restarted the machine (ESP32 included),
+  behavior was normal again: Brew on/no shot = silent with ZC ~100/s, and
+  Stop really stops the pump. **Root cause not confirmed** - leading
+  theory is TRIAC self-triggering on the inductive pump load (no RC
+  snubber on this module); an ESP-side stuck state can't be fully excluded
+  since a restart cleared it. Recommended: add an RC snubber across
+  `IN`-`OUT` (pending the TRIAC's part number), and keep the Brew switch as
+  the manual kill.
+- Also noted for next time: an OTA was pushed while a shot was in progress
+  (agent error - status showed `shot_in_progress: true`); the reboot ended
+  the shot cleanly. Check that field before any OTA.
+
+### 2026-10-01 — Claude Code (Opus 5.5) — Replacement dimmer installed with a fuse; Milestone A re-confirmed
+
+- **Replacement dimmer module installed** (after the first one's TRIAC was
+  destroyed by the `OUT`/`N` swap, see the 2026-09-15 entry below). The
+  new module's mains side has **3 terminals, `IN` / `N` / `OUT`** - not the
+  4-terminal `L(IN)/N(IN)/L(OUT)/N(OUT)` layout the docs previously
+  assumed. `N` is a sense-only Neutral for zero-cross detection; the pump
+  goes `OUT` -> pump -> Neutral, with its Blue wire left on Neutral as
+  factory and `N` just branched off it. Full as-built wiring and pre/post-
+  wiring continuity checks now in `HARDWARE_ROADMAP.md` item 8.
+- **Added a 2A fast-acting glass fuse** (250V, enclosed holder) on the Live
+  side before `IN` - the first module had no fuse, so the only thing
+  between a wiring mistake and the TRIAC was the house breaker.
+- **Verified live, user at the machine**: Brew switch on with no shot ->
+  pump silent; `dimmer_zc_count` ~99.5/s (50Hz); `/update?shot=start` ->
+  `pump_power` 100, pump ran; `/update?shot=stop` -> 0, pump stopped
+  (physically confirmed by the user). **Milestone A restored.**
+- **Observed, not yet acted on**: (1) `/status` showed 11.7 bar ~3.5s into
+  that test shot - the transducer appears to be plumbed in now, but the
+  calibration is still the 2026-09-15 bench approximation, so this number
+  is unverified (Milestone B calibration still open). (2) The live
+  `steam_max_safety` setting is **135°C**, above T2's confirmed 127°C trip
+  point (Section 4 says not to sit at/past 127°C without deliberate
+  review) - flagged to the user, left unchanged pending their decision.
+- Documentation only - no firmware changes.
+
 ### 2026-09-15 — Cursor Grok 4.6 — Web UI: appliance-console redesign (telemetry, IA, states)
 
 - **Now tab tells the truth about the pump.** Heater and pump duty sit
