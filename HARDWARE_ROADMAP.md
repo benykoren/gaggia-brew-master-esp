@@ -431,8 +431,9 @@ time for it separately from the electrical work.
 
 ## Item 8 — Phase-control dimmer to a pressure target (e.g. 9 bar)
 
-**Status: module dead, wiring/splice confirmed good (2026-09-15) -
-waiting on a replacement module only.** On/off control was briefly
+**Status (2026-10-01): replacement module installed, Milestone A
+re-confirmed on the real machine** - see "Replacement install" below.
+History: on/off control was briefly
 complete and verified on the real machine (2026-09-15, Milestone A - see
 `AGENTS.md`'s first 2026-09-15 change log entry), but shortly after, an
 accidental `OUT`/`N` terminal swap during unrelated wiring work put the
@@ -443,30 +444,45 @@ check down to probing the module's own terminals in total isolation
 (nothing wired to `IN`/`OUT`/`N`) - still shorted, so the fault is the
 module itself, not the external wiring, which has since been corrected
 and confirmed good. Full diagnosis in `AGENTS.md`'s second 2026-09-15
-change log entry. **The pump currently runs whenever the physical Brew
-switch is closed, with zero ESP32 control** - this is not a safe or
-working state to leave the machine in between sessions, until the
-replacement module is dropped in.
-**Terminal layout, worth getting right this time**: these boards have
-four separate mains terminals, not a generic "IN"/"OUT" pair - `L(IN)`,
-`N(IN)`, `L(OUT)`, `N(OUT)`. Only the Live leg (`L(IN)`->`L(OUT)`) is
-switched by the TRIAC; `N(IN)`->`N(OUT)` is a straight, always-connected
-pass-through. The pump must bridge `L(OUT)`/`N(OUT)` as the load - never
-let `N(OUT)` (or `N(IN)`) land anywhere except true Neutral.
-**Replacement module identified**: a RobotDyn-style "AC Light/Motor
-Dimmer Module," 1-channel, 3.3V/5V logic, 8A/400V (well above the pump's
-sub-1A draw, and explicitly rated for motor/inductive loads) - purchase
-in progress. Before wiring it in: verify `L(IN)`-`L(OUT)` reads open with
-nothing connected to any terminal, then swap it into the already-correct
-wiring (Live -> `L(IN)`, Neutral -> `N(IN)`, pump bridging
-`L(OUT)`/`N(OUT)`) - no re-wiring of the splice itself should be needed,
-just landing the same wires on the new module's terminals. **Once
-swapped in, re-run the Milestone A on/off test** (Start Shot/Stop Shot
-via the ESP32) to confirm control is restored before moving on.
+change log entry.
+
+**Replacement install (2026-10-01) - the module actually installed has a
+3-terminal mains side, `IN` / `N` / `OUT`** (control side `VCC` / `GND` /
+`Z-C` / `PSM`), NOT the 4-terminal `L(IN)`/`N(IN)`/`L(OUT)`/`N(OUT)`
+layout this section previously described. `IN`->`OUT` is the TRIAC
+(switched Live); `N` is a **sense-only** Neutral for zero-cross detection
+and carries no load current. The pump connects `OUT` -> pump -> Neutral;
+the pump's Blue wire stays on Neutral exactly as factory, and `N` is just
+a branch off that Neutral. **The pump must never land on `N`** - pump
+White on `N` with Neutral on `OUT` is precisely the swap that killed the
+first module (TRIAC fires straight across Live-Neutral).
+
+As-built wiring:
+```
+Brew switch White terminal ─[2A fast glass fuse, enclosed holder]─ IN
+OUT ── White wire ── PUMP ── Blue ──┬── Main switch (Neutral, unchanged)
+N ──────────── sense branch ────────┘
+VCC → 3V3   GND → GND   Z-C → GPIO6 (PIN_DIMMER_ZC)   PSM → GPIO5 (PIN_DIMMER_GATE)
+```
+- **Fuse added this time** (wasn't present when the first module died):
+  2A fast-acting glass, 250V, Live side before `IN`, in an enclosed
+  holder. Pump draws well under 1A, so 2A never nuisance-blows; a dead
+  short clears it in milliseconds instead of welding the TRIAC. A ceramic
+  F1A is a nice-to-have upgrade (glass has a low breaking capacity, ~35A,
+  vs. a dead-short prospective current far above that).
+- **Pre-install checks** (module unwired, meter on continuity): `IN`-`OUT`
+  open; `IN`-`N` and `OUT`-`N` must not beep (a high kΩ+ reading through
+  the zero-cross circuit is normal); no continuity from any mains terminal
+  to any control pin. **Post-wiring, still unplugged**: `OUT`-`N` reads
+  the pump coil's resistance (not 0Ω); `IN`-`N` and `IN`-`OUT` open.
+- **Verified live (2026-10-01)**: Brew switch on, no shot -> pump silent
+  (module not shorted); `dimmer_zc_count` rising ~99.5/s (50Hz mains
+  confirmed); `/update?shot=start` -> `pump_power` 100, pump ran;
+  `/update?shot=stop` -> `pump_power` 0, pump stopped (user-confirmed
+  physically). **Milestone A restored.**
 **Closed-loop pressure-target half not yet started** - depends on item
 7's transducer being physically plumbed in and calibrated first
-(bring-up Tasks 11-12), and now also on the replacement module being
-installed. **Depends on:** item 7 (pressure transducer) — hard
+(bring-up Tasks 11-12). **Depends on:** item 7 (pressure transducer) — hard
 prerequisite for the closed-loop pressure-target half only, see below.
 (Originally "item 9b.") **Also now covers item 4's former role** (plain
 pump on/off) — item 4 was dropped as a separate build on 2026-08-29 once

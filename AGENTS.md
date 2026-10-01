@@ -848,6 +848,32 @@ everything again.
 
 ## 10. Change Log
 
+### 2026-10-01 — Claude Code (Opus 5.5) — Replacement dimmer installed with a fuse; Milestone A re-confirmed
+
+- **Replacement dimmer module installed** (after the first one's TRIAC was
+  destroyed by the `OUT`/`N` swap, see the 2026-09-15 entry below). The
+  new module's mains side has **3 terminals, `IN` / `N` / `OUT`** - not the
+  4-terminal `L(IN)/N(IN)/L(OUT)/N(OUT)` layout the docs previously
+  assumed. `N` is a sense-only Neutral for zero-cross detection; the pump
+  goes `OUT` -> pump -> Neutral, with its Blue wire left on Neutral as
+  factory and `N` just branched off it. Full as-built wiring and pre/post-
+  wiring continuity checks now in `HARDWARE_ROADMAP.md` item 8.
+- **Added a 2A fast-acting glass fuse** (250V, enclosed holder) on the Live
+  side before `IN` - the first module had no fuse, so the only thing
+  between a wiring mistake and the TRIAC was the house breaker.
+- **Verified live, user at the machine**: Brew switch on with no shot ->
+  pump silent; `dimmer_zc_count` ~99.5/s (50Hz); `/update?shot=start` ->
+  `pump_power` 100, pump ran; `/update?shot=stop` -> 0, pump stopped
+  (physically confirmed by the user). **Milestone A restored.**
+- **Observed, not yet acted on**: (1) `/status` showed 11.7 bar ~3.5s into
+  that test shot - the transducer appears to be plumbed in now, but the
+  calibration is still the 2026-09-15 bench approximation, so this number
+  is unverified (Milestone B calibration still open). (2) The live
+  `steam_max_safety` setting is **135°C**, above T2's confirmed 127°C trip
+  point (Section 4 says not to sit at/past 127°C without deliberate
+  review) - flagged to the user, left unchanged pending their decision.
+- Documentation only - no firmware changes.
+
 ### 2026-09-15 — Cursor Grok 4.6 — Web UI: appliance-console redesign (telemetry, IA, states)
 
 - **Now tab tells the truth about the pump.** Heater and pump duty sit
