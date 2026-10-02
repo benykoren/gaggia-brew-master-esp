@@ -998,6 +998,13 @@ static bool updateFaultWindow(bool window[], int windowSize, int &index, int &fi
 static void controlTick(unsigned long now) {
   lockState();
 
+  // Dimmer slew + mains health (dimmer.cpp) - every tick, before anything
+  // below sets a new duty, so the slew always has a fresh dt.
+  static unsigned long lastDimmerTickMs = 0;
+  if (lastDimmerTickMs == 0) lastDimmerTickMs = now;
+  dimmerTick((uint32_t)(now - lastDimmerTickMs));
+  lastDimmerTickMs = now;
+
   // Read Temperature
   if (now - lastTempReadTime >= TEMP_READ_INTERVAL) {
     lastTempReadTime = now;

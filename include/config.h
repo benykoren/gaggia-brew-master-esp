@@ -111,13 +111,24 @@
 #define PIN_PRESSURE_ADC 1
 
 // Mains half-cycle at 50Hz is ~10ms (Israel/Europe mains) - change to 8333
-// if this machine is ever run on a 60Hz supply. DIMMER_MIN_FIRING_DELAY_US
-// is how close to the zero-cross the TRIAC is allowed to fire (0 risks
-// firing into switching noise right at the crossing); DIMMER_GATE_PULSE_US
-// is the minimum gate-trigger pulse width most TRIAC modules need.
+// if this machine is ever run on a 60Hz supply (now auto-detected at runtime;
+// this only seeds the initial debounce window).
 #define DIMMER_AC_HALF_CYCLE_US 10000
-#define DIMMER_MIN_FIRING_DELAY_US 300
-#define DIMMER_GATE_PULSE_US 100
+// Gate drive (2026-10-02 hardening, design spec §5): the gate goes HIGH in
+// the zero-cross ISR itself and is held DIMMER_GATE_HOLD_US, dropped by a
+// gptimer alarm. Long enough to span the true crossing whatever the
+// module's ZC offset, and for the pump's inductive current to rise past the
+// TRIAC's latching current (a 100 us pulse could end first = lost stroke).
+#define DIMMER_GATE_HOLD_US 1500
+// Duty rises at most this fast (pump hammer on shot start/phase steps);
+// decreases - including any cut to 0 - are always instant.
+#define DIMMER_SLEW_PCT_PER_S 250
+// Mains health: no accepted crossing for this long = ABSENT (Brew switch
+// off); a measured frequency outside MIN..MAX = UNSTABLE.
+#define DIMMER_MAINS_ABSENT_MS 100
+#define DIMMER_MAINS_HZ_MIN 45.0f
+#define DIMMER_MAINS_HZ_MAX 65.0f
+#define DIMMER_MAINS_HZ_DEFAULT 50.0f
 
 // Pump power is pulse-skip modulation (PSM), not phase-angle (2026-10-01):
 // the TRIAC is fired near the zero-cross on a chosen fraction of whole
