@@ -719,7 +719,7 @@ const char *index_html = R"rawliteral(
 
       <div class="card">
         <div class="tab-section-title">Pump pressure PID</div>
-        <p class="hint">Used only during a profile's pressure ramp/decline stages. Pre-infusion pulses stay on/off.</p>
+        <p class="hint">Used once a 0&ndash;16 bar sensor is fitted: adds a correction on top of the pump model during pressure phases.</p>
         <details class="disclosure">
           <summary>Kp / Ki / Kd</summary>
           <form action="/update" method="GET">
@@ -821,45 +821,24 @@ const char *index_html = R"rawliteral(
 
     <div class="view" data-view="settings" id="view-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
       <div class="group-title">Brewing</div>
-      <div class="card">
-        <div class="tab-section-title">Shot auto-stop</div>
-        <form action="/update" method="GET">
+      <div class="card" id="pump_cal_card">
+        <div class="tab-section-title">Pump calibration</div>
+        <p class="hint">Teaches the pump model how much water your pump moves. Remove the portafilter, put a cup on a scale under the group and tare it, and turn the Brew switch on. Each run pumps at full power for 10 s. Three runs are averaged; a run more than 10% off the others has to be redone.</p>
+        <div class="metric-row"><span>Current value</span><b><span id="pump_cal_current">--</span></b></div>
+        <div id="pump_cal_runs"></div>
+        <p id="pump_cal_status" class="hint" aria-live="polite"></p>
+        <p id="pump_cal_error" class="hint" style="color:var(--danger)" aria-live="assertive"></p>
+        <div id="pump_cal_grams_row" hidden>
           <div class="field">
-            <label for="input_shot_auto_stop">Stop pump after (seconds, 0 = manual only)</label>
-            <input type="number" step="1" min="0" name="shot_auto_stop_sec" id="input_shot_auto_stop" value="">
+            <label for="input_pump_cal_grams">Grams in the cup</label>
+            <input type="number" step="0.1" min="1" max="500" id="input_pump_cal_grams">
           </div>
-          <button type="submit" class="submit">Save</button>
-        </form>
-        <p class="hint" style="margin-top:var(--sp-3)">Cuts the pump via the dimmer when the timer hits this duration. Loading a profile overwrites this with that profile's own auto-stop. The physical Brew switch must still be on for the dimmer to have power.</p>
-      </div>
-      <div class="card">
-        <div class="tab-section-title">Pump power</div>
-        <form action="/update" method="GET">
-          <div class="field">
-            <label for="input_pump_brew_pct">Brew pump power (%)</label>
-            <input type="number" step="1" min="10" max="100" name="pump_brew_pct" id="input_pump_brew_pct" value="">
-          </div>
-          <div class="field">
-            <label for="input_pump_pi_pct">Pre-infusion pump power (%)</label>
-            <input type="number" step="1" min="10" max="100" name="pump_pi_pct" id="input_pump_pi_pct" value="">
-          </div>
-          <div id="pi_fill_fields" hidden>
-          <div class="field">
-            <label for="input_pi_fill_bar">Pre-infusion: fill until (bar)</label>
-            <input type="number" step="0.1" min="1" max="4.5" name="pi_fill_bar" id="input_pi_fill_bar" value="">
-          </div>
-          <div class="field">
-            <label for="input_pi_fill_max_s">Pre-infusion: max fill time (s)</label>
-            <input type="number" step="1" min="5" max="30" name="pi_fill_max_s" id="input_pi_fill_max_s" value="">
-          </div>
-          <div class="field">
-            <label for="input_pi_soak_s">Pre-infusion: soak, pump off (s, 0 = none)</label>
-            <input type="number" step="1" min="0" max="15" name="pi_soak_s" id="input_pi_soak_s" value="">
-          </div>
-          </div>
-          <button type="submit" class="submit">Save</button>
-        </form>
-        <p class="hint" style="margin-top:var(--sp-3)">Percent of pump strokes allowed. This sets flow, not pressure: with a standard basket, 45% brew lands near 9 bar for a well-dialed shot (~36 g in 25-30 s). Too fast: grind finer; too slow: grind coarser - adjust grind before power. Pre-infusion pulses (set per profile) run at the pre-infusion power. The current 0-5 bar sensor can't read brew pressure, so its reading shows near its ceiling during a shot.</p>
+          <button type="button" onclick="submitCalGrams()" class="submit">Record</button>
+        </div>
+        <button type="button" onclick="calAction('run')" id="btn_pump_cal_run" class="submit">Start run</button>
+        <button type="button" onclick="calAction('stop')" id="btn_pump_cal_stop" class="btn-secondary" hidden>Stop</button>
+        <button type="button" onclick="calAction('save')" id="btn_pump_cal_save" class="submit" hidden>Save calibration</button>
+        <button type="button" onclick="calAction('cancel')" class="btn-secondary">Clear runs</button>
       </div>
 
       <div class="group-title">Power</div>
@@ -952,7 +931,7 @@ const char *index_html = R"rawliteral(
           Restore from file
           <input type="file" accept=".txt" onchange="restoreSettings(this)" style="display:none">
         </label>
-        <p class="hint" style="margin-top:var(--sp-3)">Brew/Steam/schedule/MQTT settings. Named shot profiles live in a separate file and are not included here.</p>
+        <p class="hint" style="margin-top:var(--sp-3)">Brew/Steam/schedule/MQTT settings, the active profile and pump calibration. Your own shot profiles live in a separate file and are not included.</p>
       </div>
     </div>
     </main>
@@ -1604,26 +1583,27 @@ function applyStatus(json) {
     showBanner("pressure_banner", false);
   }
 
-   var pumpWanted = json.shot_in_progress || json.pump_cal_state === "running";
-   if (pumpWanted && json.pump_mains === "absent") {
-     showBanner("pump_banner", true, "No mains to the pump — turn the machine's Brew switch on.");
-   } else if (pumpWanted && json.pump_mains === "unstable") {
-     showBanner("pump_banner", true, "Mains zero-cross signal looks unstable (" + json.mains_hz.toFixed(1) + " Hz).");
-   } else {
-     showBanner("pump_banner", false);
-   }
-   showBanner("cal_banner", json.pump_calibrated === false);
+  var pumpWanted = json.shot_in_progress || json.pump_cal_state === "running";
+  if (pumpWanted && json.pump_mains === "absent") {
+    showBanner("pump_banner", true, "No mains to the pump — turn the machine's Brew switch on.");
+  } else if (pumpWanted && json.pump_mains === "unstable") {
+    showBanner("pump_banner", true, "Mains zero-cross signal looks unstable (" + json.mains_hz.toFixed(1) + " Hz).");
+  } else {
+    showBanner("pump_banner", false);
+  }
+  showBanner("cal_banner", json.pump_calibrated === false);
+  applyCalStatus(json);
 
-   var shotLabel = document.getElementById("shot_auto_stop_label");
-   if (json.shot_in_progress && json.phase_index >= 0) {
-     var unit = json.phase_type === "pressure" ? " bar" : json.phase_type === "flow" ? " ml/s" : json.phase_type === "power" ? "%" : "";
-     var tgt = json.phase_type === "soak" ? "pump off" : json.phase_target.toFixed(1) + unit;
-     shotLabel.textContent = json.phase_name + " · " + (json.phase_index + 1) + "/" + json.phase_count + " · " + tgt;
-   } else {
-     shotLabel.textContent = (json.active_profile_name || "--") + " · stops by " + json.active_max_sec + "s";
-   }
-   shotAutoStopSec = json.active_max_sec;
-   
+  var shotLabel = document.getElementById("shot_auto_stop_label");
+  if (json.shot_in_progress && json.phase_index >= 0) {
+    var unit = json.phase_type === "pressure" ? " bar" : json.phase_type === "flow" ? " ml/s" : json.phase_type === "power" ? "%" : "";
+    var tgt = json.phase_type === "soak" ? "pump off" : json.phase_target.toFixed(1) + unit;
+    shotLabel.textContent = json.phase_name + " · " + (json.phase_index + 1) + "/" + json.phase_count + " · " + tgt;
+  } else {
+    shotLabel.textContent = (json.active_profile_name || "--") + " · stops by " + json.active_max_sec + "s";
+  }
+  shotAutoStopSec = json.active_max_sec;
+  
   if (typeof json.active_profile_name === "string" && json.active_profile_name !== activeProfileName) {
     activeProfileName = json.active_profile_name;
     markActiveProfile();
@@ -1982,6 +1962,65 @@ function armDeleteProfile(btn, name) {
 
 function setSchedEnabled(i, checked) {
   xhr("/update?sched" + i + "_en=" + (checked ? "1" : "0"));
+}
+
+// Pump calibration card (design spec §6). Errors come back as 409 + text.
+function calDone(status, text) { setText("pump_cal_error", status === 200 ? "" : (text || "Request failed")); }
+function calAction(a) { xhr("/update?pump_cal=" + a, calDone); }
+function calRedo(n) { xhr("/update?pump_cal_redo=" + n, calDone); }
+function submitCalGrams() {
+  var input = document.getElementById("input_pump_cal_grams");
+  xhr("/update?pump_cal_grams=" + encodeURIComponent(input.value), function (s, t) {
+    calDone(s, t);
+    if (s === 200) input.value = "";
+  });
+}
+function applyCalStatus(json) {
+  if (typeof json.pump_cal_state !== "string") return;
+  setText("pump_cal_current", json.pump_ml_per_click.toFixed(3) + " ml/stroke" + (json.pump_calibrated ? "" : " (default)"));
+  var vals = json.pump_cal_runs || [];
+  var n = 0, mean = 0;
+  vals.forEach(function (v) { if (v !== null) { n++; mean += v; } });
+  mean = n ? mean / n : 0;
+  var st = json.pump_cal_state;
+  var runsEl = document.getElementById("pump_cal_runs");
+  runsEl.textContent = "";
+  for (var i = 0; i < 3; i++) {
+    var v = vals[i] === undefined ? null : vals[i];
+    var row = document.createElement("div");
+    row.className = "metric-row";
+    var label = document.createElement("span");
+    label.textContent = "Run " + (i + 1);
+    var val = document.createElement("b");
+    var off = v !== null && n === 3 && mean > 0 && Math.abs(v - mean) / mean > 0.10;
+    if (v !== null) val.textContent = v.toFixed(3) + (off ? " ⚠ redo" : "");
+    else if (json.pump_cal_run === i) val.textContent = st === "running" ? "pumping…" : "enter grams";
+    else val.textContent = "—";
+    row.appendChild(label);
+    row.appendChild(val);
+    if (v !== null && (st === "idle" || st === "aborted")) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "btn-chip-sm";
+      b.textContent = "Redo";
+      b.addEventListener("click", (function (k) { return function () { calRedo(k); }; })(i + 1));
+      row.appendChild(b);
+    }
+    runsEl.appendChild(row);
+  }
+  var msg = st === "running" ? "Run " + (json.pump_cal_run + 1) + ": pumping " + Math.floor(json.pump_cal_elapsed_ms / 1000) + " / 10 s"
+    : st === "await_grams" ? "Weigh the cup and enter the grams for run " + (json.pump_cal_run + 1) + "."
+    : st === "aborted" ? "Run aborted: " + json.pump_cal_reason + ". Start it again."
+    : n === 3 ? "All 3 runs done — Save, or Redo one."
+    : json.pump_mains !== "ok" ? "Turn the Brew switch on to start a run."
+    : "";
+  setText("pump_cal_status", msg);
+  document.getElementById("pump_cal_grams_row").hidden = st !== "await_grams";
+  var runBtn = document.getElementById("btn_pump_cal_run");
+  runBtn.hidden = st === "running" || st === "await_grams" || n === 3;
+  runBtn.disabled = json.pump_mains !== "ok";
+  document.getElementById("btn_pump_cal_stop").hidden = st !== "running";
+  document.getElementById("btn_pump_cal_save").hidden = !(n === 3 && (st === "idle" || st === "aborted"));
 }
 
 function restoreSettings(input) {
