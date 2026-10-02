@@ -529,6 +529,32 @@ enum class AutotuneState { IDLE, RUNNING, DONE_OK, DONE_FAIL };
 #define PROFILE_NAME_MAX_LEN 20
 #define PROFILE_LOG_PATH "/profiles.csv"
 
+// Phase-based profiles (design spec 2026-10-02 §3). PROFILE_MAX_COUNT above
+// is now the USER-profile limit; built-ins live in firmware
+// (profile_codec.cpp) and don't count against it. PROFILE_LOG_PATH is the
+// LEGACY file, read once for migration, then left alone (with a byte-for-
+// byte backup at PROFILE_LEGACY_BACKUP_PATH).
+#define PROFILE_PHASES_MAX 8
+#define PROFILE_UTILITY_PHASES_MAX 10
+#define PHASE_NAME_MAX_LEN 15
+#define PROFILE_BUILTIN_MAX 8
+#define PROFILE_STORE_PATH "/profiles.json"
+#define PROFILE_LEGACY_BACKUP_PATH "/profiles.csv.bak"
+#define PROFILE_DEFAULT_NAME "Classic 9 bar"
+#define PROFILE_TEMP_MIN 80.0f
+#define PROFILE_TEMP_MAX 100.0f
+#define PROFILE_MAX_SEC_MIN 5
+#define PROFILE_MAX_SEC_MAX 90
+#define PROFILE_UTILITY_MAX_SEC_MAX 120
+#define PROFILE_PRESSURE_SCALE_MIN 0.7f
+#define PROFILE_PRESSURE_SCALE_MAX 1.1f
+#define PROFILE_TRIM_MIN -20
+#define PROFILE_TRIM_MAX 20
+#define PHASE_DURATION_MIN_S 0.2f
+#define PHASE_DURATION_MAX_S 120.0f
+#define PHASE_PRESSURE_MAX_BAR 11.0f
+#define PHASE_FLOW_MAX_ML_S 10.0f
+
 // Pre-infusion (2026-08-16, originally built ahead of hardware against the
 // old NC pump relay - item 4 - see AGENTS.md/HARDWARE_ROADMAP.md; that relay
 // was removed 2026-09-04 after an unresolved brownout bug). Pulses the pump
