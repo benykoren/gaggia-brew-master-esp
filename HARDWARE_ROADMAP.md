@@ -140,11 +140,11 @@ feedforward described below are already live-tunable in the Web UI and
 confirmed on the real machine to cut brew-time sag from ~11-13°C to ~6°C
 (further gain tuning stopped helping once output pinned at the heater's
 physical wattage ceiling - a conclusive result, not a dead end). A
-configurable auto-stop timer (`shotAutoStopSec`, Settings → Shot Timer, 0 =
-disabled) also now ends the *firmware's* shot bookkeeping automatically.
-**None of this touches the pump yet** - "auto-stop" today means the
-firmware stops tracking the shot and reverts its own tuning, not that the
-pump stops flowing. That gap is exactly what the hardware below closes.
+auto-stop timer also ended the *firmware's* shot bookkeeping automatically.
+*(Superseded 2026-10-02: the global `shotAutoStopSec` setting is gone; each
+phase profile's `max_sec` ends the shot, and the shot now drives the real
+pump through item 8's dimmer. The text below is the original relay plan,
+kept for history.)*
 
 **Split from an original combined "pump dimmer" item (2026-08-16)** into
 this easy on/off half and a harder profiling half (item 8) — they have very
@@ -156,7 +156,7 @@ the pump's existing switched wire, no phase-angle timing at all.
 The machine's own Brew switch still starts the pump exactly as always,
 with **zero ESP32 involvement in starting a shot** — see the wiring
 decision below for why. Firmware can cut it early: auto-stop by a
-configured time (no other hardware needed) or by a configured weight (once
+per-profile `max_sec` time (no other hardware needed) or by a configured weight (once
 item 5's BLE scale exists). **No pressure regulation, no profiling** — full
 power or nothing, same as the pump already runs today. That's item 8, a
 separate, harder project.
@@ -175,7 +175,7 @@ module (opto-isolated, outputs a signal only when AC is present at its
 input — same category of part as half of an AC dimmer module, sold
 standalone) wired at this *same* splice point would let the ESP32 detect
 the Brew switch being flipped automatically, closing the gap noted above —
-the auto-stop timer would then control the real pump, and Start Shot would
+the profile's `max_sec` stop would then control the real pump, and Start Shot would
 no longer need a manual tap either. This is a different technique from the
 current-transformer clamp already rejected as item "7" (senses voltage
 presence on this wire, not current elsewhere on the pump's own wire) — not
@@ -510,12 +510,12 @@ fail-off tradeoff this accepts.
 
 **Pump power is pulse-skip modulation since 2026-10-01** (whole mains
 cycles fired near zero-cross or skipped, Bresenham-spread; same approach
-as Gaggiuino/GaggiMate's PSM library) instead of phase-angle. Plain-duty
-shots use Web-UI settings (Settings -> Pump power): **brew 45%** (~9 bar
-with a dialed standard-basket puck, from the EP5 pump curve - see
-`config.h`), **pre-infusion 40%** as a fill that ends when the 0-5 bar
-sensor reads ~3 bar (min 4 s, max 15 s), optional soak. % sets flow, not pressure - the bar you
-get depends on the puck.
+as Gaggiuino/GaggiMate's PSM library) instead of phase-angle.
+*(Superseded 2026-10-02: the former global Settings -> Pump power fields
+(brew 45%, pre-infusion 40%, 0-5 bar fill, soak) are removed. Shots now run
+phase profiles through the calibrated open-loop pump model - see the
+"Firmware status (2026-10-02)" block below. Duty still sets flow, not
+pressure; the bar you get depends on the puck.)*
 
 **Firmware status (2026-10-02):**
 - The dimmer now drives a gate pulse held 1500 µs from each zero-cross edge, dropped by a hardware timer (gptimer).
@@ -565,10 +565,11 @@ NC-contact detail from item 4 is moot here (see the tradeoff note above).
 
 ### Firmware considerations
 
-- **On/off half (bring-up milestone, no item 7 needed):** reuse the
-  already-built `shotInProgress`/`shotAutoStopSec` (time) and future
-  BLE-scale-weight (item 5) logic, just retargeted to drive the dimmer at
-  ~100% or 0% duty instead of a relay pin.
+- **On/off half (bring-up milestone, no item 7 needed):** implemented
+  2026-10-02 - `shotInProgress` plus the phase planner (each profile's
+  `max_sec` is the time stop; the old global `shotAutoStopSec` no longer
+  exists) drive the dimmer; future BLE-scale-weight (item 5) logic would
+  plug in as another stop condition.
 - **Pressure-target half requires item 7 (pressure transducer) already
   wired and reading correctly** — this is the feedback signal the control
   loop closes on. Without it, "control to 9 bar" has nothing to measure
@@ -587,8 +588,8 @@ NC-contact detail from item 4 is moot here (see the tradeoff note above).
 Same bench-first sequence as item 4's procedure above (steps 1-8),
 substituting the dimmer module for the relay. **First live power-up:**
 confirm firing at a fixed ~100% duty reproduces plain pass-through, exactly
-like an unmodified machine. **Second milestone:** verify time/weight
-auto-stop works by dropping to 0% duty mid-shot (this alone delivers
+like an unmodified machine. **Second milestone:** verify time (profile
+`max_sec`) / weight auto-stop works by dropping to 0% duty mid-shot (this alone delivers
 everything item 4 would have). **Only after both of those**, start
 closed-loop pressure-target tuning against the transducer (item 7) —
 expect this to take real iteration, the same way brew-temperature PID

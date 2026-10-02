@@ -224,6 +224,7 @@ The temp module also needs **3.3V** and **GND** from the DevKit (module is
   +250 %/s slew on increases (cuts stay instant); clean start at accumulator 500.
 - **Legacy migration**: if `/profiles.json` is missing, `/profiles.csv` (really
   JSON) is backed up byte-for-byte to `/profiles.csv.bak`, then converted.
+  `/profiles.csv` is the legacy path: read once for migration, never rewritten.
 
 ### Eco / Auto-Sleep
 - `lastActivityTime` (`main.cpp`) advances only on an explicit `/update` call
@@ -658,9 +659,10 @@ change/confirm the plan:
 #### Shipped — pure software, zero hardware
 1. **Shot timer** - elapsed time display during Brew mode (target window is
    ~25-30s per shot, per SCA-referenced extraction guidelines). **Extended
-   2026-08-16**: a configurable auto-stop (`shotAutoStopSec`, Web UI:
-   Settings -> Shot Timer, 0 = disabled) ends the timer/log/gain-profile
-   automatically at a set duration - no more manual "Stop Shot" tap needed.
+   2026-08-16**: an auto-stop ends the timer/log/gain-profile
+   automatically - no more manual "Stop Shot" tap needed. *(Since
+   2026-10-02 this is each phase profile's `max_sec`; the global
+   `shotAutoStopSec` setting was removed.)*
    Starting is still a manual "Start Shot" tap; see item 8 below (which
    folded in former item 4's role) for why that isn't automatic yet.
 2. **Shot history log** - duration + peak temp per shot now; extends
@@ -709,9 +711,9 @@ everything again.
    didn't previously have on the pump side. Judged acceptable: a stalled
    shot is an inconvenience, not a mains-safety hazard (unlike the heater).
    The already-built firmware (`brewActiveKp/Ki/Kd` gain-scheduling profile,
-   shot-start feedforward boost, `shotAutoStopSec` auto-stop bookkeeping) is
-   unaffected - it just now drives item 8's dimmer instead of a dedicated
-   relay.
+   shot-start feedforward boost) is unaffected. The old `shotAutoStopSec`
+   auto-stop was replaced 2026-10-02 by each profile's `max_sec`, and shots
+   now drive item 8's dimmer instead of a dedicated relay.
 
 5. **Bluetooth smart scale + brew-by-weight auto-stop.**
    **Hardware:** buy the scale itself - **Bookoo Themis or Felicita Arc**
@@ -772,7 +774,8 @@ everything again.
    pressure-target half - you cannot regulate to a bar target without a
    pressure reading to control against. The on/off half (time/weight
    auto-stop, driving the dimmer at ~100%/0% duty) does **not** need item 7
-   and is the planned first bring-up milestone, before closed-loop tuning.
+   and was the first bring-up milestone (implemented 2026-10-02 via phase
+   profiles, still pending live verification).
    **Status (2026-10-02):** phase profiles + an open-loop pump model are
    shipped (Section 4). The fitted 0-5 bar sensor is display-only; flipping
    `PRESSURE_CLOSED_LOOP_AVAILABLE` after fitting a 0-16 bar sensor turns the
@@ -916,7 +919,7 @@ everything again.
   - Now-tab est. bar / phase / water / mains banners.
 - **Dimmer**: gate raised in the ZC ISR and held 1500 µs, dropped by a gptimer alarm (was a 100 µs pulse 300 µs after ZC - risk of lost strokes on the inductive pump); mains Hz auto-detect + 100 ms zero-cross watchdog; permanent `zc_count`/`fired_cycles`; +250 %/s slew (cuts stay instant).
 - **Removed settings**: global brew/pre-infusion pump %, fill/soak settings, global shot auto-stop (now each profile's `max_sec`).
-- **Unused NVS keys left in place**, for a future cleanup: `shot_auto_stop`, `pump_brew_pct`, `pump_pi_pct` (read once for migration), `pi_fill_bar`, `pi_fill_max_s`, `pi_soak_s`, `pi_enabled`, `pi_pulses`, `pi_on_ms`, `pi_off_ms`, `press_en`, `press_ramp_bar`, `press_ramp_ms`, `press_dec_en`, `press_dec_bar`, `press_dec_ms`. (`active_profile` is removed after being mapped to a name.)
+- **Unused NVS keys left in place**, for a future cleanup: `shot_auto_stop`, `pump_brew_pct` and `pump_pi_pct` (both read once for migration), `pi_fill_bar`, `pi_fill_max_s`, `pi_soak_s`, `pi_enabled`, `pi_pulses`, `pi_on_ms`, `pi_off_ms`, `press_en`, `press_ramp_bar`, `press_ramp_ms`, `press_dec_en`, `press_dec_bar`, `press_dec_ms`. (`active_profile` is removed after being mapped to a name.)
 - **Model defaults differing from the design spec text**: 0.213 ml/stroke default, 30 ml headspace, phase duration minimum 0.2 s, utility `max_sec` up to 120, profile temp range 80-100 °C, the Lever built-in is named "Lever".
 - **Two post-review fixes**: the migrated active profile name is persisted to NVS `profile_name` (legacy `active_profile` key removed); planner/dimmer `dt` use a signed delta so a shot can't end on its first tick.
 - **Flashed**: OTA twice on 2026-10-02 (fw_build "Oct  2 2026 12:01:07" after the profile/planner switch-over, "Oct  2 2026 12:13:37" with the new UI). On the device the 3 legacy profiles (Classic, Light Roast, Dark Roast) migrated, backup at `/profiles.csv.bak`, active profile stayed "Classic"; profile CRUD and the 409 refusal path checked live.
