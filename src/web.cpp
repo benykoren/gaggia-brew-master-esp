@@ -13,6 +13,7 @@
 #include "dimmer.h"
 #include "pressure_sensor.h"
 #include "profiles.h"
+#include "pump_calibration.h"
 #include "shot_log.h"
 
 extern float currentTemperature;
@@ -2224,6 +2225,16 @@ static void handleStatus(AsyncWebServerRequest *request) {
     int idx = (snapPressHistoryHead - snapPressHistoryCount + i + TEMP_HISTORY_LEN * 2) % TEMP_HISTORY_LEN;
     snapPressHistory[i] = pressureHistory[idx];
   }
+  bool snapPumpCalibrated = pumpCalibrated;
+  float snapPumpMlpc = pumpMlPerClick;
+  String snapCalState = pumpCalStateName();
+  String snapCalReason = pumpCalAbortReason();
+  int snapCalRun = pumpCalActiveRun();
+  unsigned long snapCalElapsed = pumpCalRunElapsedMs(millis());
+  float snapCalRuns[3] = {pumpCalRunValue(0), pumpCalRunValue(1), pumpCalRunValue(2)};
+  String snapMains = mainsStateName(dimmerGetMainsState());
+  float snapMainsHz = dimmerGetMainsHz();
+  uint32_t snapFired = dimmerGetFiredCycles();
   unlockState();
 
   String json = "{";
@@ -2329,6 +2340,22 @@ static void handleStatus(AsyncWebServerRequest *request) {
   json += ",\"pressure_fault\":" + String(snapPressureFault ? "true" : "false");
   json += ",\"pump_power\":" + String(snapPumpPower, 1);
   json += ",\"dimmer_zc_count\":" + String(snapDimmerZcCount);
+  json += ",\"zc_count\":" + String(snapDimmerZcCount);
+  json += ",\"fired_cycles\":" + String(snapFired);
+  json += ",\"pump_mains\":\"" + snapMains + "\"";
+  json += ",\"mains_hz\":" + String(snapMainsHz, 1);
+  json += ",\"pump_calibrated\":" + String(snapPumpCalibrated ? "true" : "false");
+  json += ",\"pump_ml_per_click\":" + String(snapPumpMlpc, 4);
+  json += ",\"pump_cal_state\":\"" + snapCalState + "\"";
+  json += ",\"pump_cal_reason\":\"" + snapCalReason + "\"";
+  json += ",\"pump_cal_run\":" + String(snapCalRun);
+  json += ",\"pump_cal_elapsed_ms\":" + String(snapCalElapsed);
+  json += ",\"pump_cal_runs\":[";
+  for (int i = 0; i < 3; i++) {
+    if (i > 0) json += ",";
+    json += snapCalRuns[i] < 0.0f ? String("null") : String(snapCalRuns[i], 4);
+  }
+  json += "]";
   json += ",\"pressure_mv\":" + String(snapPressureMv);
   json += ",\"pressure_ceiling_tripped\":" + String(snapPressureCeilingTripped ? "true" : "false");
   json += ",\"press_enabled\":" + String(snapPressEnabled ? "true" : "false");
@@ -2395,6 +2422,11 @@ static void handleUpdate(AsyncWebServerRequest *request) {
   // setpoint, gains, shot state) needs the same lock controlTick() holds
   // during its own tick, for exactly the same reason.
   lockState();
+
+  // Actions that can be refused (calibration, profiles) set this; the
+  // response is then 409 + the reason instead of the usual redirect, so
+  // the Web UI can show WHY (xhr callback gets status + text).
+  const char *actionErr = nullptr;
 
   Preferences preferences;
   preferences.begin("gaggia", false); // false = read/write
@@ -2560,6 +2592,22 @@ static void handleUpdate(AsyncWebServerRequest *request) {
     }
   }
 
+  // Pump calibration (pump_calibration.cpp, design spec §6)
+  if (hasArg("pump_cal")) {
+    String a = arg("pump_cal");
+    if (a == "run") pumpCalStartRun(-1, &actionErr);
+    else if (a == "stop") pumpCalStop();
+    else if (a == "save") pumpCalSave(&actionErr);
+    else if (a == "cancel") pumpCalClear();
+  }
+  if (hasArg("pump_cal_redo")) {
+    int n = arg("pump_cal_redo").toInt();
+    if (n < 1 || n > 3) actionErr = "Bad run number";
+    else pumpCalStartRun(n - 1, &actionErr);
+  }
+  if (hasArg("pump_cal_grams")) pumpCalRecordGrams(arg("pump_cal_grams").toFloat(), &actionErr);
+  if (hasArg("pump_mlpc") && !pumpCalSetValue(arg("pump_mlpc").toFloat())) actionErr = "pump_mlpc out of range (0.15-0.40)";
+
   // Descale / maintenance reminder
   if (hasArg("mark_descaled") && arg("mark_descaled") == "1") {
     markDescaled();
@@ -2701,7 +2749,11 @@ static void handleUpdate(AsyncWebServerRequest *request) {
 
   unlockState();
 
-  request->redirect("/");
+  if (actionErr) {
+    request->send(409, "text/plain", actionErr);
+  } else {
+    request->redirect("/");
+  }
 
   // Reboot to apply MQTT settings cleanly (simplest way)
   if (restartForMqtt) {
@@ -2855,6 +2907,7 @@ void setupWeb() {
     q += "&steam_auto_off_min=" + String(steamAutoOffMin);
     q += "&descale_shot_threshold=" + String(descaleShotThreshold);
     q += "&descale_day_threshold=" + String(descaleDayThreshold);
+    if (pumpCalibrated) q += "&pump_mlpc=" + String(pumpMlPerClick, 4);
     // Note: named shot profiles live in their own LittleFS file (profiles.cpp,
     // GET /profiles), not NVS - not included in this key=value backup format.
     for (int i = 0; i < SCHED_MAX_COUNT; i++) {

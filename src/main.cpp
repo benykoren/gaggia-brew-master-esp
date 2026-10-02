@@ -3,6 +3,7 @@
 #include "mqtt.h"
 #include "pressure_sensor.h"
 #include "profiles.h"
+#include "pump_calibration.h"
 #include "shot_log.h"
 #include "temp_sensor.h"
 #include "web.h"
@@ -727,6 +728,7 @@ static void tickShotStages(unsigned long now) {
 
 void startShot() {
   if (shotInProgress) return;
+  if (pumpCalGetState() == PumpCalState::RUNNING) pumpCalAbort("shot started");
   shotInProgress = true;
   shotStartMillis = millis();
   shotPeakTemp = currentTemperature;
@@ -927,6 +929,7 @@ void setup() {
   // Shot history log + named shot profiles (both LittleFS)
   shotLogInit();
   profilesInit();
+  pumpCalInit();
 
   // NTP time sync, for real shot timestamps. Stored/compared in UTC
   // throughout - the Web UI converts to local time for display.
@@ -1176,6 +1179,10 @@ static void controlTick(unsigned long now) {
       pressurePID.SetMode(AUTOMATIC);
     }
   }
+
+  // Pump calibration run (pump_calibration.cpp) - after the safety cutoffs
+  // so a cut they just made aborts the run instead of being measured.
+  pumpCalTick(now);
 
   // Scheduled warm-up (see config.h) - minute-granularity, so checking once a
   // second is more than enough and avoids a redundant time()/gmtime_r() call
