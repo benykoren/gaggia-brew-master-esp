@@ -2,43 +2,29 @@
 
 #include <Arduino.h>
 
-// Named shot profiles on LittleFS (one CSV line each) - see config.h for the
-// storage rationale and full pre-infusion reasoning. Mirrors shot_log.h's
-// pattern: small, bounded, rewrite-the-whole-file-on-change (trivial at
-// PROFILE_MAX_COUNT's scale).
+#include "profile_types.h"
 
-// Mounts LittleFS (safe to call even if shotLogInit() already did) and seeds
-// three starter profiles (Espresso/Ristretto/Lungo) if the file doesn't
-// exist yet, so upgrading from the old preset system isn't a blank slate.
-void profilesInit();
+// Shot profile store on LittleFS (design spec 2026-10-02 §3.1): built-ins
+// from firmware (profile_codec.cpp) + up to PROFILE_MAX_COUNT user profiles,
+// in PROFILE_STORE_PATH as {"version":1,"user":[...],"builtin_overrides":
+// {name:{temp,max_sec,pressure_scale,trim_pct}}}. Everything is addressed by
+// NAME (case-insensitive). Call every function with stateMutex held;
+// returned pointers are valid until the next mutation.
 
-// Returns the full profile list as a JSON array, e.g.:
-// [{"name":"Espresso","temp":93.0,"auto_stop_sec":27,"preinfusion":true,
-//   "pulses":4,"on_ms":1000,"off_ms":1000}, ...]
-String profilesReadJson();
+// Mounts LittleFS, loads built-ins and the store. If the store doesn't
+// exist but the legacy PROFILE_LOG_PATH does, backs it up byte-for-byte to
+// PROFILE_LEGACY_BACKUP_PATH and migrates it (legacy*Pct = the old global
+// pump powers, used for migrated pulse/extract phases).
+void profilesInit(int legacyBrewPct, int legacyPreinfusionPct);
 
-int profileCount();
+int profileCount();                         // built-ins + user
+const Profile *profileAt(int i);            // tweaks applied
+const Profile *profileFind(const char *name);
+String profilesListJson();                  // GET /profiles
+String profileLegacyNameAt(int legacyIndex); // old NVS "active_profile" index -> migrated name, "" if none
 
-// Loads profile `index`'s fields into the out-params. Returns false (params
-// untouched) if index is out of range. Pressure fields default to
-// disabled/0 for profiles saved before pressure control existed - no
-// migration needed, ArduinoJson's `|` operator handles the missing keys.
-bool profileGet(int index, String &name, double &temp, unsigned long &autoStopSec,
-                bool &preinfusionEnabled, int &pulses, int &onMs, int &offMs,
-                bool &pressureEnabled, double &pressureRampBar, unsigned long &pressureRampMs,
-                bool &pressureDeclineEnabled, double &pressureDeclineBar,
-                unsigned long &pressureDeclineMs);
-
-// Adds a new profile (index == -1 or >= profileCount()) or overwrites an
-// existing one. Returns the resulting index, or -1 if the list is already
-// at PROFILE_MAX_COUNT and index requested a new entry. Commas in `name`
-// are stripped (CSV storage, no quoting support - keeps this simple).
-int profileSave(int index, String name, double temp, unsigned long autoStopSec,
-                bool preinfusionEnabled, int pulses, int onMs, int offMs,
-                bool pressureEnabled, double pressureRampBar, unsigned long pressureRampMs,
-                bool pressureDeclineEnabled, double pressureDeclineBar,
-                unsigned long pressureDeclineMs);
-
-// Removes profile `index`, shifting later indices down by one. No-op if out
-// of range or it would empty the list entirely (always keep at least one).
-void profileDelete(int index);
+bool profileTweak(const char *name, const ProfileTweak &t, const char **err);
+bool profileDuplicate(const char *src, const char *newName, const char **err);
+bool profileRename(const char *oldName, const char *newName, const char **err);
+bool profileDeleteUser(const char *name, const char **err);
+bool profileReset(const char *name, const char **err);

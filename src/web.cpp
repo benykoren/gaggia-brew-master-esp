@@ -13,7 +13,9 @@
 #include "dimmer.h"
 #include "pressure_sensor.h"
 #include "profiles.h"
+#include "profile_codec.h"
 #include "pump_calibration.h"
+#include "shot_planner.h"
 #include "shot_log.h"
 
 extern float currentTemperature;
@@ -27,12 +29,6 @@ extern int tempHistoryCount;
 
 extern float currentPressure;
 extern bool pressureFault;
-extern bool activePressureEnabled;
-extern double activePressureRampBar;
-extern unsigned long activePressureRampMs;
-extern bool activePressureDeclineEnabled;
-extern double activePressureDeclineBar;
-extern unsigned long activePressureDeclineMs;
 extern double pressureKp, pressureKi, pressureKd;
 extern float pressureHistory[];
 extern int pressureHistoryHead;
@@ -60,12 +56,6 @@ extern void stopAutotune();
 
 extern bool shotInProgress;
 extern unsigned long shotStartMillis;
-extern unsigned long shotAutoStopSec;
-extern int pumpBrewPowerPct;
-extern int pumpPreinfusionPowerPct;
-extern double preinfusionFillBar;
-extern int preinfusionFillMaxSec;
-extern int preinfusionSoakSec;
 extern void startShot();
 extern void stopShot();
 extern ShotPhase currentShotPhase;
@@ -76,10 +66,14 @@ extern unsigned long descaleShotThreshold;
 extern unsigned long descaleDayThreshold;
 extern void markDescaled();
 
-extern int activeProfileIndex;
-extern bool activePreinfusionEnabled;
-extern int activePreinfusionPulses, activePreinfusionOnMs, activePreinfusionOffMs;
-extern void applyProfile(int idx);
+extern String activeProfileName;
+extern bool selectProfile(const char *name);
+extern PlannerOutput plannerOut;
+extern float estPressureHistory[];
+extern float targetPressureHistory[];
+extern int estHistoryHead;
+extern int estHistoryCount;
+
 
 extern bool schedEnabled[SCHED_MAX_COUNT];
 extern int schedHour[SCHED_MAX_COUNT], schedMin[SCHED_MAX_COUNT];
@@ -2150,6 +2144,20 @@ document.getElementById("fwform").addEventListener("submit", function (e) {
 </body></html>
 )fwhtml";
 
+// Profile and phase names are user-supplied - escape before splicing into
+// the hand-built /status JSON.
+static String jsonEscape(const String &s) {
+  String o;
+  o.reserve(s.length() + 2);
+  for (size_t i = 0; i < s.length(); i++) {
+    char c = s[i];
+    if (c == '"' || c == '\\') { o += '\\'; o += c; }
+    else if ((unsigned char)c < 0x20) { char b[7]; snprintf(b, sizeof b, "\\u%04x", c); o += b; }
+    else o += c;
+  }
+  return o;
+}
+
 // Snapshots every control-task-owned field under the lock first (see
 // config.h "Shared-state lock"), then builds JSON from the local copies
 // unlocked - keeps the lock held for microseconds instead of for the whole
@@ -2168,10 +2176,6 @@ static void handleStatus(AsyncWebServerRequest *request) {
   unsigned long snapSteamAutoOffMin = steamAutoOffMin;
   bool snapAutoSleeping = autoSleeping;
   OpMode snapModeBeforeSleep = modeBeforeSleep;
-  unsigned long snapShotAutoStopSec = shotAutoStopSec;
-  int snapPumpBrewPct = pumpBrewPowerPct, snapPumpPiPct = pumpPreinfusionPowerPct;
-  double snapPiFillBar = preinfusionFillBar;
-  int snapPiFillMaxS = preinfusionFillMaxSec, snapPiSoakS = preinfusionSoakSec;
   AutotuneState snapAutotuneState = autotuneState;
   String snapAutotuneMessage = autotuneMessage;
   bool snapShotInProgress = shotInProgress;
@@ -2180,9 +2184,6 @@ static void handleStatus(AsyncWebServerRequest *request) {
   time_t snapLastDescaleTime = lastDescaleTime;
   unsigned long snapDescaleShotThreshold = descaleShotThreshold;
   unsigned long snapDescaleDayThreshold = descaleDayThreshold;
-  int snapActiveProfileIndex = activeProfileIndex;
-  bool snapPiEnabled = activePreinfusionEnabled;
-  int snapPiPulses = activePreinfusionPulses, snapPiOnMs = activePreinfusionOnMs, snapPiOffMs = activePreinfusionOffMs;
   ShotPhase snapShotPhase = currentShotPhase;
   bool snapSchedEnabled[SCHED_MAX_COUNT];
   int snapSchedHour[SCHED_MAX_COUNT], snapSchedMin[SCHED_MAX_COUNT];
@@ -2201,12 +2202,6 @@ static void handleStatus(AsyncWebServerRequest *request) {
   }
   bool snapPressureFault = pressureFault;
   float snapPressure = currentPressure;
-  bool snapPressEnabled = activePressureEnabled;
-  double snapPressRampBar = activePressureRampBar;
-  unsigned long snapPressRampMs = activePressureRampMs;
-  bool snapPressDeclineEnabled = activePressureDeclineEnabled;
-  double snapPressDeclineBar = activePressureDeclineBar;
-  unsigned long snapPressDeclineMs = activePressureDeclineMs;
   double snapPressKp = pressureKp, snapPressKi = pressureKi, snapPressKd = pressureKd;
   // Pump telemetry - lets a bench operator (Milestones A-C) distinguish
   // "pump idle" / "pump at 100% duty" / "PID commanding some percent" /
@@ -2235,6 +2230,18 @@ static void handleStatus(AsyncWebServerRequest *request) {
   String snapMains = mainsStateName(dimmerGetMainsState());
   float snapMainsHz = dimmerGetMainsHz();
   uint32_t snapFired = dimmerGetFiredCycles();
+  String snapProfileName = activeProfileName;
+  const Profile *snapProf = profileFind(activeProfileName.c_str());
+  int snapMaxSec = snapProf ? snapProf->maxSec : 0;
+  PlannerOutput snapPlan = plannerOut;
+  String snapPhaseName = snapPlan.phaseName ? snapPlan.phaseName : "";
+  int snapEstCount = estHistoryCount, snapEstHead = estHistoryHead;
+  float snapEst[TEMP_HISTORY_LEN], snapTgt[TEMP_HISTORY_LEN];
+  for (int i = 0; i < snapEstCount; i++) {
+    int idx = (snapEstHead - snapEstCount + i + TEMP_HISTORY_LEN * 2) % TEMP_HISTORY_LEN;
+    snapEst[i] = estPressureHistory[idx];
+    snapTgt[i] = targetPressureHistory[idx];
+  }
   unlockState();
 
   String json = "{";
@@ -2295,12 +2302,6 @@ static void handleStatus(AsyncWebServerRequest *request) {
   json += ",\"asleep_from\":\"";
   json += (snapModeBeforeSleep == OpMode::STEAM) ? "steam" : "brew";
   json += "\"";
-  json += ",\"shot_auto_stop_sec\":" + String(snapShotAutoStopSec);
-  json += ",\"pump_brew_pct\":" + String(snapPumpBrewPct);
-  json += ",\"pump_pi_pct\":" + String(snapPumpPiPct);
-  json += ",\"pi_fill_bar\":" + String(snapPiFillBar, 1);
-  json += ",\"pi_fill_max_s\":" + String(snapPiFillMaxS);
-  json += ",\"pi_soak_s\":" + String(snapPiSoakS);
   json += ",\"pressure_max_bar\":" + String(PRESSURE_SENSOR_MAX_BAR, 1);
   json += ",\"press_available\":" + String(PRESSURE_CLOSED_LOOP_AVAILABLE ? "true" : "false");
 
@@ -2331,11 +2332,6 @@ static void handleStatus(AsyncWebServerRequest *request) {
       (daysSinceDescale >= 0 && (unsigned long)daysSinceDescale >= snapDescaleDayThreshold);
   json += ",\"descale_due\":" + String(descaleDue ? "true" : "false");
 
-  json += ",\"active_profile\":" + String(snapActiveProfileIndex);
-  json += ",\"pi_enabled\":" + String(snapPiEnabled ? "true" : "false");
-  json += ",\"pi_pulses\":" + String(snapPiPulses);
-  json += ",\"pi_on_ms\":" + String(snapPiOnMs);
-  json += ",\"pi_off_ms\":" + String(snapPiOffMs);
   json += ",\"pressure\":" + String(snapPressure, 2);
   json += ",\"pressure_fault\":" + String(snapPressureFault ? "true" : "false");
   json += ",\"pump_power\":" + String(snapPumpPower, 1);
@@ -2358,12 +2354,6 @@ static void handleStatus(AsyncWebServerRequest *request) {
   json += "]";
   json += ",\"pressure_mv\":" + String(snapPressureMv);
   json += ",\"pressure_ceiling_tripped\":" + String(snapPressureCeilingTripped ? "true" : "false");
-  json += ",\"press_enabled\":" + String(snapPressEnabled ? "true" : "false");
-  json += ",\"press_ramp_bar\":" + String(snapPressRampBar);
-  json += ",\"press_ramp_ms\":" + String(snapPressRampMs);
-  json += ",\"press_decline_enabled\":" + String(snapPressDeclineEnabled ? "true" : "false");
-  json += ",\"press_decline_bar\":" + String(snapPressDeclineBar);
-  json += ",\"press_decline_ms\":" + String(snapPressDeclineMs);
   json += ",\"press_kp\":" + String(snapPressKp, 4);
   json += ",\"press_ki\":" + String(snapPressKi, 4);
   json += ",\"press_kd\":" + String(snapPressKd, 4);
@@ -2376,6 +2366,16 @@ static void handleStatus(AsyncWebServerRequest *request) {
     default: json += "none"; break;
   }
   json += "\"";
+
+  json += ",\"active_profile_name\":\"" + jsonEscape(snapProfileName) + "\"";
+  json += ",\"active_max_sec\":" + String(snapMaxSec);
+  json += ",\"phase_name\":\"" + jsonEscape(snapPhaseName) + "\"";
+  json += ",\"phase_index\":" + String(snapPlan.phaseIndex);
+  json += ",\"phase_count\":" + String(snapPlan.phaseCount);
+  json += ",\"phase_type\":\"" + String(snapPlan.phaseIndex >= 0 ? phaseTypeName(snapPlan.phaseType) : "") + "\"";
+  json += ",\"phase_target\":" + String(snapPlan.phaseTarget, 2);
+  json += ",\"pressure_est\":" + String(snapPlan.pressureEst, 2);
+  json += ",\"ml_est\":" + String(snapPlan.mlEst, 1);
 
   json += ",\"sched\":[";
   for (int i = 0; i < SCHED_MAX_COUNT; i++) {
@@ -2398,6 +2398,11 @@ static void handleStatus(AsyncWebServerRequest *request) {
     if (i > 0) json += ",";
     json += String(snapPressHistory[i], 2);
   }
+  json += "]";
+  json += ",\"est_history\":[";
+  for (int i = 0; i < snapEstCount; i++) { if (i > 0) json += ","; json += String(snapEst[i], 2); }
+  json += "],\"target_history\":[";
+  for (int i = 0; i < snapEstCount; i++) { if (i > 0) json += ","; json += String(snapTgt[i], 2); }
   json += "]";
 
   json += "}";
@@ -2524,39 +2529,6 @@ static void handleUpdate(AsyncWebServerRequest *request) {
     }
   }
 
-  // Shot auto-stop - 0 (disabled) passes through untouched; any nonzero
-  // value gets clamped so a typo can't set an unreasonably short/long
-  // duration (same pattern as steam_max_safety's clamp above).
-  if (hasArg("shot_auto_stop_sec")) {
-    long v = arg("shot_auto_stop_sec").toInt();
-    shotAutoStopSec = (v <= 0) ? 0 : constrain(v, SHOT_AUTO_STOP_SEC_MIN, SHOT_AUTO_STOP_SEC_MAX);
-    preferences.putULong("shot_auto_stop", shotAutoStopSec);
-  }
-
-  // Plain-duty pump power (pulse-skip %, see config.h). Clamped so a typo
-  // can't stall the pump (too low) or exceed 100%. Takes effect on the next
-  // stage change / shot start - a running shot keeps its current duty.
-  if (hasArg("pump_brew_pct")) {
-    pumpBrewPowerPct = constrain(arg("pump_brew_pct").toInt(), PUMP_POWER_PCT_MIN, PUMP_POWER_PCT_MAX);
-    preferences.putInt("pump_brew_pct", pumpBrewPowerPct);
-  }
-  if (hasArg("pump_pi_pct")) {
-    pumpPreinfusionPowerPct = constrain(arg("pump_pi_pct").toInt(), PUMP_POWER_PCT_MIN, PUMP_POWER_PCT_MAX);
-    preferences.putInt("pump_pi_pct", pumpPreinfusionPowerPct);
-  }
-  if (hasArg("pi_fill_bar")) {
-    preinfusionFillBar = constrain(arg("pi_fill_bar").toDouble(), PREINFUSION_FILL_BAR_MIN, PREINFUSION_FILL_BAR_MAX);
-    preferences.putDouble("pi_fill_bar", preinfusionFillBar);
-  }
-  if (hasArg("pi_fill_max_s")) {
-    preinfusionFillMaxSec = constrain(arg("pi_fill_max_s").toInt(), PREINFUSION_FILL_MAX_S_MIN, PREINFUSION_FILL_MAX_S_MAX);
-    preferences.putInt("pi_fill_max_s", preinfusionFillMaxSec);
-  }
-  if (hasArg("pi_soak_s")) {
-    preinfusionSoakSec = constrain(arg("pi_soak_s").toInt(), 0, PREINFUSION_SOAK_S_MAX);
-    preferences.putInt("pi_soak_s", preinfusionSoakSec);
-  }
-
   // Eco / auto-sleep
   if (hasArg("eco_timeout_min")) {
     ecoTimeoutMin = arg("eco_timeout_min").toInt();
@@ -2637,59 +2609,40 @@ static void handleUpdate(AsyncWebServerRequest *request) {
     shotLogUpdateNotes(idx, bean, doseIn, grind, rating, notes);
   }
 
-  // Named shot profiles (profiles.cpp) - three independent actions, same
-  // split as everywhere else in this handler (editing vs. an explicit
-  // apply action):
-  //   profile_apply=<idx>       - load a saved profile into the live
-  //                               settings (temp/auto-stop/pre-infusion)
-  //   profile_save=1 (+ fields) - add (profile_index=-1) or overwrite an
-  //                               existing saved profile
-  //   profile_delete=<idx>      - remove a saved profile
-  if (hasArg("profile_apply")) {
-    applyProfile(arg("profile_apply").toInt());
+  // Shot profiles (profiles.cpp) - addressed by NAME (design spec §7).
+  if (hasArg("profile_select") && !selectProfile(arg("profile_select").c_str())) actionErr = "No such profile";
+  if (hasArg("profile_tweak")) {
+    String name = arg("profile_tweak");
+    const Profile *p = profileFind(name.c_str());
+    if (!p) {
+      actionErr = "No such profile";
+    } else {
+      ProfileTweak t = profileGetTweak(*p);
+      if (hasArg("temp")) t.temp = arg("temp").toFloat();
+      if (hasArg("max_sec")) t.maxSec = (uint16_t)constrain(arg("max_sec").toInt(), 0, 600);
+      if (hasArg("pressure_scale")) t.pressureScale = arg("pressure_scale").toFloat();
+      if (hasArg("trim_pct")) t.trimPct = (int8_t)constrain(arg("trim_pct").toInt(), -100, 100);
+      if (profileTweak(name.c_str(), t, &actionErr) && activeProfileName.equalsIgnoreCase(name)) selectProfile(name.c_str());
+    }
   }
-  if (hasArg("profile_save")) {
-    int idx = hasArg("profile_index") ? arg("profile_index").toInt() : -1;
-    String name = hasArg("profile_name") ? arg("profile_name") : "Profile";
-    double temp = hasArg("profile_temp") ? arg("profile_temp").toDouble() : BREW_SETPOINT_DEFAULT;
-    unsigned long autoStop = hasArg("profile_autostop")
-        ? constrain((long)arg("profile_autostop").toInt(), (long)SHOT_AUTO_STOP_SEC_MIN, (long)SHOT_AUTO_STOP_SEC_MAX)
-        : SHOT_AUTO_STOP_SEC_DEFAULT;
-    bool piEnabled = hasArg("profile_pi_enabled") && arg("profile_pi_enabled") == "1";
-    int pulses = hasArg("profile_pi_pulses")
-        ? constrain(arg("profile_pi_pulses").toInt(), 0, PREINFUSION_PULSES_MAX) : 0;
-    int onMs = hasArg("profile_pi_on_ms")
-        ? constrain(arg("profile_pi_on_ms").toInt(), PREINFUSION_PULSE_MS_MIN, PREINFUSION_PULSE_MS_MAX) : PREINFUSION_ON_MS_DEFAULT;
-    int offMs = hasArg("profile_pi_off_ms")
-        ? constrain(arg("profile_pi_off_ms").toInt(), PREINFUSION_PULSE_MS_MIN, PREINFUSION_PULSE_MS_MAX) : PREINFUSION_OFF_MS_DEFAULT;
-    bool pressureEnabled = hasArg("profile_press_enabled") && arg("profile_press_enabled") == "1";
-    // Clamped the same way the neighboring fields above are (see
-    // steam_max_safety's comment elsewhere in this file) - a typo in this
-    // field shouldn't be able to command the PID to push toward a
-    // dangerously high ceiling.
-    double pressureRampBar = hasArg("profile_press_ramp_bar")
-        ? constrain(arg("profile_press_ramp_bar").toDouble(), 0.0, PUMP_MAX_SAFETY_BAR - 1.0)
-        : PRESSURE_RAMP_BAR_DEFAULT;
-    unsigned long pressureRampMs = hasArg("profile_press_ramp_ms")
-        ? (unsigned long)constrain((long)arg("profile_press_ramp_ms").toInt(), 0L, 120000L)
-        : PRESSURE_RAMP_MS_DEFAULT;
-    bool pressureDeclineEnabled = hasArg("profile_press_decline_enabled") && arg("profile_press_decline_enabled") == "1";
-    double pressureDeclineBar = hasArg("profile_press_decline_bar")
-        ? constrain(arg("profile_press_decline_bar").toDouble(), 0.0, PUMP_MAX_SAFETY_BAR - 1.0)
-        : PRESSURE_DECLINE_BAR_DEFAULT;
-    unsigned long pressureDeclineMs = hasArg("profile_press_decline_ms")
-        ? (unsigned long)constrain((long)arg("profile_press_decline_ms").toInt(), 0L, 120000L)
-        : PRESSURE_DECLINE_MS_DEFAULT;
-    int saved = profileSave(idx, name, temp, autoStop, piEnabled, pulses, onMs, offMs,
-                             pressureEnabled, pressureRampBar, pressureRampMs,
-                             pressureDeclineEnabled, pressureDeclineBar, pressureDeclineMs);
-    // Editing the profile that's currently active also refreshes the live
-    // settings from it, so tweaking "your current setup" takes effect
-    // immediately instead of silently drifting from what's now saved.
-    if (saved >= 0 && saved == activeProfileIndex) applyProfile(saved);
+  if (hasArg("profile_duplicate")) {
+    String newName = hasArg("new_name") ? arg("new_name") : "";
+    profileDuplicate(arg("profile_duplicate").c_str(), newName.c_str(), &actionErr);
+  }
+  if (hasArg("profile_rename")) {
+    String oldName = arg("profile_rename");
+    String newName = hasArg("new_name") ? arg("new_name") : "";
+    if (profileRename(oldName.c_str(), newName.c_str(), &actionErr) && activeProfileName.equalsIgnoreCase(oldName))
+      selectProfile(newName.c_str());
   }
   if (hasArg("profile_delete")) {
-    profileDelete(arg("profile_delete").toInt());
+    String name = arg("profile_delete");
+    if (profileDeleteUser(name.c_str(), &actionErr) && activeProfileName.equalsIgnoreCase(name))
+      selectProfile(PROFILE_DEFAULT_NAME);
+  }
+  if (hasArg("profile_reset")) {
+    String name = arg("profile_reset");
+    if (profileReset(name.c_str(), &actionErr) && activeProfileName.equalsIgnoreCase(name)) selectProfile(name.c_str());
   }
 
   // Scheduled warm-up - SCHED_MAX_COUNT independent slots. Editing a slot's
@@ -2857,7 +2810,10 @@ void setupWeb() {
   // like every other setting, for the same reason /settings_export reuses
   // it for restore - one code path, not two.
   server.on("/profiles", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(200, "application/json", profilesReadJson());
+    lockState();
+    String body = profilesListJson();
+    unlockState();
+    request->send(200, "application/json", body);
   });
 
   // Settings backup/restore (2026-08-16). Export builds a query-string in
@@ -2897,12 +2853,7 @@ void setupWeb() {
     q += "&steam_ki=" + String(steamKi, 4);
     q += "&steam_kd=" + String(steamKd, 4);
     q += "&steam_max_safety=" + String(steamMaxSafety, 1);
-    q += "&shot_auto_stop_sec=" + String(shotAutoStopSec);
-    q += "&pump_brew_pct=" + String(pumpBrewPowerPct);
-    q += "&pump_pi_pct=" + String(pumpPreinfusionPowerPct);
-    q += "&pi_fill_bar=" + String(preinfusionFillBar, 1);
-    q += "&pi_fill_max_s=" + String(preinfusionFillMaxSec);
-    q += "&pi_soak_s=" + String(preinfusionSoakSec);
+    q += "&profile_select=" + enc(activeProfileName);
     q += "&eco_timeout_min=" + String(ecoTimeoutMin);
     q += "&steam_auto_off_min=" + String(steamAutoOffMin);
     q += "&descale_shot_threshold=" + String(descaleShotThreshold);
