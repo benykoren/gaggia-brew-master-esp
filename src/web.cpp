@@ -561,7 +561,8 @@ const char *index_html = R"rawliteral(
       <div id="fault_banner" class="banner banner-error">Sensor fault &mdash; heater held off. Check the PT100 wiring.</div>
       <div id="pressure_banner" class="banner banner-error"></div>
       <div id="pump_banner" class="banner banner-warn"></div>
-      <div id="sleep_banner" class="banner banner-info">
+      <div id="cal_banner" class="banner banner-info">Pump not calibrated &mdash; shots use a default pump model.&nbsp;<a href="#settings" onclick="showTab('settings')">Calibrate</a></div>
+         <div id="sleep_banner" class="banner banner-info">
         <span id="sleep_banner_text">Asleep (eco timeout) &mdash; heater off</span>
         <button type="button" onclick="wake()" class="btn-chip">Wake Up</button>
         <button type="button" onclick="dismissSleepBanner()" class="btn-chip-sm" aria-label="Dismiss sleep notice">&times;</button>
@@ -633,7 +634,11 @@ const char *index_html = R"rawliteral(
             <span class="stat-value"><span id="pump_power" class="skeleton">--</span><small>%</small></span>
             <div class="bar pump"><span id="pump_bar"></span></div>
           </div>
-        </div>
+          <div class="stat-tile">
+            <span class="stat-label">Water (est.)</span>
+            <span class="stat-value"><span id="ml_est" class="skeleton">--</span><small>ml</small></span>
+          </div>
+           </div>
 
         <div class="chart-card">
           <div class="chart-label"><span>Temp &middot; last 2 min</span><span>&deg;C</span></div>
@@ -641,7 +646,7 @@ const char *index_html = R"rawliteral(
         </div>
 
         <div class="chart-card">
-          <div class="chart-label"><span>Pressure &middot; last 2 min</span><span id="pressure_label">-- bar</span></div>
+          <div class="chart-label"><span>Pressure (est.) &middot; last 2 min</span><span id="pressure_label">-- bar</span></div>
           <canvas id="pressure_chart" width="300" height="60" aria-hidden="true"></canvas>
         </div>
       </div>
@@ -1160,29 +1165,39 @@ function drawSparkline(data, target) {
   ctx.stroke();
 }
 
-function drawPressureSparkline(data, target) {
+// Pressure chart: the model estimate (or the real reading once the closed
+// loop exists) as the main line, the raw sensor reading as a thin line
+// while it can't read brew pressure, and the profile's pressure target
+// dashed (target < 0 = no pressure target at that sample -> gap).
+function drawPressureChart(est, sensor, target, closedLoop) {
   var canvas = document.getElementById("pressure_chart");
-  if (!canvas || !data || data.length < 2) return;
+  if (!canvas) return;
+  var main = closedLoop ? sensor : est;
+  if (!main || main.length < 2) return;
   var ctx = canvas.getContext("2d");
   var w = canvas.width, h = canvas.height;
   ctx.clearRect(0, 0, w, h);
-  var scaleValues = (target === null || target === undefined) ? data : data.concat([target]);
-  var min = Math.min.apply(null, scaleValues), max = Math.max.apply(null, scaleValues);
-  if (max - min < 0.5) { max += 0.25; min -= 0.25; }
-  if (min > 0) min = 0; // pressure chart always includes zero for scale
-
-  drawTargetLine(ctx, w, h, min, max, target);
-
-  ctx.beginPath();
-  data.forEach(function (v, i) {
-    var x = (i / (data.length - 1)) * w;
-    var y = h - ((v - min) / (max - min)) * (h - 6) - 3;
-    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-  });
-  ctx.strokeStyle = "#3f8cd9";
-  ctx.lineWidth = 2.5;
-  ctx.lineJoin = "round";
-  ctx.stroke();
+  var max = 10;
+  function y(v) { return h - (Math.min(max, Math.max(0, v)) / max) * (h - 6) - 3; }
+  function line(data, color, width, dashed, gapsBelowZero) {
+    if (!data || data.length < 2) return;
+    ctx.beginPath();
+    var pen = false;
+    data.forEach(function (v, i) {
+      var x = (i / (data.length - 1)) * w;
+      if (gapsBelowZero && v < 0) { pen = false; return; }
+      if (!pen) { ctx.moveTo(x, y(v)); pen = true; } else ctx.lineTo(x, y(v));
+    });
+    ctx.setLineDash(dashed ? [5, 4] : []);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.lineJoin = "round";
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  line(target, "#d98c3f", 1.5, true, true);
+  if (!closedLoop) line(sensor, "#6b5d52", 1, false, false);
+  line(main, "#3f8cd9", 2.5, false, false);
 }
 
 function formatElapsed(ms) {
@@ -1203,7 +1218,7 @@ var shotRunning = false;
 var shotElapsedBaseMs = 0;
 var shotElapsedCapturedAt = null;
 var prevShotRunning = false; // detects the stop transition, to refresh history once
-// Populated from /status (shot_auto_stop_sec) - the progress bar and
+// Populated from /status (active_max_sec) - the progress bar and
 // in-window/over coloring track THIS configured value, not a hardcoded
 // number, so they stay correct whenever the auto-stop duration changes
 // (directly, or via loading a profile with a different auto-stop time).
@@ -1450,9 +1465,6 @@ setInterval(function () {
 }, 1000);
 
 var statusInflight = false;
-var lastZcCount = null;
-var lastZcAt = null;
-var zcHz = 0;
 
 function applyModeButtons(mode) {
   document.getElementById("btn_off").classList.toggle("active", mode === "off");
@@ -1495,12 +1507,17 @@ function applyStatus(json) {
   var pumpBar = document.getElementById("pump_bar");
   if (pumpBar) pumpBar.style.width = clamp(pumpPct) + "%";
 
-  trackPhaseMarkers(json.shot_phase, json.shot_in_progress);
+  trackPhaseMarkers(json.phase_index, json.shot_in_progress);
   drawSparkline(json.history, hasTarget ? target : null);
-  var pressureTarget = (json.press_available !== false && json.press_enabled && json.shot_phase === "pressure") ? json.press_ramp_bar : null;
-  drawPressureSparkline(json.pressure_history, pressureTarget);
+  var closedLoop = json.press_available === true && !json.pressure_fault;
+  drawPressureChart(json.est_history, json.pressure_history, json.target_history, closedLoop);
   var pLabel = document.getElementById("pressure_label");
-  if (pLabel) pLabel.textContent = (json.pressure_fault ? "fault" : (json.pressure_max_bar && json.pressure >= json.pressure_max_bar ? json.pressure_max_bar.toFixed(0) + "+" : json.pressure.toFixed(2)) + " bar");
+  if (pLabel) {
+    pLabel.textContent = json.pressure_fault ? "sensor fault"
+      : "sensor " + (json.pressure_max_bar && json.pressure >= json.pressure_max_bar
+        ? json.pressure_max_bar.toFixed(0) + "+" : json.pressure.toFixed(1)) + " bar";
+  }
+  setText("ml_est", json.shot_in_progress ? json.ml_est.toFixed(0) : "--");
 
   var tempPct = (temp > 0 && hasTarget) ? clamp((temp / target) * 100) : 0;
   var ring = document.getElementById("temp_ring_fill");
@@ -1514,31 +1531,29 @@ function applyStatus(json) {
     else ring.classList.add("ready");
   }
 
-  // Scale the gauge to the fitted sensor's real range; with no closed-loop
-  // pressure control there's no goal to color against.
-  var PRESSURE_GAUGE_MAX_BAR = json.pressure_max_bar || 16;
-  var pressureLoop = json.press_available !== false && json.press_enabled;
-  var pressureGoal = (pressureLoop && json.press_ramp_bar > 0) ? json.press_ramp_bar : null;
-  var pressureVal = json.pressure;
-  var pressureAtMax = json.pressure_max_bar && pressureVal >= json.pressure_max_bar;
-  var pressurePct = json.pressure_fault ? 0 : clamp((pressureVal / PRESSURE_GAUGE_MAX_BAR) * 100);
+  // Pressure gauge: the model estimate during a shot (no usable sensor),
+  // the real reading once the closed loop exists. Goal = the current
+  // pressure-phase target.
+  var PRESSURE_GAUGE_MAX_BAR = 12;
+  var showPressure = closedLoop || json.shot_in_progress;
+  var pressureVal = closedLoop ? json.pressure : (json.shot_in_progress ? json.pressure_est : 0);
+  var pressureGoal = (json.shot_in_progress && json.phase_type === "pressure") ? json.phase_target : null;
   var pRing = document.getElementById("pressure_ring_fill");
   if (pRing) {
-    pRing.style.strokeDashoffset = RING_CIRCUMFERENCE * (1 - pressurePct / 100);
+    pRing.style.strokeDashoffset = RING_CIRCUMFERENCE * (1 - clamp((pressureVal / PRESSURE_GAUGE_MAX_BAR) * 100) / 100);
     pRing.classList.remove("heating", "ready", "over");
-    if (!json.pressure_fault && json.shot_in_progress && pressureGoal !== null) {
-      var PRESSURE_READY_MARGIN_BAR = 1.5;
+    if (pressureGoal !== null) {
+      var PRESSURE_READY_MARGIN_BAR = 1.0;
       if (pressureVal < pressureGoal - PRESSURE_READY_MARGIN_BAR) pRing.classList.add("heating");
       else if (pressureVal > pressureGoal + PRESSURE_READY_MARGIN_BAR) pRing.classList.add("over");
       else pRing.classList.add("ready");
     }
   }
-  setText("pressure_gauge_val", json.pressure_fault ? "--" : pressureAtMax ? pressureVal.toFixed(0) + "+" : pressureVal.toFixed(1));
+  setText("pressure_gauge_val", showPressure ? pressureVal.toFixed(1) : "--");
   var pCap = document.getElementById("pressure_target_caption");
   if (pCap) {
-    pCap.textContent = json.shot_in_progress && pressureGoal !== null
-      ? "Target " + pressureGoal.toFixed(1) + " bar"
-      : json.press_available === false ? "Pressure (0-" + PRESSURE_GAUGE_MAX_BAR + " bar sensor)" : "Pressure";
+    pCap.textContent = (closedLoop ? "" : "est. · ") +
+      (pressureGoal !== null ? "target " + pressureGoal.toFixed(1) + " bar" : "pressure");
   }
 
   document.getElementById("output_bar").style.width = clamp(outputPct) + "%";
@@ -1571,29 +1586,11 @@ function applyStatus(json) {
   setVal("input_mqtt_user", json.mqtt_user || "");
   setVal("input_eco_min", json.eco_timeout_min);
   setVal("input_steam_off_min", json.steam_auto_off_min);
-  setVal("input_shot_auto_stop", json.shot_auto_stop_sec);
-  if (typeof json.pump_brew_pct === "number") setVal("input_pump_brew_pct", json.pump_brew_pct);
-  if (typeof json.pump_pi_pct === "number") setVal("input_pump_pi_pct", json.pump_pi_pct);
-  if (typeof json.pi_fill_bar === "number") setVal("input_pi_fill_bar", json.pi_fill_bar);
-  if (typeof json.pi_fill_max_s === "number") setVal("input_pi_fill_max_s", json.pi_fill_max_s);
-  if (typeof json.pi_soak_s === "number") setVal("input_pi_soak_s", json.pi_soak_s);
-  var piFill = document.getElementById("pi_fill_fields");
-  if (piFill) piFill.hidden = json.press_available === false;
   var passHint = document.getElementById("mqtt_pass_hint");
   if (passHint) passHint.hidden = !json.mqtt_pass_set;
 
   var ntpBanner = document.getElementById("ntp_banner");
   if (ntpBanner) ntpBanner.style.display = json.ntp_synced ? "none" : "flex";
-
-  var now = Date.now();
-  if (typeof json.dimmer_zc_count === "number") {
-    if (lastZcCount !== null && lastZcAt !== null) {
-      var dt = (now - lastZcAt) / 1000;
-      if (dt > 0) zcHz = (json.dimmer_zc_count - lastZcCount) / dt;
-    }
-    lastZcCount = json.dimmer_zc_count;
-    lastZcAt = now;
-  }
 
   var pumpMsg = "";
   if (json.pressure_ceiling_tripped) {
@@ -1607,27 +1604,26 @@ function applyStatus(json) {
     showBanner("pressure_banner", false);
   }
 
-  var brewSwitchOff = json.shot_in_progress && zcHz < 20 && lastZcCount !== null;
-  if (brewSwitchOff) {
-    showBanner("pump_banner", true, "Flip the machine's Brew switch — the dimmer has no mains power.");
-  } else if (json.shot_in_progress && pumpPct < 1 && zcHz >= 20 && !json.pressure_ceiling_tripped) {
-    showBanner("pump_banner", true, "Pump commanded off while the Brew switch is on.");
-  } else {
-    showBanner("pump_banner", false);
-  }
+   var pumpWanted = json.shot_in_progress || json.pump_cal_state === "running";
+   if (pumpWanted && json.pump_mains === "absent") {
+     showBanner("pump_banner", true, "No mains to the pump — turn the machine's Brew switch on.");
+   } else if (pumpWanted && json.pump_mains === "unstable") {
+     showBanner("pump_banner", true, "Mains zero-cross signal looks unstable (" + json.mains_hz.toFixed(1) + " Hz).");
+   } else {
+     showBanner("pump_banner", false);
+   }
+   showBanner("cal_banner", json.pump_calibrated === false);
 
-  var shotLabel = document.getElementById("shot_auto_stop_label");
-  if (json.shot_in_progress && json.shot_phase === "preinfusion") {
-    shotLabel.textContent = "Pre-infusing…";
-  } else if (json.shot_in_progress && json.shot_phase === "pressure") {
-    shotLabel.textContent = "Pressure " + (json.press_ramp_bar ? json.press_ramp_bar.toFixed(1) + " bar" : "hold");
-  } else if (json.shot_in_progress && json.shot_phase === "extraction") {
-    shotLabel.textContent = "Extracting…";
-  } else {
-    shotLabel.textContent = json.shot_auto_stop_sec > 0 ? "Auto-stops at " + json.shot_auto_stop_sec + "s" : "Auto-stop disabled";
-  }
-
-  shotAutoStopSec = json.shot_auto_stop_sec;
+   var shotLabel = document.getElementById("shot_auto_stop_label");
+   if (json.shot_in_progress && json.phase_index >= 0) {
+     var unit = json.phase_type === "pressure" ? " bar" : json.phase_type === "flow" ? " ml/s" : json.phase_type === "power" ? "%" : "";
+     var tgt = json.phase_type === "soak" ? "pump off" : json.phase_target.toFixed(1) + unit;
+     shotLabel.textContent = json.phase_name + " · " + (json.phase_index + 1) + "/" + json.phase_count + " · " + tgt;
+   } else {
+     shotLabel.textContent = (json.active_profile_name || "--") + " · stops by " + json.active_max_sec + "s";
+   }
+   shotAutoStopSec = json.active_max_sec;
+   
   if (typeof json.active_profile_name === "string" && json.active_profile_name !== activeProfileName) {
     activeProfileName = json.active_profile_name;
     markActiveProfile();
@@ -2184,8 +2180,7 @@ static void handleStatus(AsyncWebServerRequest *request) {
   // now that Fix 1 makes an unwired-sensor fault the likeliest Milestone A
   // confusion point.
   float snapPumpPower = dimmerGetPowerPercent();
-  // Temporary bring-up diagnostic (2026-09-15) - see dimmerGetZcCount()'s
-  // declaration comment. Remove alongside it once bring-up is complete.
+  // Zero-cross count (dimmer health), exposed as zc_count.
   uint32_t snapDimmerZcCount = dimmerGetZcCount();
   uint32_t snapPressureMv = pressureSensorLastMv();
   bool snapPressureCeilingTripped = (pressureFault || currentPressure > PUMP_MAX_SAFETY_BAR);
@@ -2310,7 +2305,6 @@ static void handleStatus(AsyncWebServerRequest *request) {
   json += ",\"pressure\":" + String(snapPressure, 2);
   json += ",\"pressure_fault\":" + String(snapPressureFault ? "true" : "false");
   json += ",\"pump_power\":" + String(snapPumpPower, 1);
-  json += ",\"dimmer_zc_count\":" + String(snapDimmerZcCount);
   json += ",\"zc_count\":" + String(snapDimmerZcCount);
   json += ",\"fired_cycles\":" + String(snapFired);
   json += ",\"pump_mains\":\"" + snapMains + "\"";
