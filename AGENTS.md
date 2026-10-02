@@ -133,6 +133,15 @@ The temp module also needs **3.3V** and **GND** from the DevKit (module is
   - `include/config.h` — pins, sensor UART config, brew/steam gain-scheduling
     profile defaults, per-mode safety ceilings, eco-sleep default, autotune
     relay-feedback parameters.
+  - `src/pump_model.cpp` — the pure EP5 + reference-puck open-loop model;
+  - `src/pump_cal_math.cpp` and `src/pump_calibration.cpp` — 3-run scale
+    calibration, owning NVS `pump_mlpc`;
+  - `src/profile_codec.cpp` — built-ins, validation, legacy migration;
+  - `src/shot_planner.cpp` — the phase sequencer;
+  - `src/profiles.cpp` — the `/profiles.json` store.
+  - The pure units (`pump_model`, `pump_cal_math`, `profile_codec`,
+    `shot_planner`) are written to be host-testable, but there is currently
+    **no `test/` directory and no `[env:native]`** - user declined unit tests.
   - `src/sniffer.cpp` — standalone UART protocol prober, NOT part of the main
     app (its own env, excludes main/web/mqtt). Kept for future diagnostics.
 - **Persistence:** settings (per-mode target/Kp/Ki/Kd, MQTT, eco-sleep
@@ -179,6 +188,42 @@ The temp module also needs **3.3V** and **GND** from the DevKit (module is
   produces any real physical effect depends on the SSR genuinely being the
   only thing controlling the heater regardless of switch position — not yet
   confirmed (same open thermostat-photo dependency as above).
+
+### Phase profiles + open-loop pump model (2026-10-02)
+- Shots run **phase profiles** (`/profiles.json`), addressed **by name** (active
+  one in NVS `profile_name`; unknown name falls back to "Classic 9 bar"). Phase
+  types: `pressure` (bar), `flow` (ml/s), `power` (% duty), `soak` (pump off);
+  each has a curve/ramp, optional limit, a hard `duration_s`, and optional
+  `press_gte`/`press_lte` stops (only honored when the pressure sensor is usable).
+- **7 built-ins** (flash, undeletable): Classic 9 bar, Londinium, Lever, IUIUIU
+  Classic, Blooming, Flush, Backflush (last two are utilities: no temp, not
+  logged, up to 10 phases). Per profile: **Tweak** (temp 80-100 C, `max_sec`,
+  `pressure_scale` 0.7-1.1, `trim_pct` +-20; stored as overrides for built-ins),
+  **Copy**, **Rename**, **Delete** (user profiles only, max 8), **Reset**
+  (drops a built-in's override). Phase duration minimum 0.2 s; utility
+  `max_sec` up to 120. The per-profile `max_sec` replaces the old global shot
+  auto-stop. The old global pump %, fill/soak and pulse settings are gone.
+- `shot_planner` runs every 50 ms in `controlTick()` on top of `pump_model`:
+  `P_est` (integrated estimate) and `ml_est` come from the model, **not a
+  sensor** - `P_est` is an estimate, and the Now tab labels it so. Model
+  defaults: **0.213 ml/stroke** (Gaggiuino's effective free-flow value; scaled
+  by calibration), puck `Qref` = 2 ml/s at 9 bar (x trim), a **30 ml headspace**
+  (compliance) in the model. Safety cutoffs in `controlTick()` still override it.
+- The 0-5 bar sensor is **display-only**. Flipping
+  `PRESSURE_CLOSED_LOOP_AVAILABLE` after fitting a 0-16 bar sensor turns the
+  pressure PID into a **+-30 % trim** around the model duty - no profile changes.
+- **Pump calibration** (Settings -> Pump calibration): portafilter off, tared
+  cup on the scale, Brew switch on, 3 x 10 s runs at 100 % (no slew, requires
+  `pump_mains == ok`), enter grams each time; ml/stroke = grams / fired cycles,
+  plausible 0.15-0.40, any run >10 % off the mean is flagged for redo; Save
+  stores the mean (NVS `pump_mlpc`). Any safety cut/mains loss/shot start discards the run.
+- **Dimmer hardening** (`dimmer.cpp`): gate raised in the ZC ISR and held
+  1500 us, dropped by a gptimer alarm; mains Hz auto-detect; `/status`
+  `pump_mains` = `ok`/`absent` (no crossing >100 ms, nothing fires)/`unstable`;
+  permanent `zc_count` and `fired_cycles` counters (no longer a diagnostic);
+  +250 %/s slew on increases (cuts stay instant); clean start at accumulator 500.
+- **Legacy migration**: if `/profiles.json` is missing, `/profiles.csv` (really
+  JSON) is backed up byte-for-byte to `/profiles.csv.bak`, then converted.
 
 ### Eco / Auto-Sleep
 - `lastActivityTime` (`main.cpp`) advances only on an explicit `/update` call
@@ -728,6 +773,10 @@ everything again.
    pressure reading to control against. The on/off half (time/weight
    auto-stop, driving the dimmer at ~100%/0% duty) does **not** need item 7
    and is the planned first bring-up milestone, before closed-loop tuning.
+   **Status (2026-10-02):** phase profiles + an open-loop pump model are
+   shipped (Section 4). The fitted 0-5 bar sensor is display-only; flipping
+   `PRESSURE_CLOSED_LOOP_AVAILABLE` after fitting a 0-16 bar sensor turns the
+   pressure PID into a +-30 % trim with no profile changes.
    **Why:** enables a phase-based profile system (pump power/pressure/flow
    target + time/volume/pressure stop conditions per phase, matching both
    competitor projects' architecture) - real pre-infusion and
@@ -835,6 +884,11 @@ everything again.
   placeholders per Section 4).
 - ⬜ Autotune not yet run on the real machine — first run should be
   supervised (Section 4, "PID Autotune").
+- ✅ **Phase profiles + open-loop pump model + dimmer hardening + pump
+  calibration shipped** (2026-10-02, OTA-flashed twice; legacy profiles
+  migrated, profile CRUD checked live) - see Section 4.
+- ⬜ Live verification of phase profiles + pump calibration (plan Task 12) —
+  pending, supervised. No shot, calibration run or heating done yet.
 
 > Serial-monitor note: the S3 USB-Serial/JTAG can drop the CDC link on `RST`, so
 > the boot banner is often missed by an already-attached monitor. Use the
@@ -847,6 +901,26 @@ everything again.
 ---
 
 ## 10. Change Log
+
+### 2026-10-02 — Claude Code (Opus 5.5) — Phase profiles, open-loop pump model, dimmer hardening, pump calibration
+
+- **Research**: read Gaggiuino (`release/stm32-blackpill`) and GaggiMate (`master`) source. Both use 0-12/16 bar 0.5-4.5 V sensors via ADS1115 + Kalman filtering, and PSM pulse-skip pump drive. Their pump models disagree ~2x at 9 bar (Gaggiuino EP5 curve -> ~55-75% duty to hold 9 bar; GaggiMate linear 10.2 ml/s@1 bar / 5.5@9 -> ~27-36%) - hence a per-machine calibration instead of a fixed %. Peak targets are 8-9 bar with declines/flow phases, not flat 9 bar.
+- **User decisions**: keep the 0-5 bar sensor for now (closed loop must switch on later with no profile changes); phase-% from a model fitted by a 3-run scale calibration with a 10% outlier check; built-in profiles + simple tweaks, no full phase editor yet; harden the dimmer across the board; **no unit tests**.
+- **Built**:
+  - pure units `pump_model`, `pump_cal_math`, `profile_codec`, `shot_planner`, written to be host-testable but **currently without tests, by user decision** (no `test/`, no `[env:native]`);
+  - `/profiles.json` store addressed by name;
+  - 7 built-ins: Classic 9 bar, Londinium, Lever, IUIUIU Classic, Blooming, Flush, Backflush;
+  - migration of the legacy profiles after a byte-for-byte backup to `/profiles.csv.bak`;
+  - the planner runs in `controlTick()`;
+  - a 3-run calibration card;
+  - Now-tab est. bar / phase / water / mains banners.
+- **Dimmer**: gate raised in the ZC ISR and held 1500 µs, dropped by a gptimer alarm (was a 100 µs pulse 300 µs after ZC - risk of lost strokes on the inductive pump); mains Hz auto-detect + 100 ms zero-cross watchdog; permanent `zc_count`/`fired_cycles`; +250 %/s slew (cuts stay instant).
+- **Removed settings**: global brew/pre-infusion pump %, fill/soak settings, global shot auto-stop (now each profile's `max_sec`).
+- **Unused NVS keys left in place**, for a future cleanup: `shot_auto_stop`, `pump_brew_pct`, `pump_pi_pct` (read once for migration), `pi_fill_bar`, `pi_fill_max_s`, `pi_soak_s`, `pi_enabled`, `pi_pulses`, `pi_on_ms`, `pi_off_ms`, `press_en`, `press_ramp_bar`, `press_ramp_ms`, `press_dec_en`, `press_dec_bar`, `press_dec_ms`. (`active_profile` is removed after being mapped to a name.)
+- **Model defaults differing from the design spec text**: 0.213 ml/stroke default, 30 ml headspace, phase duration minimum 0.2 s, utility `max_sec` up to 120, profile temp range 80-100 °C, the Lever built-in is named "Lever".
+- **Two post-review fixes**: the migrated active profile name is persisted to NVS `profile_name` (legacy `active_profile` key removed); planner/dimmer `dt` use a signed delta so a shot can't end on its first tick.
+- **Flashed**: OTA twice on 2026-10-02 (fw_build "Oct  2 2026 12:01:07" after the profile/planner switch-over, "Oct  2 2026 12:13:37" with the new UI). On the device the 3 legacy profiles (Classic, Light Roast, Dark Roast) migrated, backup at `/profiles.csv.bak`, active profile stayed "Classic"; profile CRUD and the 409 refusal path checked live.
+- **Not yet verified on the real machine**: no shot, calibration run or heating was performed (machine on mains, unattended). See the plan's Task 12 checklist.
 
 ### 2026-10-01 — Claude Code (Opus 5.5) — Pre-infusion back to profile pulses; pressure fill gated off for the 5-bar sensor
 
@@ -1145,7 +1219,7 @@ everything again.
   consistently reliable** and is what actually got both fixes onto the
   board. Worth a closer look in a future session if OTA continues to be
   flaky; for now, prefer USB when OTA fails more than once in a row.
-- **Added a temporary zero-cross counter diagnostic**
+- **Added a zero-cross counter** (kept permanently since 2026-10-02)
   (`dimmerGetZcCount()`, exposed as `/status`'s `dimmer_zc_count`) to get
   hard data during this bring-up rather than guessing - confirmed the
   ESP32 detects a genuine, continuous ~100Hz signal (matching 50Hz mains)
@@ -1154,8 +1228,7 @@ everything again.
   all when the **physical** Brew switch is on (it's spliced into the
   switched White wire) - Start Shot alone can't make the pump run if the
   physical switch is off, since firmware can only control duty cycle
-  *given* power is already present. Remove this diagnostic once hardware
-  bring-up is fully complete (Milestone C).
+  *given* power is already present.
 - **Result: Milestone A (HARDWARE_ROADMAP.md item 8, on/off dimmer
   control) is complete** - the dimmer is wired into the real machine,
   replacing the old relay, and Start Shot/Stop Shot correctly starts and

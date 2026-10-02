@@ -517,6 +517,14 @@ with a dialed standard-basket puck, from the EP5 pump curve - see
 sensor reads ~3 bar (min 4 s, max 15 s), optional soak. % sets flow, not pressure - the bar you
 get depends on the puck.
 
+**Firmware status (2026-10-02):**
+- The dimmer now drives a gate pulse held 1500 µs from each zero-cross edge, dropped by a hardware timer (gptimer).
+- The pump only runs during a shot or a calibration run.
+- Shots run name-addressed phase profiles through an open-loop pump model (see `AGENTS.md` Section 4).
+- Calibration procedure: portafilter off, tared cup on the scale, Brew switch on, Settings -> Pump calibration, 3 x 10 s runs at full power, enter the grams each time, Save.
+- The 0-5 bar sensor is display-only until a 0-16 bar part replaces it; then set `PRESSURE_CLOSED_LOOP_AVAILABLE` to `true` and the pressure PID becomes a +-30 % trim with no profile changes.
+- Live verification on the real machine is still pending (plan Task 12).
+
 **Two things, one build:**
 1. **Plain pump on/off** (former item 4's whole scope) — time-based
    auto-stop (25s, no other hardware needed) or weight-based auto-stop
