@@ -195,9 +195,9 @@ The temp module also needs **3.3V** and **GND** from the DevKit (module is
   types: `pressure` (bar), `flow` (ml/s), `power` (% duty), `soak` (pump off);
   each has a curve/ramp, optional limit, a hard `duration_s`, and optional
   `press_gte`/`press_lte` stops (only honored when the pressure sensor is usable).
-- **7 built-ins** (flash, undeletable): Classic 9 bar, Londinium, Lever, IUIUIU
-  Classic, Blooming, Flush, Backflush (last two are utilities: no temp, not
-  logged, up to 10 phases). Per profile: **Tweak** (temp 80-100 C, `max_sec`,
+- **6 built-ins** (flash, undeletable): Classic 9 bar, Londinium, Lever, IUIUIU
+  Classic, Blooming, Flush (Flush is a utility: no temp, not logged; utility
+  profiles may have up to 10 phases). No Backflush: this machine has no 3-way valve. Per profile: **Tweak** (temp 80-100 C, `max_sec`,
   `pressure_scale` 0.7-1.1, `trim_pct` +-20; stored as overrides for built-ins),
   **Copy**, **Rename**, **Delete** (user profiles only, max 8), **Reset**
   (drops a built-in's override). Phase duration minimum 0.2 s; utility
@@ -208,14 +208,14 @@ The temp module also needs **3.3V** and **GND** from the DevKit (module is
   sensor** - `P_est` is an estimate, and the Now tab labels it so. Model
   defaults: **0.213 ml/stroke** (Gaggiuino's effective free-flow value; scaled
   by calibration), puck `Qref` = 2 ml/s at 9 bar (x trim), a **30 ml headspace**
-  (compliance) in the model. Safety cutoffs in `controlTick()` still override it.
+  (water volume) plus a 1.4 ml/bar compliance constant in the model. Safety cutoffs in `controlTick()` still override it.
 - The 0-5 bar sensor is **display-only**. Flipping
   `PRESSURE_CLOSED_LOOP_AVAILABLE` after fitting a 0-16 bar sensor turns the
   pressure PID into a **+-30 % trim** around the model duty - no profile changes.
 - **Pump calibration** (Settings -> Pump calibration): portafilter off, tared
   cup on the scale, Brew switch on, 3 x 10 s runs at 100 % (no slew, requires
   `pump_mains == ok`), enter grams each time; ml/stroke = grams / fired cycles,
-  plausible 0.15-0.40, any run >10 % off the mean is flagged for redo; Save
+  plausible 0.08-0.40, any run >10 % off the mean is flagged for redo; Save
   stores the mean (NVS `pump_mlpc`). Any safety cut/mains loss/shot start discards the run.
 - **Dimmer hardening** (`dimmer.cpp`): gate raised in the ZC ISR and held
   1500 us, dropped by a gptimer alarm; mains Hz auto-detect; `/status`
@@ -912,7 +912,7 @@ everything again.
 - **Built**:
   - pure units `pump_model`, `pump_cal_math`, `profile_codec`, `shot_planner`, written to be host-testable but **currently without tests, by user decision** (no `test/`, no `[env:native]`);
   - `/profiles.json` store addressed by name;
-  - 7 built-ins: Classic 9 bar, Londinium, Lever, IUIUIU Classic, Blooming, Flush, Backflush;
+  - 6 built-ins: Classic 9 bar, Londinium, Lever, IUIUIU Classic, Blooming, Flush;
   - migration of the legacy profiles after a byte-for-byte backup to `/profiles.csv.bak`;
   - the planner runs in `controlTick()`;
   - a 3-run calibration card;
@@ -1040,6 +1040,14 @@ everything again.
 - Also noted for next time: an OTA was pushed while a shot was in progress
   (agent error - status showed `shot_in_progress: true`); the reboot ended
   the shot cleanly. Check that field before any OTA.
+
+### 2026-10-02 — Claude Code (Opus 5.5) — Final whole-branch review fixes
+
+- **Stale `now` fixed at the root**: `controlTick()` re-samples `millis()` right after taking `lockState()`, so timestamps written under the lock by `/update` (calibration run start, activity time, planner tick) can't be newer than `now` and wrap. `pumpCalTick` also compares with a signed delta.
+- **Calibration**: Stop during `await_grams` now discards just that run (UI button reads "Discard run"). **Live finding**: run 1 measured 56 g / 10 s, about 0.11 ml/stroke with cold water, below the old 0.15 floor, so `PUMP_ML_PER_CLICK_MIN` is now 0.08 (range 0.08-0.40, all messages/docs updated).
+- **Backflush built-in removed** (now 6 built-ins): no 3-way valve on this machine, so a blind-basket backflush would dead-head the pump. Flush stays.
+- **Dimmer**: on mains loss `appliedX10` is zeroed (request kept) so the slew ramps up again on return; the gate is forced low every tick when applied power is 0 or mains is absent. New runtime diagnostic `dimmer_gate_hold_us=<500-8000>` on `/update` (not persisted, resets to 1500 on boot) and `gate_hold_us` in `/status`, to A/B lost TRIAC latching against genuinely low flow. No UI.
+- Pump trim hint corrected (+ = more pump duty = faster shot). `profiles.cpp` init now promotes an orphaned `.tmp` store if the store file is missing (LittleFS rename overwrite semantics could not be confirmed from source, so the remove stays). Stale shot-timer/route comments fixed.
 
 ### 2026-10-01 — Claude Code (Opus 5.5) — Replacement dimmer installed with a fuse; Milestone A re-confirmed
 
