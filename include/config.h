@@ -202,6 +202,31 @@
 // installed and calibrated.
 #define PRESSURE_CLOSED_LOOP_AVAILABLE false
 
+// ============================================================================
+// Open-loop pump model (design spec 2026-10-02 §4.1)
+// ----------------------------------------------------------------------------
+// Pump side: one stroke per mains cycle, ml per stroke falls with pressure
+// along Gaggiuino's EP5 curve SHAPE (pump_model.cpp), scaled to OUR pump by
+// the 3-run scale calibration (pump_calibration.cpp). 0.213 ml/stroke is
+// Gaggiuino's effective free-flow value (their pumpFlowAtZero 0.2225 minus
+// the 0.045 curve offset, x1.2 multiplier at 50 Hz) - used until calibrated.
+// Puck side: a "reference puck" passing PUMP_MODEL_REF_PUCK_FLOW_ML_S at
+// PUMP_MODEL_REF_PUCK_BAR (a dialed 18 g -> 36 g shot), linear in pressure.
+// Headspace: the estimate holds 0 bar until this much water has gone in
+// (basket headspace + dry-puck absorption) - otherwise a fill phase would
+// "reach" its bar limit in ~1 s and starve the fill.
+// ============================================================================
+#define PUMP_ML_PER_CLICK_DEFAULT 0.213f
+#define PUMP_ML_PER_CLICK_MIN 0.15f
+#define PUMP_ML_PER_CLICK_MAX 0.40f
+#define PUMP_MODEL_COMPLIANCE_ML_PER_BAR 1.4f
+#define PUMP_MODEL_TAU_S 0.5f
+#define PUMP_MODEL_REF_PUCK_FLOW_ML_S 2.0f
+#define PUMP_MODEL_REF_PUCK_BAR 9.0f
+#define PUMP_MODEL_HEADSPACE_ML 30.0f
+#define PUMP_MODEL_SHAPE_FLOOR 0.02f
+#define PUMP_MODEL_MAX_BAR 16.0f
+
 // Same rolling error-rate fault model as the temp sensor (see
 // SENSOR_FAULT_WINDOW above) - a separate window since pressure and temp
 // fail independently.
