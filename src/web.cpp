@@ -2430,14 +2430,13 @@ static void handleUpdate(AsyncWebServerRequest *request) {
   auto hasArg = [request](const char *name) { return request->hasParam(name); };
   auto arg = [request](const char *name) { return request->getParam(name)->value(); };
 
-  noteActivity(); // any /update call is explicit user action - resets eco-sleep timer
-
   // Holds the whole handler body under stateMutex - see config.h
   // "Shared-state lock". This runs on the AsyncTCP task, a different task
   // than controlTick(), so every field this handler touches (mode,
   // setpoint, gains, shot state) needs the same lock controlTick() holds
   // during its own tick, for exactly the same reason.
   lockState();
+  noteActivity(); // after the lock: any /update call is explicit user action - resets eco-sleep timer
 
   // Actions that can be refused (calibration, profiles) set this; the
   // response is then 409 + the reason instead of the usual redirect, so

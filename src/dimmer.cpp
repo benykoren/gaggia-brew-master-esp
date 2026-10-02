@@ -145,15 +145,6 @@ void dimmerSetPowerPercentImmediate(float percent) {
 }
 
 void dimmerTick(uint32_t dtMs) {
-  int32_t req = requestedX10, app = appliedX10;
-  if (app < req) {
-    int32_t step = (int32_t)((DIMMER_SLEW_PCT_PER_S * 10UL * dtMs) / 1000UL);
-    if (step < 1) step = 1;
-    app += step;
-    if (app > req) app = req;
-    appliedX10 = app;
-  }
-
   uint32_t nowMs = millis();
   if (nowMs - windowStartMs >= 1000) {
     uint32_t zc = zcCount;
@@ -176,12 +167,24 @@ void dimmerTick(uint32_t dtMs) {
   } else {
     mainsState = MainsState::OK;
   }
-  if (mainsState == MainsState::ABSENT && prev != MainsState::ABSENT) {
-    psmResetRequested = true; // clean pattern when power returns
-    appliedX10 = 0;           // requestedX10 stays, so the slew ramps up again on return
+  if (mainsState == MainsState::ABSENT) {
+    // Hold applied at 0 for as long as mains is absent and do NOT advance the
+    // slew, so the pump ramps up from 0 (not full duty) when power returns.
+    // requestedX10 stays untouched.
+    if (prev != MainsState::ABSENT) psmResetRequested = true; // clean pattern when power returns
+    appliedX10 = 0;
     gateLow();
+  } else {
+    int32_t req = requestedX10, app = appliedX10;
+    if (app < req) {
+      int32_t step = (int32_t)((DIMMER_SLEW_PCT_PER_S * 10UL * dtMs) / 1000UL);
+      if (step < 1) step = 1;
+      app += step;
+      if (app > req) app = req;
+      appliedX10 = app;
+    }
   }
-  if (appliedX10 == 0 || mainsState == MainsState::ABSENT) gateLow();
+  if (appliedX10 == 0) gateLow();
 }
 
 void dimmerSetGateHoldUs(int32_t us) {

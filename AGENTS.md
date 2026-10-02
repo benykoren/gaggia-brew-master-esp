@@ -1048,6 +1048,7 @@ everything again.
 - **Backflush built-in removed** (now 6 built-ins): no 3-way valve on this machine, so a blind-basket backflush would dead-head the pump. Flush stays.
 - **Dimmer**: on mains loss `appliedX10` is zeroed (request kept) so the slew ramps up again on return; the gate is forced low every tick when applied power is 0 or mains is absent. New runtime diagnostic `dimmer_gate_hold_us=<500-8000>` on `/update` (not persisted, resets to 1500 on boot) and `gate_hold_us` in `/status`, to A/B lost TRIAC latching against genuinely low flow. No UI.
 - Pump trim hint corrected (+ = more pump duty = faster shot). `profiles.cpp` init now promotes an orphaned `.tmp` store if the store file is missing (LittleFS rename overwrite semantics could not be confirmed from source, so the remove stays). Stale shot-timer/route comments fixed.
+- **Residual fixes**: `dimmerTick()` now computes mains state first and, while ABSENT, holds `appliedX10` at 0 without advancing the slew (previously the slew undid the zeroing within ~0.4 s, so the pump restarted at full duty on return). `noteActivity()` moved to after `lockState()` in `web.cpp` `/update` and `mqtt.cpp`, and `checkEcoSleep` uses a signed idle delta (negative = 0), closing a wrap that could spuriously turn Brew/Steam off.
 
 ### 2026-10-01 — Claude Code (Opus 5.5) — Replacement dimmer installed with a fuse; Milestone A re-confirmed
 

@@ -73,13 +73,12 @@ void callback(char *topic, byte *payload, unsigned int length) {
   }
   Serial.printf("MQTT message [%s] %s\n", topic, message.c_str());
   String t = String(topic);
-  noteActivity(); // an MQTT command is an explicit user/automation action,
-                   // same as any Web UI /update - keeps eco-sleep in sync.
 
   // See config.h "Shared-state lock" - held for the whole handler (matching
   // web.cpp's /update) so a mode/tuning change from MQTT can never
   // interleave with a half-finished control tick.
   lockState();
+  noteActivity(); // after the lock: an MQTT command is explicit user action (keeps eco-sleep in sync)
 
   if (t == "gaggia/set/mode") {
     stopAutotune(); // mirror web.cpp: a mode change always interrupts autotune

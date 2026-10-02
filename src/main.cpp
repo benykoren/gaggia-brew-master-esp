@@ -154,7 +154,9 @@ static void checkEcoSleep(unsigned long now) {
   if (timeoutMin == 0) return; // disabled for this mode
 
   unsigned long timeoutMs = timeoutMin * 60000UL;
-  if (now - lastActivityTime >= timeoutMs) {
+  long idleMs = (long)(now - lastActivityTime); // signed: activity stamped after `now` counts as 0
+  if (idleMs < 0) idleMs = 0;
+  if ((unsigned long)idleMs >= timeoutMs) {
     modeBeforeSleep = modeNow;
     autoSleeping = true;
     setOpMode(OpMode::OFF);
