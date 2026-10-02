@@ -727,6 +727,15 @@ void setup() {
   if (startName.length() == 0 && legacyActiveIndex >= 0) startName = profileLegacyNameAt(legacyActiveIndex);
   if (!profileFind(startName.c_str())) startName = PROFILE_DEFAULT_NAME;
   activeProfileName = startName;
+  if (startName != savedProfileName) {
+    // Persist the migrated/fallback choice so later boots don't depend on
+    // the legacy index (legacy names are only known on the migrating boot).
+    Preferences pn;
+    pn.begin("gaggia", false);
+    pn.putString("profile_name", startName);
+    pn.remove("active_profile");
+    pn.end();
+  }
   resetPlannerOut();
 
   // NTP time sync, for real shot timestamps. Stored/compared in UTC
@@ -803,8 +812,15 @@ static void controlTick(unsigned long now) {
   // below sets a new duty, so the slew always has a fresh dt.
   static unsigned long lastDimmerTickMs = 0;
   if (lastDimmerTickMs == 0) lastDimmerTickMs = now;
-  dimmerTick((uint32_t)(now - lastDimmerTickMs));
-  lastDimmerTickMs = now;
+  {
+    // `now` was sampled before lockState() blocked, so it can be older than
+    // a timestamp another task set meanwhile - never let the subtraction wrap.
+    long dimDelta = (long)(now - lastDimmerTickMs);
+    if (dimDelta > 0) {
+      dimmerTick((uint32_t)dimDelta);
+      lastDimmerTickMs = now;
+    }
+  }
 
   // Read Temperature
   if (now - lastTempReadTime >= TEMP_READ_INTERVAL) {
@@ -928,8 +944,9 @@ static void controlTick(unsigned long now) {
   // after a safety cut clears (or mains returns) the pump resumes, ramped
   // by the dimmer's slew.
   if (shotInProgress) {
-    float dtS = (now - lastPlannerTickMs) / 1000.0f;
-    lastPlannerTickMs = now;
+    long plannerDelta = (long)(now - lastPlannerTickMs);
+    float dtS = plannerDelta > 0 ? plannerDelta / 1000.0f : 0.0f;
+    if (plannerDelta > 0) lastPlannerTickMs = now;
     bool sensorUsable = PRESSURE_CLOSED_LOOP_AVAILABLE && !pressureFault;
     plannerOut = shotPlanner.tick(dtS, currentPressure, sensorUsable);
     if (plannerOut.done) {
