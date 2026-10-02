@@ -27,7 +27,7 @@ struct Phase {
 struct Profile {
   char name[PROFILE_NAME_MAX_LEN + 1];
   bool builtin;
-  bool utility;        // Flush/Backflush: no temp setpoint, not logged
+  bool utility;        // Flush: no temp setpoint, not logged
   float temp;
   uint16_t maxSec;
   float pressureScale; // multiplies pressure targets, flow-phase bar limits, press_* stops

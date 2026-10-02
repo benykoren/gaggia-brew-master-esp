@@ -21,6 +21,9 @@ static volatile int32_t debounceUs = DIMMER_AC_HALF_CYCLE_US / 2;
 static volatile uint32_t zcCount = 0;
 static volatile uint32_t firedCycles = 0;
 static volatile bool psmResetRequested = false;
+// Diagnostic only (not persisted, resets to DIMMER_GATE_HOLD_US on boot): lets
+// us A/B lost TRIAC latching against genuinely low flow. Integer - ISR-safe.
+static volatile int32_t gateHoldUs = DIMMER_GATE_HOLD_US;
 static gptimer_handle_t gateTimer = nullptr;
 
 // Pulse-skip state - ISR-owned. A "cycle" is two consecutive accepted
@@ -89,7 +92,7 @@ static void IRAM_ATTR onZeroCross(void *) {
   uint64_t count = 0;
   gptimer_get_raw_count(gateTimer, &count);
   gptimer_alarm_config_t alarm = {};
-  alarm.alarm_count = count + DIMMER_GATE_HOLD_US; // 1 MHz timer: counts = us
+  alarm.alarm_count = count + gateHoldUs; // 1 MHz timer: counts = us
   gptimer_set_alarm_action(gateTimer, &alarm);
 }
 
@@ -175,9 +178,18 @@ void dimmerTick(uint32_t dtMs) {
   }
   if (mainsState == MainsState::ABSENT && prev != MainsState::ABSENT) {
     psmResetRequested = true; // clean pattern when power returns
+    appliedX10 = 0;           // requestedX10 stays, so the slew ramps up again on return
     gateLow();
   }
+  if (appliedX10 == 0 || mainsState == MainsState::ABSENT) gateLow();
 }
+
+void dimmerSetGateHoldUs(int32_t us) {
+  if (us < 500) us = 500;
+  if (us > 8000) us = 8000;
+  gateHoldUs = us;
+}
+int32_t dimmerGetGateHoldUs() { return gateHoldUs; }
 
 float dimmerGetPowerPercent() { return (float)appliedX10 / 10.0f; }
 uint32_t dimmerGetZcCount() { return zcCount; }

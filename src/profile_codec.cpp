@@ -40,13 +40,7 @@ static const char BUILTIN_PROFILES_JSON[] = R"json([
  {"name":"Ramp","type":"flow","target":2,"limit":6,"curve":"ease-out","ramp_s":5,"duration_s":5},
  {"name":"Flow","type":"flow","target":2,"limit":6,"duration_s":15}]},
 {"name":"Flush","utility":true,"temp":0,"max_sec":10,"phases":[
- {"name":"Flush","type":"power","target":100,"duration_s":5}]},
-{"name":"Backflush","utility":true,"temp":0,"max_sec":100,"phases":[
- {"name":"On 1","type":"power","target":100,"duration_s":10},{"name":"Off 1","type":"soak","duration_s":10},
- {"name":"On 2","type":"power","target":100,"duration_s":10},{"name":"Off 2","type":"soak","duration_s":10},
- {"name":"On 3","type":"power","target":100,"duration_s":10},{"name":"Off 3","type":"soak","duration_s":10},
- {"name":"On 4","type":"power","target":100,"duration_s":10},{"name":"Off 4","type":"soak","duration_s":10},
- {"name":"On 5","type":"power","target":100,"duration_s":10},{"name":"Off 5","type":"soak","duration_s":10}]}
+ {"name":"Flush","type":"power","target":100,"duration_s":5}]}
 ])json";
 
 static void copyStr(char *dst, size_t cap, const char *src) {

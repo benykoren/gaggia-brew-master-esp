@@ -69,6 +69,11 @@ void pumpCalAbort(const char *reason) {
 
 void pumpCalStop() {
   if (state == PumpCalState::RUNNING) pumpCalAbort("stopped");
+  else if (state == PumpCalState::AWAIT_GRAMS) { // discard just this run
+    if (activeRun >= 0) runs[activeRun] = -1.0f;
+    activeRun = -1;
+    state = PumpCalState::IDLE;
+  }
 }
 
 // Runs AFTER controlTick()'s pump safety cutoffs, so a cut they made this
@@ -77,7 +82,7 @@ void pumpCalTick(unsigned long nowMs) {
   if (state != PumpCalState::RUNNING) return;
   if (dimmerGetMainsState() == MainsState::ABSENT) { pumpCalAbort("mains lost - Brew switch off?"); return; }
   if (dimmerGetPowerPercent() < 99.0f) { pumpCalAbort("pump cut by a safety check"); return; }
-  if (nowMs - runStartMs >= PUMP_CAL_RUN_MS) {
+  if ((long)(nowMs - runStartMs) >= (long)PUMP_CAL_RUN_MS) {
     runCycles = dimmerGetFiredCycles() - runStartFired;
     dimmerSetPowerPercent(0.0f);
     state = PumpCalState::AWAIT_GRAMS;
@@ -88,7 +93,7 @@ void pumpCalTick(unsigned long nowMs) {
 bool pumpCalRecordGrams(float grams, const char **err) {
   if (state != PumpCalState::AWAIT_GRAMS) { *err = "No run is waiting for grams"; return false; }
   float v = calRunMlPerClick(grams, runCycles);
-  if (!calPlausible(v)) { *err = "That works out outside 0.15-0.40 ml per stroke - check the grams"; return false; }
+  if (!calPlausible(v)) { *err = "That works out outside 0.08-0.40 ml per stroke - check the grams"; return false; }
   runs[activeRun] = v;
   activeRun = -1;
   state = PumpCalState::IDLE;

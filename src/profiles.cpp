@@ -147,6 +147,11 @@ void profilesInit(int legacyBrewPct, int legacyPreinfusionPct) {
     rebuildEffective();
     return;
   }
+  // saveStore() removes the store before renaming the temp into place; a power
+  // cut in between leaves only the (complete) .tmp - promote it.
+  if (!LittleFS.exists(PROFILE_STORE_PATH) && LittleFS.exists(PROFILE_STORE_PATH ".tmp")) {
+    if (LittleFS.rename(PROFILE_STORE_PATH ".tmp", PROFILE_STORE_PATH)) Serial.println("profiles: recovered store from .tmp");
+  }
   if (LittleFS.exists(PROFILE_STORE_PATH)) {
     if (!loadStore()) saveStore();
   } else {

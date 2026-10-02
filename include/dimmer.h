@@ -23,6 +23,10 @@ void dimmerTick(uint32_t dtMs);
 // The percent actually being fired right now (after slew).
 float dimmerGetPowerPercent();
 
+// Diagnostic: gate hold time in us (clamped 500-8000), not persisted.
+void dimmerSetGateHoldUs(int32_t us);
+int32_t dimmerGetGateHoldUs();
+
 uint32_t dimmerGetZcCount();     // accepted zero-crossings since boot
 uint32_t dimmerGetFiredCycles(); // fired mains cycles (= pump strokes) since boot
 MainsState dimmerGetMainsState();

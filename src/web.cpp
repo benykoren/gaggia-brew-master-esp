@@ -735,7 +735,7 @@ const char *index_html = R"rawliteral(
 
       <div class="card">
         <div class="tab-section-title">Shot profiles</div>
-        <p class="hint">Tap a profile to use it. Pressure and flow are estimates from the calibrated pump model until a 0&ndash;16 bar sensor is fitted. Pump trim: negative if shots run slow, positive if they run fast.</p>
+        <p class="hint">Tap a profile to use it. Pressure and flow are estimates from the calibrated pump model until a 0&ndash;16 bar sensor is fitted. Pump trim: + pushes more water (faster shot), &minus; less (slower shot). Adjust grind first.</p>
         <div id="profile_list_body"></div>
       </div>
 
@@ -2019,7 +2019,9 @@ function applyCalStatus(json) {
   var runBtn = document.getElementById("btn_pump_cal_run");
   runBtn.hidden = st === "running" || st === "await_grams" || n === 3;
   runBtn.disabled = json.pump_mains !== "ok";
-  document.getElementById("btn_pump_cal_stop").hidden = st !== "running";
+  var stopBtn = document.getElementById("btn_pump_cal_stop");
+  stopBtn.hidden = !(st === "running" || st === "await_grams");
+  stopBtn.textContent = st === "await_grams" ? "Discard run" : "Stop";
   document.getElementById("btn_pump_cal_save").hidden = !(n === 3 && (st === "idle" || st === "aborted"));
 }
 
@@ -2351,6 +2353,7 @@ static void handleStatus(AsyncWebServerRequest *request) {
   json += ",\"pump_calibrated\":" + String(snapPumpCalibrated ? "true" : "false");
   json += ",\"pump_ml_per_click\":" + String(snapPumpMlpc, 4);
   json += ",\"pump_cal_state\":\"" + snapCalState + "\"";
+  json += ",\"gate_hold_us\":" + String((long)dimmerGetGateHoldUs());
   json += ",\"pump_cal_reason\":\"" + snapCalReason + "\"";
   json += ",\"pump_cal_run\":" + String(snapCalRun);
   json += ",\"pump_cal_elapsed_ms\":" + String(snapCalElapsed);
@@ -2586,7 +2589,8 @@ static void handleUpdate(AsyncWebServerRequest *request) {
     else pumpCalStartRun(n - 1, &actionErr);
   }
   if (hasArg("pump_cal_grams")) pumpCalRecordGrams(arg("pump_cal_grams").toFloat(), &actionErr);
-  if (hasArg("pump_mlpc") && !pumpCalSetValue(arg("pump_mlpc").toFloat())) actionErr = "pump_mlpc out of range (0.15-0.40)";
+  if (hasArg("dimmer_gate_hold_us")) dimmerSetGateHoldUs(arg("dimmer_gate_hold_us").toInt());
+  if (hasArg("pump_mlpc") && !pumpCalSetValue(arg("pump_mlpc").toFloat())) actionErr = "pump_mlpc out of range (0.08-0.40)";
 
   // Descale / maintenance reminder
   if (hasArg("mark_descaled") && arg("mark_descaled") == "1") {
@@ -2813,7 +2817,7 @@ void setupWeb() {
     request->send(200, "application/json", shotLogReadJson());
   });
 
-  // Named shot profiles (temp + auto-stop + pre-infusion pattern) - see
+  // Named shot profiles (temp + phase list + max_sec) - see
   // profiles.cpp. List only; add/edit/delete/apply all go through /update
   // like every other setting, for the same reason /settings_export reuses
   // it for restore - one code path, not two.

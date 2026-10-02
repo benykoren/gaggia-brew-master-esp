@@ -432,10 +432,9 @@ static void runAutotuneStep(unsigned long now) {
 // Started manually from the Web UI (Start Shot button) - the ESP32 has no
 // visibility into the machine's own Brew switch/pump yet, so it can't detect
 // a shot beginning on its own (see HARDWARE_ROADMAP.md for the sensor that
-// would). Stopping happens automatically when the active profile's phases end (below),
-// timed from that manual start - see the loop() check further down and its
-// important caveat: this stops the firmware's own bookkeeping, not the pump
-// itself (no hardware yet to do that either).
+// would). The shot drives the pump through the profile's phase list, and each
+// profile's max_sec ends it automatically (timed from that manual start) -
+// see controlTick() further down.
 // (shotInProgress itself is declared up with the other PID globals, not
 // here - applyActiveProfile() needs it for Brew gain-scheduling.)
 // ============================================================================
@@ -453,7 +452,7 @@ unsigned long descaleDayThreshold = DESCALE_DAY_THRESHOLD_DEFAULT;
 // by NAME and persisted as NVS "profile_name", never by list index, so
 // reordering or deleting can't silently retarget it. Selecting a non-utility
 // profile loads its temperature into brewSetpoint (persisted like a manual
-// edit); utility profiles (Flush/Backflush) leave the brew target alone.
+// edit); utility profiles (Flush) leave the brew target alone.
 // ============================================================================
 String activeProfileName = PROFILE_DEFAULT_NAME;
 bool activeShotIsUtility = false;
@@ -560,7 +559,7 @@ void stopShot() {
   bool wasUtility = activeShotIsUtility;
   activeShotIsUtility = false;
   unsigned long durationMs = millis() - shotStartMillis;
-  // Utility runs (Flush/Backflush) aren't shots - not logged, not counted.
+  // Utility runs (Flush) aren't shots - not logged, not counted.
   if (!wasUtility) {
     // 0 = unknown, same convention as weight.
     float endTemp = (currentTemperature > 0) ? currentTemperature : 0.0f;
@@ -807,6 +806,7 @@ static bool updateFaultWindow(bool window[], int windowSize, int &index, int &fi
 // half-updated mix of mode/setpoint/gains/shot-phase state.
 static void controlTick(unsigned long now) {
   lockState();
+  now = millis(); // re-sample: the caller's value may predate timestamps written under the lock by /update
 
   // Dimmer slew + mains health (dimmer.cpp) - every tick, before anything
   // below sets a new duty, so the slew always has a fresh dt.

@@ -189,7 +189,7 @@
 // "reach" its bar limit in ~1 s and starve the fill.
 // ============================================================================
 #define PUMP_ML_PER_CLICK_DEFAULT 0.213f
-#define PUMP_ML_PER_CLICK_MIN 0.15f
+#define PUMP_ML_PER_CLICK_MIN 0.08f
 #define PUMP_ML_PER_CLICK_MAX 0.40f
 #define PUMP_MODEL_COMPLIANCE_ML_PER_BAR 1.4f
 #define PUMP_MODEL_TAU_S 0.5f
