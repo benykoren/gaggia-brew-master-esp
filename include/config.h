@@ -227,6 +227,12 @@
 #define PUMP_MODEL_SHAPE_FLOOR 0.02f
 #define PUMP_MODEL_MAX_BAR 16.0f
 
+// Pump calibration (design spec 2026-10-02 §6): 3 free-flow runs at 100%,
+// averaged; a run more than PUMP_CAL_MAX_SPREAD from the 3-run mean must be
+// redone.
+#define PUMP_CAL_RUN_MS 10000UL
+#define PUMP_CAL_MAX_SPREAD 0.10f
+
 // Same rolling error-rate fault model as the temp sensor (see
 // SENSOR_FAULT_WINDOW above) - a separate window since pressure and temp
 // fail independently.
