@@ -431,6 +431,9 @@ const char *index_html = R"rawliteral(
     .profile-row-main b { font-size: var(--fs-8); }
     .profile-row-main span { font-size: var(--fs-4); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .profile-row-actions { display: flex; gap: var(--sp-2); flex: none; }
+    .profile-row-main { cursor: pointer; flex: 1; }
+    .profile-mini { width: 120px; height: 32px; flex: none; margin: 0 var(--sp-2); }
+    @media (max-width: 420px) { .profile-mini { display: none; } }
     .btn-chip-sm {
       border: 1px solid var(--border); background: var(--surface); color: var(--text-dim);
       padding: 6px 11px; border-radius: var(--radius-sm); font-size: var(--fs-3); font-weight: 700; cursor: pointer;
@@ -727,47 +730,24 @@ const char *index_html = R"rawliteral(
 
       <div class="card">
         <div class="tab-section-title">Shot profiles</div>
-        <p class="hint">Chips on Now load a saved temperature, auto-stop, pre-infusion, and pressure pattern into the live Brew settings.</p>
+        <p class="hint">Tap a profile to use it. Pressure and flow are estimates from the calibrated pump model until a 0&ndash;16 bar sensor is fitted. Pump trim: negative if shots run slow, positive if they run fast.</p>
         <div id="profile_list_body"></div>
-        <button type="button" onclick="newProfileForm()" class="btn-secondary">New profile</button>
       </div>
 
-      <div class="card" id="profile_editor_card" hidden>
-        <div class="tab-section-title" id="profile_form_title">New Profile</div>
-        <form onsubmit="submitProfileForm(event)">
-          <input type="hidden" id="input_profile_index" value="-1">
-          <div class="field">
-            <label for="input_profile_name">Name</label>
-            <input type="text" id="input_profile_name" maxlength="20" placeholder="e.g. Light Roast">
+      <div class="card" id="profile_tweak_card" hidden>
+        <div class="tab-section-title" id="profile_tweak_title">Tweak</div>
+        <form onsubmit="submitProfileTweak(event)">
+          <input type="hidden" id="input_tweak_name" value="">
+          <div class="field-row">
+            <div class="field" id="tweak_temp_field"><label for="input_tweak_temp">Temperature (&deg;C)</label><input type="number" step="0.5" min="80" max="100" id="input_tweak_temp"></div>
+            <div class="field"><label for="input_tweak_max_sec">Max shot time (s)</label><input type="number" step="1" min="5" max="120" id="input_tweak_max_sec"></div>
           </div>
           <div class="field-row">
-            <div class="field"><label for="input_profile_temp">Temperature (&deg;C)</label><input type="number" step="0.1" id="input_profile_temp" value="93"></div>
-            <div class="field"><label for="input_profile_autostop">Auto-stop (sec)</label><input type="number" step="1" min="5" max="90" id="input_profile_autostop" value="27" oninput="drawProfilePreview()"></div>
+            <div class="field"><label for="input_tweak_scale">Pressure scale</label><input type="number" step="0.05" min="0.7" max="1.1" id="input_tweak_scale"></div>
+            <div class="field"><label for="input_tweak_trim">Pump trim (%)</label><input type="number" step="1" min="-20" max="20" id="input_tweak_trim"></div>
           </div>
-          <label class="check-row"><input type="checkbox" id="input_profile_pi_enabled" onchange="drawProfilePreview()"> Pulsed pre-infusion</label>
-          <p class="hint" style="margin-top:var(--sp-2)">Pulses the pump before extraction to wet the puck: each pulse runs at the pre-infusion pump power (Settings &rarr; Pump power) for "On", then stops for "Off". Remember to load the profile after saving it.</p>
-          <div class="field-row-3" style="margin-top:var(--sp-3)">
-            <div class="field"><label for="input_profile_pi_pulses">Pulses</label><input type="number" step="1" min="0" max="10" id="input_profile_pi_pulses" value="3" oninput="drawProfilePreview()"></div>
-            <div class="field"><label for="input_profile_pi_on">On (sec)</label><input type="number" step="0.1" min="0.2" max="5" id="input_profile_pi_on" value="1" oninput="drawProfilePreview()"></div>
-            <div class="field"><label for="input_profile_pi_off">Off (sec)</label><input type="number" step="0.1" min="0.2" max="5" id="input_profile_pi_off" value="2" oninput="drawProfilePreview()"></div>
-          </div>
-          <label class="check-row"><input type="checkbox" id="input_profile_press_enabled"> Pressure profile</label>
-          <p class="hint" style="margin-top:var(--sp-2)">Closed-loop ramp, hold, then optional decline. Needs a pressure sensor that reads above the target (0-16 bar); ignored while the current 0-5 bar sensor is fitted - shots run at the brew pump power instead.</p>
-          <div class="field-row-3" style="margin-top:var(--sp-3)">
-            <div class="field"><label for="input_profile_press_ramp_bar">Ramp target (bar)</label><input type="number" step="0.1" min="0" max="11.9" id="input_profile_press_ramp_bar" value="9"></div>
-            <div class="field"><label for="input_profile_press_ramp_sec">Ramp/hold (sec)</label><input type="number" step="1" min="1" id="input_profile_press_ramp_sec" value="20"></div>
-          </div>
-          <label class="check-row"><input type="checkbox" id="input_profile_press_decline_enabled"> Declining finish</label>
-          <div class="field-row-3" style="margin-top:var(--sp-3)">
-            <div class="field"><label for="input_profile_press_decline_bar">Decline target (bar)</label><input type="number" step="0.1" min="0" max="11.9" id="input_profile_press_decline_bar" value="6"></div>
-            <div class="field"><label for="input_profile_press_decline_sec">Decline (sec)</label><input type="number" step="1" min="1" id="input_profile_press_decline_sec" value="8"></div>
-          </div>
-          <div class="chart-card">
-            <div class="chart-label"><span>Pump pattern preview</span><span id="profile_preview_label">&nbsp;</span></div>
-            <canvas id="profile_preview_chart" width="300" height="40" aria-hidden="true"></canvas>
-          </div>
-          <button type="submit" id="profile_form_submit" class="submit">Add Profile</button>
-          <button type="button" onclick="cancelProfileForm()" class="btn-secondary">Cancel</button>
+          <button type="submit" id="profile_tweak_submit" class="submit">Save</button>
+          <button type="button" onclick="closeProfileTweak()" class="btn-secondary">Cancel</button>
         </form>
       </div>
     </div>
@@ -1648,8 +1628,8 @@ function applyStatus(json) {
   }
 
   shotAutoStopSec = json.shot_auto_stop_sec;
-  if (json.active_profile !== activeProfileIndex) {
-    activeProfileIndex = json.active_profile;
+  if (typeof json.active_profile_name === "string" && json.active_profile_name !== activeProfileName) {
+    activeProfileName = json.active_profile_name;
     markActiveProfile();
   }
 
@@ -1770,71 +1750,171 @@ function toggleShot() {
 }
 
 // ============================================================================
-// Named shot profiles (Now-tab quick-select chips + Tune-tab management list)
+// Shot profiles - by NAME (design spec 2026-10-02 §7). All profile data goes
+// into the DOM via textContent/createElement(NS) only - names are user input.
 // ============================================================================
 var profilesCache = [];
-var activeProfileIndex = 0;
+var activeProfileName = "";
 var lastProfilesJson = "";
 
-function piSummary(p) {
-  return p.preinfusion ? p.pulses + "× " + (p.on_ms / 1000) + "s/" + (p.off_ms / 1000) + "s" : "None";
+function profileTotalSec(p) {
+  var t = 0;
+  p.phases.forEach(function (ph) { t += ph.duration_s; });
+  return Math.min(t, p.max_sec);
+}
+
+function profileSummary(p) {
+  if (p.utility) return "Utility · " + profileTotalSec(p).toFixed(0) + "s";
+  var peak = 0;
+  p.phases.forEach(function (ph) { if (ph.type === "pressure") peak = Math.max(peak, ph.target * p.pressure_scale); });
+  var s = p.temp.toFixed(1) + "°C · " + p.phases.length + " phases · " + profileTotalSec(p).toFixed(0) + "s";
+  if (peak > 0) s += " · peak " + peak.toFixed(1) + " bar";
+  if (p.trim_pct) s += " · trim " + (p.trim_pct > 0 ? "+" : "") + p.trim_pct + "%";
+  if (p.tweaked) s += " · tweaked";
+  return s;
+}
+
+function easeJs(curve, x) {
+  if (curve === "linear") return x;
+  if (curve === "ease-in") return x * x * x;
+  if (curve === "ease-out") return 1 - Math.pow(1 - x, 3);
+  if (curve === "ease-in-out") return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+  return 1;
+}
+
+// Mini phase chart: each phase's target over time, normalised per unit
+// (bar/10, ml/s/10, %/100) so mixed phases share one axis; colour = type.
+var SVG_NS = "http://www.w3.org/2000/svg";
+var PHASE_COLORS = { pressure: "#d98c3f", flow: "#3f8cd9", power: "#9a8b7e", soak: "#4a3f37" };
+function phaseNorm(ph, v, scale) {
+  if (ph.type === "pressure") return (v * scale) / 10;
+  if (ph.type === "flow") return v / 10;
+  if (ph.type === "power") return v / 100;
+  return 0;
+}
+function buildProfileMiniChart(p) {
+  var W = 120, H = 32;
+  var svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+  svg.setAttribute("class", "profile-mini");
+  svg.setAttribute("aria-hidden", "true");
+  var total = 0;
+  p.phases.forEach(function (ph) { total += ph.duration_s; });
+  if (total <= 0) return svg;
+  var t = 0, prevEnd = 0;
+  p.phases.forEach(function (ph) {
+    var end = phaseNorm(ph, ph.target, p.pressure_scale);
+    var start = ph.start !== undefined ? phaseNorm(ph, ph.start, p.pressure_scale) : prevEnd;
+    if (ph.type === "soak") { start = 0; end = 0; }
+    var ramp = (ph.curve && ph.curve !== "instant") ? Math.min(ph.ramp_s || 0, ph.duration_s) : 0;
+    var pts = [];
+    if (ramp > 0) {
+      for (var i = 0; i <= 8; i++) pts.push([t + (i / 8) * ramp, start + (end - start) * easeJs(ph.curve, i / 8)]);
+    } else {
+      pts.push([t, end]);
+    }
+    pts.push([t + ph.duration_s, end]);
+    var line = document.createElementNS(SVG_NS, "polyline");
+    line.setAttribute("points", pts.map(function (q) {
+      return ((q[0] / total) * W).toFixed(1) + "," + (H - 2 - Math.min(1, q[1]) * (H - 4)).toFixed(1);
+    }).join(" "));
+    line.setAttribute("fill", "none");
+    line.setAttribute("stroke", PHASE_COLORS[ph.type] || "#888");
+    line.setAttribute("stroke-width", "2");
+    svg.appendChild(line);
+    t += ph.duration_s;
+    prevEnd = end;
+  });
+  return svg;
 }
 
 function markActiveProfile() {
   var chips = document.querySelectorAll("#profile_chip_row .btn-preset");
-  for (var i = 0; i < chips.length; i++) chips[i].classList.toggle("active", i === activeProfileIndex);
+  for (var i = 0; i < chips.length; i++) chips[i].classList.toggle("active", chips[i].dataset.name === activeProfileName);
   var rows = document.querySelectorAll("#profile_list_body .profile-row");
-  for (var j = 0; j < rows.length; j++) rows[j].classList.toggle("active", j === activeProfileIndex);
+  for (var j = 0; j < rows.length; j++) rows[j].classList.toggle("active", rows[j].dataset.name === activeProfileName);
+}
+
+function profileActionDone(status, text) {
+  if (status !== 200) alert(text || "Request failed");
+  lastProfilesJson = "";
+  fetchProfiles();
+}
+
+function selectProfileByName(name) {
+  activeProfileName = name;
+  markActiveProfile();
+  xhr("/update?profile_select=" + encodeURIComponent(name), profileActionDone);
 }
 
 function renderProfileChips() {
   var row = document.getElementById("profile_chip_row");
   if (!row) return;
   row.textContent = "";
-  profilesCache.forEach(function (p, i) {
+  profilesCache.forEach(function (p) {
     var btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "btn-preset" + (i === activeProfileIndex ? " active" : "");
+    btn.className = "btn-preset";
+    btn.dataset.name = p.name;
     btn.textContent = p.name;
-    btn.addEventListener("click", function () { applyProfile(i); });
+    btn.addEventListener("click", function () { selectProfileByName(p.name); });
     row.appendChild(btn);
   });
+  markActiveProfile();
+}
+
+function addRowButton(parent, label, cls, onClick) {
+  var b = document.createElement("button");
+  b.type = "button";
+  b.className = "btn-chip-sm" + (cls ? " " + cls : "");
+  b.textContent = label;
+  b.addEventListener("click", function (e) { e.stopPropagation(); onClick(b); });
+  parent.appendChild(b);
+  return b;
 }
 
 function renderProfileList() {
   var body = document.getElementById("profile_list_body");
   if (!body) return;
   body.textContent = "";
-  profilesCache.forEach(function (p, i) {
+  profilesCache.forEach(function (p) {
     var row = document.createElement("div");
-    row.className = "profile-row" + (i === activeProfileIndex ? " active" : "");
+    row.className = "profile-row";
+    row.dataset.name = p.name;
     var main = document.createElement("div");
     main.className = "profile-row-main";
     var nameEl = document.createElement("b");
-    nameEl.textContent = p.name;
+    nameEl.textContent = p.name + (p.builtin ? "" : " ★");
     var meta = document.createElement("span");
-    var extra = p.pressure_enabled ? " · " + p.pressure_ramp_bar + " bar" : "";
-    meta.textContent = p.temp.toFixed(1) + "°C · " + p.auto_stop_sec + "s · pre-infusion: " + piSummary(p) + extra;
+    meta.textContent = profileSummary(p);
     main.appendChild(nameEl);
     main.appendChild(meta);
+    main.addEventListener("click", function () { selectProfileByName(p.name); });
     var actions = document.createElement("div");
     actions.className = "profile-row-actions";
-    var editBtn = document.createElement("button");
-    editBtn.type = "button";
-    editBtn.className = "btn-chip-sm";
-    editBtn.textContent = "Edit";
-    editBtn.addEventListener("click", function () { editProfile(i); });
-    var delBtn = document.createElement("button");
-    delBtn.type = "button";
-    delBtn.className = "btn-chip-sm danger";
-    delBtn.textContent = "Delete";
-    delBtn.addEventListener("click", function () { armDeleteProfile(delBtn, i); });
-    actions.appendChild(editBtn);
-    actions.appendChild(delBtn);
+    addRowButton(actions, "Tweak", "", function () { openProfileTweak(p); });
+    addRowButton(actions, "Copy", "", function () {
+      var n = prompt("Name for the copy (max 20 characters):", (p.name + " copy").slice(0, 20));
+      if (!n) return;
+      xhr("/update?profile_duplicate=" + encodeURIComponent(p.name) + "&new_name=" + encodeURIComponent(n), profileActionDone);
+    });
+    if (p.builtin && p.tweaked) {
+      addRowButton(actions, "Reset", "", function () { xhr("/update?profile_reset=" + encodeURIComponent(p.name), profileActionDone); });
+    }
+    if (!p.builtin) {
+      addRowButton(actions, "Rename", "", function () {
+        var n = prompt("New name (max 20 characters):", p.name);
+        if (!n || n === p.name) return;
+        xhr("/update?profile_rename=" + encodeURIComponent(p.name) + "&new_name=" + encodeURIComponent(n), profileActionDone);
+      });
+      addRowButton(actions, "Delete", "danger", function (btn) { armDeleteProfile(btn, p.name); });
+    }
     row.appendChild(main);
+    row.appendChild(buildProfileMiniChart(p));
     row.appendChild(actions);
     body.appendChild(row);
   });
+  markActiveProfile();
 }
 
 function fetchProfiles() {
@@ -1848,121 +1928,53 @@ function fetchProfiles() {
 }
 fetchProfiles();
 
-function applyProfile(idx) {
-  activeProfileIndex = idx;
-  markActiveProfile();
-  xhr("/update?profile_apply=" + idx, function () { lastProfilesJson = ""; fetchProfiles(); });
+function openProfileTweak(p) {
+  document.getElementById("input_tweak_name").value = p.name;
+  document.getElementById("profile_tweak_title").textContent = "Tweak \"" + p.name + "\"";
+  document.getElementById("tweak_temp_field").hidden = !!p.utility;
+  document.getElementById("input_tweak_temp").value = p.temp;
+  document.getElementById("input_tweak_max_sec").value = p.max_sec;
+  document.getElementById("input_tweak_scale").value = p.pressure_scale;
+  document.getElementById("input_tweak_trim").value = p.trim_pct;
+  var card = document.getElementById("profile_tweak_card");
+  card.hidden = false;
+  card.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
-// Pump pattern preview - a step chart of pulses (from the form fields, live
-// as you type) followed by a solid "extraction" block for the remainder of
-// the shot. This is the same kind of curve-preview Gaggiuino/GaggiMate/
-// Meticulous show for their (pressure/flow) profiles, scaled to what this
-// project can actually show: on/off pump state, not a measured curve, since
-// there's no pressure transducer or flow sensor here.
-function drawProfilePreview() {
-  var canvas = document.getElementById("profile_preview_chart");
-  if (!canvas) return;
-  var ctx = canvas.getContext("2d");
-  var w = canvas.width, h = canvas.height;
-  ctx.clearRect(0, 0, w, h);
+function closeProfileTweak() { document.getElementById("profile_tweak_card").hidden = true; }
 
-  var enabled = document.getElementById("input_profile_pi_enabled").checked;
-  var pulses = parseInt(document.getElementById("input_profile_pi_pulses").value, 10) || 0;
-  var onSec = parseFloat(document.getElementById("input_profile_pi_on").value) || 0;
-  var offSec = parseFloat(document.getElementById("input_profile_pi_off").value) || 0;
-  var autoStop = parseFloat(document.getElementById("input_profile_autostop").value) || 27;
-
-  var piTotal = (enabled && pulses > 0) ? pulses * onSec + Math.max(0, pulses - 1) * offSec : 0;
-  var extractionSec = Math.max(3, autoStop - piTotal); // always show a visible extraction block
-  var totalSec = piTotal + extractionSec;
-
-  var label = document.getElementById("profile_preview_label");
-  if (label) label.textContent = (enabled && pulses > 0) ? piTotal.toFixed(1) + "s pre-infusion" : "No pre-infusion";
-
-  var x = 0;
-  var barY = 6, barH = h - 12;
-  function seg(durSec, on) {
-    var segW = (durSec / totalSec) * w;
-    ctx.fillStyle = on ? "#d98c3f" : "#2a221c";
-    ctx.fillRect(x, barY, Math.max(0, segW - 1), barH);
-    x += segW;
-  }
-  if (enabled && pulses > 0) {
-    for (var i = 0; i < pulses; i++) {
-      seg(onSec, true);
-      if (i < pulses - 1) seg(offSec, false);
-    }
-  }
-  seg(extractionSec, true); // continuous extraction for the rest of the shot
+function submitProfileTweak(ev) {
+  ev.preventDefault();
+  var q = "profile_tweak=" + encodeURIComponent(document.getElementById("input_tweak_name").value) +
+    "&temp=" + encodeURIComponent(document.getElementById("input_tweak_temp").value) +
+    "&max_sec=" + encodeURIComponent(document.getElementById("input_tweak_max_sec").value) +
+    "&pressure_scale=" + encodeURIComponent(document.getElementById("input_tweak_scale").value) +
+    "&trim_pct=" + encodeURIComponent(document.getElementById("input_tweak_trim").value);
+  var btn = document.getElementById("profile_tweak_submit");
+  btn.disabled = true;
+  btn.textContent = "Saving…";
+  xhr("/update?" + q, function (status, text) {
+    profileActionDone(status, text);
+    btn.textContent = status === 200 ? "Saved" : "Save failed";
+    setTimeout(function () {
+      btn.disabled = false;
+      btn.textContent = "Save";
+      if (status === 200) closeProfileTweak();
+    }, 900);
+  });
 }
 
-function editProfile(idx) {
-  var p = profilesCache[idx];
-  if (!p) return;
-  document.getElementById("input_profile_index").value = idx;
-  document.getElementById("input_profile_name").value = p.name;
-  document.getElementById("input_profile_temp").value = p.temp;
-  document.getElementById("input_profile_autostop").value = p.auto_stop_sec;
-  document.getElementById("input_profile_pi_enabled").checked = p.preinfusion;
-  document.getElementById("input_profile_pi_pulses").value = p.pulses;
-  document.getElementById("input_profile_pi_on").value = p.on_ms / 1000;
-  document.getElementById("input_profile_pi_off").value = p.off_ms / 1000;
-  document.getElementById("input_profile_press_enabled").checked = p.pressure_enabled;
-  document.getElementById("input_profile_press_ramp_bar").value = p.pressure_ramp_bar;
-  document.getElementById("input_profile_press_ramp_sec").value = p.pressure_ramp_ms / 1000;
-  document.getElementById("input_profile_press_decline_enabled").checked = p.pressure_decline_enabled;
-  document.getElementById("input_profile_press_decline_bar").value = p.pressure_decline_bar;
-  document.getElementById("input_profile_press_decline_sec").value = p.pressure_decline_ms / 1000;
-  document.getElementById("profile_form_title").textContent = "Edit \"" + p.name + "\"";
-  document.getElementById("profile_form_submit").textContent = "Save Changes";
-  document.getElementById("profile_editor_card").hidden = false;
-  document.getElementById("profile_editor_card").scrollIntoView({ behavior: "smooth", block: "center" });
-  drawProfilePreview();
-}
-
-function newProfileForm() {
-  document.getElementById("input_profile_index").value = -1;
-  document.getElementById("input_profile_name").value = "";
-  document.getElementById("input_profile_temp").value = 93;
-  document.getElementById("input_profile_autostop").value = 27;
-  document.getElementById("input_profile_pi_enabled").checked = false;
-  document.getElementById("input_profile_pi_pulses").value = 3;
-  document.getElementById("input_profile_pi_on").value = 1;
-  document.getElementById("input_profile_pi_off").value = 2;
-  document.getElementById("input_profile_press_enabled").checked = false;
-  document.getElementById("input_profile_press_ramp_bar").value = 9;
-  document.getElementById("input_profile_press_ramp_sec").value = 20;
-  document.getElementById("input_profile_press_decline_enabled").checked = false;
-  document.getElementById("input_profile_press_decline_bar").value = 6;
-  document.getElementById("input_profile_press_decline_sec").value = 8;
-  document.getElementById("profile_form_title").textContent = "New Profile";
-  document.getElementById("profile_form_submit").textContent = "Add Profile";
-  document.getElementById("profile_editor_card").hidden = false;
-  document.getElementById("profile_editor_card").scrollIntoView({ behavior: "smooth", block: "center" });
-  drawProfilePreview();
-}
-
-function cancelProfileForm() {
-  document.getElementById("profile_editor_card").hidden = true;
-}
-
-// Arm-then-confirm instead of a native confirm() popup - first click arms
-// the button (relabels it, 4s window to change your mind), second click
-// within that window actually deletes. Any other Delete button clicked
-// while one is armed disarms it first, so only one can ever be armed.
+// Arm-then-confirm delete (no native confirm()): first click arms for 4 s,
+// second click deletes; arming another disarms the first.
 var armedDeleteBtn = null, armedDeleteTimer = null;
-
 function disarmDeleteProfile() {
   if (armedDeleteTimer) { clearTimeout(armedDeleteTimer); armedDeleteTimer = null; }
   if (armedDeleteBtn) { armedDeleteBtn.textContent = "Delete"; armedDeleteBtn.classList.remove("armed"); armedDeleteBtn = null; }
 }
-
-function armDeleteProfile(btn, idx) {
-  if (profilesCache.length <= 1) { alert("Can't delete the last remaining profile."); return; }
+function armDeleteProfile(btn, name) {
   if (btn === armedDeleteBtn) {
     disarmDeleteProfile();
-    xhr("/update?profile_delete=" + idx, function () { lastProfilesJson = ""; fetchProfiles(); });
+    xhr("/update?profile_delete=" + encodeURIComponent(name), profileActionDone);
     return;
   }
   disarmDeleteProfile();
@@ -1970,43 +1982,6 @@ function armDeleteProfile(btn, idx) {
   btn.textContent = "Confirm?";
   btn.classList.add("armed");
   armedDeleteTimer = setTimeout(disarmDeleteProfile, 4000);
-}
-
-function submitProfileForm(ev) {
-  ev.preventDefault();
-  var q = "profile_save=1";
-  q += "&profile_index=" + document.getElementById("input_profile_index").value;
-  q += "&profile_name=" + encodeURIComponent(document.getElementById("input_profile_name").value);
-  q += "&profile_temp=" + document.getElementById("input_profile_temp").value;
-  q += "&profile_autostop=" + document.getElementById("input_profile_autostop").value;
-  q += "&profile_pi_enabled=" + (document.getElementById("input_profile_pi_enabled").checked ? "1" : "0");
-  q += "&profile_pi_pulses=" + document.getElementById("input_profile_pi_pulses").value;
-  q += "&profile_pi_on_ms=" + Math.round(document.getElementById("input_profile_pi_on").value * 1000);
-  q += "&profile_pi_off_ms=" + Math.round(document.getElementById("input_profile_pi_off").value * 1000);
-  q += "&profile_press_enabled=" + (document.getElementById("input_profile_press_enabled").checked ? "1" : "0");
-  q += "&profile_press_ramp_bar=" + document.getElementById("input_profile_press_ramp_bar").value;
-  q += "&profile_press_ramp_ms=" + Math.round(document.getElementById("input_profile_press_ramp_sec").value * 1000);
-  q += "&profile_press_decline_enabled=" + (document.getElementById("input_profile_press_decline_enabled").checked ? "1" : "0");
-  q += "&profile_press_decline_bar=" + document.getElementById("input_profile_press_decline_bar").value;
-  q += "&profile_press_decline_ms=" + Math.round(document.getElementById("input_profile_press_decline_sec").value * 1000);
-
-  // Inline save feedback (disable + label swap) instead of nothing happening
-  // until the list silently refreshes - same "no toast library, just button
-  // state" pattern GaggiMate's settings pages use.
-  var btn = document.getElementById("profile_form_submit");
-  var priorLabel = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = "Saving…";
-  xhr("/update?" + q, function (status) {
-    lastProfilesJson = "";
-    fetchProfiles();
-    btn.textContent = status === 200 ? "Saved" : "Save failed";
-    setTimeout(function () {
-      btn.disabled = false;
-      btn.textContent = priorLabel;
-      if (status === 200) document.getElementById("profile_editor_card").hidden = true;
-    }, 900);
-  });
 }
 
 function setSchedEnabled(i, checked) {
