@@ -426,6 +426,8 @@ UI; then block shot start / stop the pump on low water.
 
 ## Item 7 — Real-time pressure transducer + live pressure graph
 
+Install steps: [`docs/install-guide-2026-10-15-hlk-pressure-water.md`](docs/install-guide-2026-10-15-hlk-pressure-water.md).
+
 **Update (2026-10-15): replacement planned - 0-1.6 MPa "G41 1.6Mpa IN5V"
 (ordered), powered from 5V via an HLK-PM01; firmware already switched to
 it (PR on `feature/water-level-sensor`).** Wiring decided with the user:

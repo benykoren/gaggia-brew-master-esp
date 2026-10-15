@@ -84,6 +84,9 @@ Defined in [`include/config.h`](include/config.h). Chosen to avoid reserved S3
 pins (USB `GPIO19/20`, flash `GPIO26-32`, OPI PSRAM `GPIO33-37`, strapping
 `0/3/45/46`, RGB LED `48`).
 
+Planned power/sensor changes and their install steps:
+[`docs/install-guide-2026-10-15-hlk-pressure-water.md`](docs/install-guide-2026-10-15-hlk-pressure-water.md).
+
 | Function | GPIO |
 |----------|------|
 | SSR (heater) control | **4** |
@@ -917,6 +920,14 @@ everything again.
 ---
 
 ## 10. Change Log
+
+### 2026-10-15 — Claude Code (Opus 5.5) — Install guide for HLK power, 16-bar sensor and water sensor
+
+- Step-by-step install guide (parts, mains tap, 5V side, water sensor,
+  multimeter checks, first power-up, calibration, pin map):
+  [`docs/install-guide-2026-10-15-hlk-pressure-water.md`](docs/install-guide-2026-10-15-hlk-pressure-water.md).
+  A Hebrew user-facing copy lives in the user's Claude Doc of the same
+  subject. Hardware not installed yet.
 
 ### 2026-10-15 — Claude Code (Opus 5.5) — Firmware switched to the 0-16 bar pressure sensor on 5V (HLK-PM01) + divider
 
