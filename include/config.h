@@ -128,6 +128,15 @@
 #define WATER_SENSOR_ENABLED_DEFAULT false // off until the sensor is installed
 #define WATER_ACTIVE_LOW_DEFAULT true      // datasheet: LOW = water present
 #define WATER_INTERLOCK_DEFAULT true       // refuse shot / calibration start on low water
+// Reserve below the sensor (2026-10-15): when the tank reads Low, the water
+// still under the sensor's height is used up first. 0 = unknown -> block
+// as soon as it reads Low (original behaviour). Measured once by the user:
+// empty tank, pour measured water until "Tank OK" appears.
+#define WATER_RESERVE_ML_DEFAULT 0
+#define WATER_RESERVE_ML_MAX 1500
+// Water a shot is assumed to need when turning the remaining reserve into
+// "shots left" and deciding whether one more shot can start.
+#define WATER_SHOT_ML_ESTIMATE 60.0f
 // How long /status keeps reporting a refused shot start, so the Web UI can
 // explain why its Start tap didn't start a shot.
 #define SHOT_BLOCKED_REPORT_MS 5000
