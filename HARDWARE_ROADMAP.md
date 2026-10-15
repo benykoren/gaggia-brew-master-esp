@@ -426,6 +426,40 @@ UI; then block shot start / stop the pump on low water.
 
 ## Item 7 — Real-time pressure transducer + live pressure graph
 
+**Update (2026-10-15): replacement planned - 0-1.6 MPa "G41 1.6Mpa IN5V"
+(ordered), powered from 5V via an HLK-PM01; firmware already switched to
+it (PR on `feature/water-level-sensor`).** Wiring decided with the user:
+
+```
+Always-on mains, tapped mid-run (away from the boiler) on the two NEW
+heater-circuit wires from the 2026-08 clean bypass:
+  Mains L -> T2 wire  --Wago 221-- [0.5A fuse] -- HLK AC1
+  Heater -> Mains N wire --Wago 221-------------- HLK AC2
+HLK +Vo -> DevKit 5V pin  AND  sensor red
+HLK -Vo -> DevKit GND     AND  sensor black
+sensor yellow -- 4.3k -- GPIO1 -- 10k -- GND     (0.5-4.5 V -> ~0.35-3.15 V)
+```
+- **Always-on, not from the brew switch:** the HLK now powers the ESP32
+  too (replacing the USB wall-wart), and the controller must stay up for
+  heating, auto-off and the scheduled warm-up. Tapping before the heater's
+  SSR keeps the heater safe if the HLK's fuse blows (no ESP -> no SSR
+  drive).
+- **Never USB + HLK at the same time** - unplug the machine before any USB
+  flashing; OTA is unaffected.
+- HLK-PM01: 5V 3W (600 mA) - enough for the ESP32 (WiFi peaks ~400-500 mA)
+  plus sensors; fully insulated (heat-shrink or a small box), away from the
+  boiler (rated ~70 °C), strain-relieved. A 100 µF cap across +Vo/-Vo is
+  recommended for cleaner ADC readings.
+- Pre-checks before GPIO1 is connected: 230 V AC between the two tapped
+  wires with the main switch AND brew switch off (proves always-on);
+  5.0 V on +Vo; ~0.35 V at the divider midpoint with no pressure.
+- Firmware: `PRESSURE_SENSOR_ZERO_MV` 350, `_MV_PER_BAR` 175 (nominal,
+  calibrate on the machine), `_MAX_BAR` 16, `PRESSURE_CLOSED_LOOP_AVAILABLE`
+  true, GPIO1 `INPUT` (no internal pull-down - it would skew the divider).
+  **Don't flash that build while the old 5-bar part is still fitted** - it
+  would read below zero and fault.
+
+
 **Status (2026-10-01): plumbed at the pump outlet - but the fitted part is
 a 0-0.5 MPa (0-5 bar) sensor, below espresso brew pressure.** Body marking
 "G41 0.5Mpa IN5V" (5V supply, G1/4), confirmed by the user after an earlier

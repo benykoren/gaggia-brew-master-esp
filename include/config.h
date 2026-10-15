@@ -171,29 +171,29 @@
 // Pressure transducer calibration - linear mapping from ADC millivolts to
 // bar: bar = (mv - PRESSURE_SENSOR_ZERO_MV) / PRESSURE_SENSOR_MV_PER_BAR.
 //
-// The installed transducer is a **0-0.5 MPa (0-5 bar)**, 5V-supply part
-// (body marking "G41 0.5Mpa IN5V", confirmed by the user 2026-10-01), run
-// from 3V3 because this board's 5V pin doesn't output on USB power. Its
-// range is BELOW espresso brew pressure, so it is only meaningful for
-// pre-infusion / low-pressure monitoring until a 0-1.6 MPa part replaces
-// it (see HARDWARE_ROADMAP.md item 7).
-//   ZERO_MV: measured 2026-10-01, pump off: 155-160 mV.
-//   MV_PER_BAR: ESTIMATE, not verified against a reference. On 3V3 the
-//   output was observed to clip at ~1620-1640 mV both in free flow and
-//   with a choked puck (pressure well above 5 bar); this assumes that
-//   ceiling is roughly the sensor's 5-bar full scale:
-//   (1630 - 158) / 5 ~= 290 mV/bar.
-#define PRESSURE_SENSOR_ZERO_MV 158.0f
-#define PRESSURE_SENSOR_MV_PER_BAR 290.0f
-// Rated full scale - readings are clamped here (the UI shows "5+" rather
-// than an invented number) and the plausibility window is derived from it.
-#define PRESSURE_SENSOR_MAX_BAR 5.0f
-// Closed-loop pressure control (profile ramp/decline stages) needs a sensor
-// that can actually read the target. False while the 5-bar part is fitted:
-// profile pressure stages are ignored and shots run at plain pump power
-// (PUMP_BREW_POWER_PCT) instead. Set true again once a 0-1.6 MPa sensor is
-// installed and calibrated.
-#define PRESSURE_CLOSED_LOOP_AVAILABLE false
+// Sensor (2026-10-15): **0-1.6 MPa (0-16 bar), 5V supply** ("G41 1.6Mpa
+// IN5V"), 0.5-4.5 V output. Powered from a real 5V rail (HLK-PM01, which
+// also feeds the DevKit's 5V pin - HARDWARE_ROADMAP.md item 7), with a
+// divider into GPIO1 so the ADC never sees more than ~3.15 V:
+//   signal -- 4.3k -- GPIO1 -- 10k -- GND     ratio 10 / 14.3 = 0.699
+//   0 bar  : 0.5 V x 0.699 = ~350 mV
+//   16 bar : 4.5 V x 0.699 = ~3147 mV          (0.25 V/bar x 0.699 = ~175 mV/bar)
+// Both values are NOMINAL (datasheet + resistor values) until calibrated on
+// the machine: ZERO_MV from pressure_mv with the pump off, MV_PER_BAR from a
+// known reference (the 16-bar safety-valve plateau, or a gauge).
+// The previous 0-5 bar part on 3V3 used ZERO 158 / 290 mV/bar / MAX 5 and
+// closed loop off - flashing THIS build with that old sensor still fitted
+// reads below zero -> pressure fault, so swap the sensor first.
+#define PRESSURE_SENSOR_ZERO_MV 350.0f
+#define PRESSURE_SENSOR_MV_PER_BAR 175.0f
+// Rated full scale - readings are clamped here and the plausibility window
+// is derived from it.
+#define PRESSURE_SENSOR_MAX_BAR 16.0f
+// Closed-loop pressure control: in pressure phases the pressure PID adds a
+// +/- PUMP_PRESSURE_PID_TRIM_PCT trim on top of the pump-model duty, so a
+// profile's 9 bar target is held by the real reading. Falls back to the
+// pure model automatically whenever the sensor is faulted.
+#define PRESSURE_CLOSED_LOOP_AVAILABLE true
 
 // ============================================================================
 // Open-loop pump model (design spec 2026-10-02 §4.1)
@@ -239,10 +239,8 @@
 
 // Hard safety ceiling - comfortably under the machine's 16-bar safety valve
 // rating (docs/oem-manuals/hydraulic-schematic-SAI0103.pdf), above the
-// ~9 bar working target. NOTE (2026-10-01): with the current 0-5 bar sensor
-// this ceiling is above the sensor's range, so it cannot trip on a real
-// over-pressure - the machine's mechanical 16-bar safety valve is the
-// effective limit, exactly as on the stock machine. Forces the dimmer to 0% immediately if exceeded or
+// ~9 bar working target. With the 0-16 bar sensor (2026-10-15) this ceiling
+// is live again: a real reading above it cuts the pump. Forces the dimmer to 0% immediately if exceeded or
 // if the pressure sensor is faulted, independent of PID/profile output -
 // same "cutoff wins over everything" rule as activeMaxSafety for
 // temperature. Fixed, not Web-UI-configurable (mirrors BREW_MAX_SAFETY,

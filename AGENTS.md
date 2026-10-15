@@ -54,7 +54,7 @@ README.
 | Temp sensor | **PT100, 3-wire**, PTFE cable, M4 thread | Replaces the original boiler thermostat |
 | Temp module | **UART PT100 + relay module** (silkscreen says "MAX31865" but it is NOT SPI — it's an ASCII AT-command UART board; see Section 3/4) | 9600 8N1, `AT+T` command |
 | Heater switch | **Fotek SSR-DA** (DC control → AC load) + heatsink | Switches the boiler heater |
-| PSU | **External USB wall-wart** (5V), routed into the case | Powers the ESP32; HLK-PM01 module dropped from the build 2026-08-14 |
+| PSU | **External USB wall-wart** (5V) today → **planned: HLK-PM01** (5V 3W) fed from always-on mains (2026-10-15) | HLK will power the ESP32 via its 5V pin and the 16-bar pressure sensor; see HARDWARE_ROADMAP.md item 7 |
 | Wiring | Wago 221 (mains), silicone wire (18AWG power / 22AWG signal), Dupont, PTFE tape | |
 | Boiler heating element | Stainless, **1000W**, 230V (Gaggia P/N `11001002`) | Factory spec, see OEM manuals below |
 | Boiler thermostats (factory) | Brew **95°C** / Steam **127°C**, both Gaggia `US-622AXTDNO` | T2 (steam, 127°C) is the one reused as the mains-wiring overheat cutoff — see Section 7 |
@@ -912,6 +912,25 @@ everything again.
 ---
 
 ## 10. Change Log
+
+### 2026-10-15 — Claude Code (Opus 5.5) — Firmware switched to the 0-16 bar pressure sensor on 5V (HLK-PM01) + divider
+
+- User ordered a "G41 1.6Mpa IN5V" (0-16 bar, 5V, 0.5-4.5 V out) to
+  replace the 0-5 bar part, and will power it - and the ESP32 - from an
+  HLK-PM01 fed from always-on mains (tapped on the clean-bypass heater
+  wires). Signal into GPIO1 through a 4.3k/10k divider. Full wiring and
+  checks: `HARDWARE_ROADMAP.md` item 7, "Update (2026-10-15)".
+- `config.h`: ZERO_MV 350, MV_PER_BAR 175 (nominal from datasheet +
+  resistors - calibrate), MAX_BAR 16, `PRESSURE_CLOSED_LOOP_AVAILABLE`
+  true (PID trim on the model duty in pressure phases; falls back to the
+  model on a sensor fault). `PUMP_MAX_SAFETY_BAR` (12) can now trip on a
+  real reading.
+- `pressure_sensor.cpp`: GPIO1 now plain `INPUT` (the internal ~45k
+  pull-down would skew the divider by ~7%; the divider's 10k still pins an
+  unwired input to 0 mV -> OUT_OF_RANGE).
+- Web UI hint texts updated (no longer "until a 0-16 bar sensor is fitted").
+- **Do not flash this until the new sensor is installed** - the old 5-bar
+  part would read below zero and fault.
 
 ### 2026-10-15 — Claude Code (Opus 5.5) — Water tank sensor implemented (firmware + Web UI); "Water (est.)" tile removed
 

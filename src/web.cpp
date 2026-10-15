@@ -748,7 +748,7 @@ const char *index_html = R"rawliteral(
 
       <div class="card">
         <div class="tab-section-title">Pump pressure PID</div>
-        <p class="hint">Used once a 0&ndash;16 bar sensor is fitted: adds a correction on top of the pump model during pressure phases.</p>
+        <p class="hint">Adds a correction from the 0&ndash;16 bar sensor on top of the pump model during pressure phases (falls back to the model alone if the sensor faults).</p>
         <details class="disclosure">
           <summary>Kp / Ki / Kd</summary>
           <form action="/update" method="GET">
@@ -764,7 +764,7 @@ const char *index_html = R"rawliteral(
 
       <div class="card">
         <div class="tab-section-title">Shot profiles</div>
-        <p class="hint">Tap a profile to use it. Pressure and flow are estimates from the calibrated pump model until a 0&ndash;16 bar sensor is fitted. Pump trim: + pushes more water (faster shot), &minus; less (slower shot). Adjust grind first.</p>
+        <p class="hint">Tap a profile to use it. Pressure phases are held by the 0&ndash;16 bar sensor; flow phases use the calibrated pump model. Pump trim: + pushes more water (faster shot), &minus; less (slower shot). Adjust grind first.</p>
         <div id="profile_list_body"></div>
       </div>
 
