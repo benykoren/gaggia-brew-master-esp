@@ -932,6 +932,12 @@ everything again.
   3V3) until the new sensor is installed**, then flip to 1 and rebuild.
   This lets the water-sensor build ship now without breaking pressure
   readings. GPIO1's pull-down follows the switch.
+- **Flashed via OTA 2026-10-15 ~22:40** (CI `80523c7`, fw_build "Oct 15
+  2026 19:32:45" UTC). Pre-checks: Off, no shot, pump 0%, no cal/autotune.
+  After reboot: pressure on the 5-bar settings (`pressure_max_bar` 5,
+  closed loop off, 155 mV, no fault); water sensor enabled, reading raw
+  HIGH = "low" right after the user wired it - to be checked against the
+  real tank state.
 
 ### 2026-10-15 — Claude Code (Opus 5.5) — Install guide for HLK power, 16-bar sensor and water sensor
 
