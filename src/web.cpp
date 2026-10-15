@@ -176,6 +176,7 @@ const char *index_html = R"rawliteral(
     .tabbar {
       position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
       display: flex; justify-content: center; gap: 48px;
+      padding: 8px 0 10px;
       padding: 8px 0 calc(10px + env(safe-area-inset-bottom));
       background: rgba(14,15,17,.94); border-top: 1px solid var(--border-soft);
     }
@@ -258,12 +259,12 @@ const char *index_html = R"rawliteral(
     .dial { position: relative; width: 100%; max-width: 400px; margin: 0 auto; }
     .dial::before { content: ""; display: block; padding-top: 100%; }
     .dial-glow {
-      position: absolute; inset: 6%; border-radius: 50%; pointer-events: none;
+      position: absolute; top: 6%; right: 6%; bottom: 6%; left: 6%; border-radius: 50%; pointer-events: none;
       background: radial-gradient(circle, rgba(227,154,98,.13) 0%, rgba(227,154,98,0) 68%);
       transition: opacity .6s;
     }
     .dial.off .dial-glow { opacity: 0; }
-    .dial svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+    .dial svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; overflow: visible; }
     .dial-track { fill: none; stroke: rgba(255,255,255,.05); stroke-width: 3; stroke-linecap: round; }
     .dial-temp { fill: none; stroke: url(#dialCopper); stroke-width: 3; stroke-linecap: round; transition: stroke-dasharray .8s ease; }
     .dial-temp-glow { fill: none; stroke: var(--copper); stroke-opacity: .55; stroke-width: 4; stroke-linecap: round; filter: url(#dialBlur); transition: stroke-dasharray .8s ease; }
@@ -280,7 +281,7 @@ const char *index_html = R"rawliteral(
     .tick.major.lit { stroke-opacity: .95; }
     .dial-marker { transition: transform .8s ease; }
     .dial-center {
-      position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
       text-align: center; pointer-events: none;
     }
     .dial-temp-value { display: flex; align-items: flex-start; margin-top: 2px; }
@@ -399,7 +400,7 @@ const char *index_html = R"rawliteral(
     /* ---- Forms ---- */
     .field { display: flex; flex-direction: column; gap: 6px; margin-top: var(--sp-3); }
     .field label, .check-row { font-size: 13px; color: var(--text-2); }
-    .field-row, .field-row-3 { display: grid; gap: var(--sp-3); }
+    .field-row, .field-row-3 { display: grid; grid-gap: var(--sp-3); gap: var(--sp-3); }
     .field-row { grid-template-columns: 1fr 1fr; }
     .field-row-3 { grid-template-columns: 1fr 1fr 1fr; }
     input[type=number], input[type=text], input[type=password], input[type=time], select {
@@ -440,7 +441,7 @@ const char *index_html = R"rawliteral(
     .sec-btn svg { display: none; }
     .sec-btn.active { color: var(--bg); background: var(--text); border-color: var(--text); font-weight: 600; }
     .set-panel h2 { margin: 0 0 var(--sp-3); font-size: 22px; font-weight: 500; letter-spacing: -.02em; }
-    .set-grid { display: grid; grid-template-columns: 1fr; gap: var(--sp-3); }
+    .set-grid { display: grid; grid-template-columns: 1fr; grid-gap: var(--sp-3); gap: var(--sp-3); }
     .set-grid > .card + .card { margin-top: 0; }
     .adv { border-top: 1px solid var(--border-soft); }
     .adv:first-of-type { border-top: 0; }
@@ -519,6 +520,54 @@ const char *index_html = R"rawliteral(
       .set-panels { flex: 1 1 0; min-width: 0; padding-top: 6px; }
       .set-grid { grid-template-columns: 1fr 1fr; align-items: start; }
       .set-grid > .wide { grid-column: 1 / -1; }
+    }
+    /* No flexbox `gap` (Chrome < 84, e.g. the kitchen tablet): the script adds
+       .no-flexgap to <html> and these margins stand in for it. Keep in sync with
+       the gap values above. */
+    .no-flexgap .tabbar > * + * { margin-left: 48px; }
+    .no-flexgap .btn-shot::before { margin-right: 12px; }
+    .no-flexgap .tab > * + * { margin-top: 4px; }
+    .no-flexgap .brand-status > * + * { margin-top: 4px; }
+    .no-flexgap .status-line > * + * { margin-left: 10px; }
+    .no-flexgap .top-controls > * + * { margin-left: 8px; }
+    .no-flexgap .tank-pill > * + * { margin-left: 8px; }
+    .no-flexgap .alerts > * + * { margin-top: 8px; }
+    .no-flexgap .banner > * + * { margin-left: 12px; }
+    .no-flexgap .metric-row > * + * { margin-left: 12px; }
+    .no-flexgap .brew-grid > * + * { margin-top: 16px; }
+    .no-flexgap .brew-col > * + * { margin-top: 16px; }
+    .no-flexgap .dial-press-line > * + * { margin-left: 10px; }
+    .no-flexgap .btn-preset > * + * { margin-top: 8px; }
+    .no-flexgap .card-shot > * + * { margin-top: 12px; }
+    .no-flexgap .shot-head > * + * { margin-left: 16px; }
+    .no-flexgap .btn-shot > * + * { margin-left: 12px; }
+    .no-flexgap .legend > * + * { margin-left: 14px; }
+    .no-flexgap .shot-live > * + * { margin-top: 16px; }
+    .no-flexgap .live-read > * + * { margin-top: 4px; }
+    .no-flexgap .stepper > * + * { margin-left: 12px; }
+    .no-flexgap .taste-row > * + * { margin-left: 8px; }
+    .no-flexgap .field > * + * { margin-top: 6px; }
+    .no-flexgap .check-row > * + * { margin-left: 12px; }
+    .no-flexgap .settings-layout > * + * { margin-top: 16px; }
+    .no-flexgap .settings-nav > * + * { margin-left: 8px; }
+    .no-flexgap .sec-btn > * + * { margin-left: 12px; }
+    .no-flexgap .adv > summary > * + * { margin-left: 12px; }
+    .no-flexgap .adv > summary span > * + * { margin-top: 2px; }
+    .no-flexgap .water-live > * + * { margin-left: 12px; }
+    .no-flexgap .profile-row-main > * + * { margin-top: 2px; }
+    .no-flexgap .topbar > * { margin: 0 12px 12px 0; }
+    .no-flexgap .preset-row > * { margin: 0 8px 8px 0; }
+    .no-flexgap .phase-steps > * { margin: 0 8px 6px 0; }
+    .no-flexgap .last-shot-sum > * { margin: 0 14px 6px 0; }
+    .no-flexgap .profile-row > * { margin: 0 12px 12px 0; }
+    .no-flexgap .profile-row-actions > * { margin: 0 6px 6px 0; }
+    @media (min-width: 900px) {
+      .no-flexgap .tabbar > * + * { margin-left: 0; margin-top: 8px; }
+      .no-flexgap .brew-grid > * + *, .no-flexgap .settings-layout > * + * { margin-top: 0; margin-left: 40px; }
+      .no-flexgap .settings-nav > * + * { margin-left: 0; margin-top: 8px; }
+      .no-flexgap .brew-col.right > * + * { margin-top: 12px; }
+      .no-flexgap .card-shot > * + * { margin-top: 10px; }
+      .no-flexgap .sec-btn span > * + * { margin-top: 2px; }
     }
     @media (min-width: 900px) and (max-height: 700px) {
       .dial, .app.shooting .dial { max-width: 320px; }
@@ -962,6 +1011,20 @@ const char *index_html = R"rawliteral(
   </div>
 
 <script>
+// Old WebViews (the kitchen tablet) lack flexbox `gap`; detect it and let the
+// .no-flexgap margin fallbacks in the stylesheet take over.
+(function () {
+  var d = document.createElement("div");
+  d.style.display = "flex";
+  d.style.flexDirection = "column";
+  d.style.rowGap = "1px";
+  d.appendChild(document.createElement("div"));
+  d.appendChild(document.createElement("div"));
+  document.body.appendChild(d);
+  var ok = d.scrollHeight === 1;
+  document.body.removeChild(d);
+  if (!ok) document.documentElement.className += " no-flexgap";
+})();
 function setVal(id, v) {
   var el = document.getElementById(id);
   if (!el) return;
