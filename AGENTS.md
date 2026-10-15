@@ -86,6 +86,9 @@ pins (USB `GPIO19/20`, flash `GPIO26-32`, OPI PSRAM `GPIO33-37`, strapping
 | Function | GPIO |
 |----------|------|
 | SSR (heater) control | **4** |
+| Pump dimmer TRIAC gate (output) | **5** |
+| Pump dimmer zero-cross detect (input, pull-up, ISR) | **6** |
+| Pressure transducer analog in (ADC1_CH0, pull-down) | **1** |
 | Temp module UART RX (ESP receives, module TX) | **18** |
 | Temp module UART TX (ESP sends, module RX) | **17** |
 
@@ -922,8 +925,11 @@ everything again.
   `noteActivity()` whenever it switches into Brew or Steam. The second part
   also stops a scheduled warm-up from being put to sleep immediately (its
   `lastActivityTime` could be hours old).
-- Not compiled or flashed here (no PlatformIO in the session) - needs a
-  build + OTA by the user.
+- Also: Section 3 pin map now lists the dimmer (GPIO5/6) and pressure
+  ADC (GPIO1) pins, which were in `config.h` but missing from the table.
+- Added `.github/workflows/build.yml`: builds the S3 env on every push and
+  uploads `firmware.bin` as an artifact (the agent session had no PyPI
+  access to install PlatformIO).
 
 ### 2026-10-02 — Claude Code (Opus 5.5) — Phase profiles, open-loop pump model, dimmer hardening, pump calibration
 
