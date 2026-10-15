@@ -110,6 +110,27 @@
 #define PIN_DIMMER_ZC 6
 #define PIN_PRESSURE_ADC 1
 
+// ============================================================================
+// Water tank level sensor (HARDWARE_ROADMAP.md item 6, 2026-10-15) - a
+// non-contact capacitive switch on the outside of the tank wall. Push-pull
+// output, powered from 3V3: LOW = water at the sensor's height, HIGH = no
+// water (also what a removed tank reads). GPIO7 is free, not a strapping/
+// flash/PSRAM/USB pin, and sits next to GPIO6 on the DevKitC-1 J1 header.
+// Design: docs/superpowers/specs/2026-10-15-water-level-sensor-design.md
+// ============================================================================
+#define PIN_WATER_LEVEL 7
+#define WATER_SAMPLE_INTERVAL_MS 100
+// The state only flips after this many consistent raw reads in a row
+// (20 x 100 ms = 2 s), so sloshing at pump start or reseating the tank
+// can't flicker the state or block a shot at random.
+#define WATER_DEBOUNCE_SAMPLES 20
+#define WATER_SENSOR_ENABLED_DEFAULT false // off until the sensor is installed
+#define WATER_ACTIVE_LOW_DEFAULT true      // datasheet: LOW = water present
+#define WATER_INTERLOCK_DEFAULT true       // refuse shot / calibration start on low water
+// How long /status keeps reporting a refused shot start, so the Web UI can
+// explain why its Start tap didn't start a shot.
+#define SHOT_BLOCKED_REPORT_MS 5000
+
 // Mains half-cycle at 50Hz is ~10ms (Israel/Europe mains) - change to 8333
 // if this machine is ever run on a 60Hz supply (now auto-detected at runtime;
 // this only seeds the initial debounce window).

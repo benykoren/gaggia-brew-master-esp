@@ -10,6 +10,7 @@
 extern bool shotInProgress;
 extern AutotuneState autotuneState;
 extern float currentPressure;
+extern bool waterBlocksPumpStart();
 
 float pumpMlPerClick = PUMP_ML_PER_CLICK_DEFAULT;
 bool pumpCalibrated = false;
@@ -39,6 +40,7 @@ bool pumpCalStartRun(int runIndex, const char **err) {
   if (shotInProgress) { *err = "Stop the shot first"; return false; }
   if (autotuneState == AutotuneState::RUNNING) { *err = "Autotune is running"; return false; }
   if (dimmerGetMainsState() != MainsState::OK) { *err = "No mains at the pump - turn the Brew switch on"; return false; }
+  if (waterBlocksPumpStart()) { *err = "Water tank is low - refill it first"; return false; }
   if (runIndex < 0) {
     for (int i = 0; i < PUMP_CAL_RUNS; i++) {
       if (runs[i] < 0.0f) { runIndex = i; break; }

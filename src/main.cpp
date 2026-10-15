@@ -8,6 +8,7 @@
 #include "shot_planner.h"
 #include "shot_log.h"
 #include "temp_sensor.h"
+#include "water_level.h"
 #include "web.h"
 #include <Arduino.h>
 #include <PID_v1.h>
@@ -543,8 +544,36 @@ static void resetPlannerOut() {
   plannerOut.phaseName = "";
 }
 
+// ============================================================================
+// Water tank sensor (water_level.cpp) - settings persisted in NVS, loaded in
+// setup(), changed from /update. The interlock refuses to START anything
+// that runs the pump (a shot, a calibration run) on a low tank; it never
+// stops a shot that's already running (the sensor sits at a "low" mark,
+// not at empty), and never touches the heater.
+// ============================================================================
+bool waterSensorEnabled = WATER_SENSOR_ENABLED_DEFAULT;
+bool waterActiveLow = WATER_ACTIVE_LOW_DEFAULT;
+bool waterInterlock = WATER_INTERLOCK_DEFAULT;
+// Last refused shot start, reported in /status for SHOT_BLOCKED_REPORT_MS.
+const char *shotBlockedReason = "";
+unsigned long shotBlockedAtMillis = 0;
+
+bool waterBlocksPumpStart() {
+  return waterSensorEnabled && waterInterlock &&
+         waterLevelState() == WaterState::LOW_WATER;
+}
+
+void applyWaterSettings() { waterLevelConfigure(waterSensorEnabled, waterActiveLow); }
+
 void startShot() {
   if (shotInProgress) return;
+  shotBlockedReason = "";
+  if (waterBlocksPumpStart()) {
+    shotBlockedReason = "low_water";
+    shotBlockedAtMillis = millis();
+    Serial.println("Shot refused: low water");
+    return;
+  }
   if (pumpCalGetState() == PumpCalState::RUNNING) pumpCalAbort("shot started");
   const Profile *p = profileFind(activeProfileName.c_str());
   if (!p) p = profileFind(PROFILE_DEFAULT_NAME);
@@ -683,6 +712,7 @@ void setup() {
   // switch position - an accepted tradeoff, see the design spec §3.
   dimmerInit();
   pressureSensorInit();
+  waterLevelInit();
   // Closed loop (future 0-16 bar sensor) is a +/- trim on the model duty.
   pressurePID.SetOutputLimits(-PUMP_PRESSURE_PID_TRIM_PCT, PUMP_PRESSURE_PID_TRIM_PCT);
   pressurePID.SetMode(MANUAL);
@@ -731,7 +761,11 @@ void setup() {
     schedModeSteam[i] = preferences.getBool((p + "st").c_str(), SCHED_MODE_STEAM_DEFAULT);
   }
   schedTzOffsetMin = preferences.getInt("sched_tz_min", SCHED_TZ_OFFSET_MIN_DEFAULT);
+  waterSensorEnabled = preferences.getBool("water_en", WATER_SENSOR_ENABLED_DEFAULT);
+  waterActiveLow = preferences.getBool("water_low_act", WATER_ACTIVE_LOW_DEFAULT);
+  waterInterlock = preferences.getBool("water_lock", WATER_INTERLOCK_DEFAULT);
   preferences.end();
+  applyWaterSettings();
 
   // Shot history log + named shot profiles (both LittleFS)
   shotLogInit();
@@ -1017,6 +1051,9 @@ static void controlTick(unsigned long now) {
   // Pump calibration run (pump_calibration.cpp) - after the safety cutoffs
   // so a cut they just made aborts the run instead of being measured.
   pumpCalTick(now);
+
+  // Water tank level (debounced; drives the shot-start interlock above).
+  waterLevelTick(now);
 
   // Scheduled warm-up (see config.h) - minute-granularity, so checking once a
   // second is more than enough and avoids a redundant time()/gmtime_r() call

@@ -1,7 +1,9 @@
 # Water Level Sensor (Item 6): Design Spec
 
 **Status:** approved by the user in chat, 2026-10-15 (UI mockups reviewed:
-"tank OK" and "low water" states). Not implemented yet.
+"tank OK" and "low water" states). **Implemented** on
+`feature/water-level-sensor` (based on `wip/local`); built in CI, not yet
+flashed or bench-tested. Implementation notes are in Section 7.
 **Blocked on:** the firmware actually running on the machine
 (`build Oct 2 2026 12:47:26`) has local changes that are on no GitHub
 branch: a "Water (est.)" stat tile and a pump calibration field
@@ -225,3 +227,30 @@ CI: `.github/workflows/build.yml` must pass before any OTA. Check
 3. Implement Sections 3-4 on that branch; CI build.
 4. OTA via `/firmware`, sensor still disabled → verify nothing changed.
 5. Install the sensor, enable it in Settings, run the bench steps above.
+
+## 7. Implementation notes (2026-10-15)
+
+- Built on `wip/local` (the code actually running on the machine), not
+  `main`.
+- The enum value is `WaterState::LOW_WATER`, not `LOW`: `LOW` is an
+  Arduino macro.
+- The interlock also refuses a **pump calibration run** on low water (it
+  runs the pump at 100% for 10 s), through the same `waterBlocksPumpStart()`.
+- A refused shot start returns **409 + reason** from `/update` (the existing
+  refusal path used by calibration/profiles), and the UI rolls back its
+  optimistic timer and shows the reason. `shot_blocked` is in `/status` too.
+- **"Water (est.)" removed from the UI and from `/status` (`ml_est`)** only.
+  The planner's internal `mlEst` and the **pump calibration stay**: on
+  `wip/local` the calibration (ml/stroke) drives the whole pump model,
+  the estimated bar and the phase profiles, not just that tile.
+- Settings toggles save on change (`setWater()` → `/update`), not through
+  the generic form handler, which would send a checkbox as "on" either way.
+- Fix 7 (red "Ns ago") was **dropped**: it only turns red after 6 s with no
+  `/status` reply, which is a real connection loss (the offline banner shows
+  at the same moment). The "51s ago" seen live came from a background tab
+  whose polling the browser had throttled.
+- The HA `binary_sensor` `water_low` is added/removed on the fly
+  (`mqttWaterDiscoveryDirty`) when the sensor is switched on/off in Settings.
+- Checked here: the embedded JS passes `node --check`, and the Now and
+  Settings screens were rendered in Chromium against a mock `/status` (OK
+  and low-water states, plus the refused Start tap).

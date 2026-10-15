@@ -1,5 +1,6 @@
 #include "mqtt.h"
 #include "config.h"
+#include "water_level.h"
 #include <Preferences.h>
 #include <PubSubClient.h>
 #include <WiFi.h>
@@ -32,6 +33,7 @@ extern float currentTemperature;
 extern double Output;
 extern bool sensorFault;
 extern bool shotInProgress;
+extern bool waterSensorEnabled;
 extern unsigned long shotCount;
 extern unsigned long descaleShotThreshold;
 extern unsigned long descaleDayThreshold;
@@ -129,6 +131,26 @@ static void publishDiscovery(const String &component, const String &objectId,
 // and republished "online" (retained) right after a successful connect.
 static const char *AVAILABILITY_TOPIC = "gaggia/availability";
 
+volatile bool mqttWaterDiscoveryDirty = false;
+
+// "Low water" problem sensor - only exists in HA while the tank sensor is
+// enabled in Settings; disabling it publishes an empty retained config,
+// which is HA's way of removing an entity.
+static void publishWaterDiscovery() {
+  lockState();
+  bool enabled = waterSensorEnabled;
+  unlockState();
+  if (!enabled) {
+    publishDiscovery("binary_sensor", "water_low", "");
+    return;
+  }
+  String avail = "\"avty_t\":\"" + String(AVAILABILITY_TOPIC) + "\",";
+  publishDiscovery("binary_sensor", "water_low",
+      "{" + avail + "\"name\":\"Low Water\",\"uniq_id\":\"gaggia_water_low\",\"dev_cla\":\"problem\","
+      "\"stat_t\":\"gaggia/status\",\"val_tpl\":\"{{ 'ON' if value_json.water_state == 'low' else 'OFF' }}\","
+      "\"icon\":\"mdi:water-alert\"," + haDevice() + "}");
+}
+
 void sendDiscovery() {
   String dev = haDevice();
   String avail = "\"avty_t\":\"" + String(AVAILABILITY_TOPIC) + "\",";
@@ -157,6 +179,7 @@ void sendDiscovery() {
   publishDiscovery("binary_sensor", "fault",
       "{" + avail + "\"name\":\"Sensor Fault\",\"uniq_id\":\"gaggia_fault\",\"dev_cla\":\"problem\","
       "\"stat_t\":\"gaggia/status\",\"val_tpl\":\"{{ 'ON' if value_json.fault else 'OFF' }}\"," + dev + "}");
+  publishWaterDiscovery();
   publishDiscovery("binary_sensor", "descale",
       "{" + avail + "\"name\":\"Descale Due\",\"uniq_id\":\"gaggia_descale\",\"dev_cla\":\"problem\","
       "\"stat_t\":\"gaggia/status\",\"val_tpl\":\"{{ 'ON' if value_json.descale_due else 'OFF' }}\"," + dev + "}");
@@ -257,6 +280,7 @@ void publishStatus() {
   double snapSteamTarget = steamSetpoint, snapSteamKp = steamKp, snapSteamKi = steamKi, snapSteamKd = steamKd;
   bool snapShotInProgress = shotInProgress;
   bool snapFault = sensorFault;
+  WaterState snapWaterState = waterLevelState();
   unsigned long snapShotCount = shotCount;
   time_t snapLastDescaleTime = lastDescaleTime;
   unsigned long snapDescaleShotThreshold = descaleShotThreshold;
@@ -286,6 +310,7 @@ void publishStatus() {
   json += ",\"shot_in_progress\":" + String(snapShotInProgress ? "true" : "false");
   json += ",\"fault\":" + String(snapFault ? "true" : "false");
   json += ",\"descale_due\":" + String(descaleDue ? "true" : "false");
+  json += ",\"water_state\":\"" + String(waterStateName(snapWaterState)) + "\"";
   json += "}";
 
   client.publish("gaggia/status", json.c_str());
@@ -303,6 +328,10 @@ void handleMQTT() {
     }
   } else {
     client.loop();
+    if (mqttWaterDiscoveryDirty) {
+      mqttWaterDiscoveryDirty = false;
+      publishWaterDiscovery();
+    }
     unsigned long now = millis();
     if (now - lastMsg > interval) {
       lastMsg = now;

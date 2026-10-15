@@ -17,6 +17,8 @@
 #include "pump_calibration.h"
 #include "shot_planner.h"
 #include "shot_log.h"
+#include "water_level.h"
+#include "mqtt.h"
 
 extern float currentTemperature;
 extern bool sensorFault;
@@ -58,6 +60,10 @@ extern bool shotInProgress;
 extern unsigned long shotStartMillis;
 extern void startShot();
 extern void stopShot();
+extern bool waterSensorEnabled, waterActiveLow, waterInterlock;
+extern void applyWaterSettings();
+extern const char *shotBlockedReason;
+extern unsigned long shotBlockedAtMillis;
 extern ShotPhase currentShotPhase;
 
 extern unsigned long shotCount;
@@ -231,6 +237,13 @@ const char *index_html = R"rawliteral(
     .pill.fault .dot { background: var(--red); box-shadow: 0 0 0 4px rgba(229,84,75,.2); animation: pulse-dot 1.1s var(--ease) infinite; }
     @keyframes pulse-dot { 0%,100% { opacity: 1 } 50% { opacity: .45 } }
     .last-updated { font-size: var(--fs-1); color: var(--text-dim); margin-top: 5px; }
+    /* Water tank chip (water_level.cpp) - sits left of the mode pill. Amber,
+       not red, when low: red stays reserved for safety faults. */
+    .status-row { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-2); }
+    .pill.tank { display: none; font-weight: 700; }
+    .pill.tank.ok { display: inline-flex; color: #bfe6d3; border-color: rgba(72,181,131,.45); }
+    .pill.tank.low { display: inline-flex; color: #f3dcc2; border-color: rgba(224,161,58,.6); background: rgba(224,161,58,.12); }
+    .tank-icon { width: 9px; height: 12px; border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%; background: currentColor; opacity: .85; }
 
     .alerts { display: flex; flex-direction: column; gap: var(--sp-2); margin-bottom: var(--sp-4); }
     .banner {
@@ -339,6 +352,17 @@ const char *index_html = R"rawliteral(
     }
     .btn-shot:active { transform: translateY(1px); }
     .btn-shot.running { background: var(--red); border-color: var(--red); color: #1a0d0c; }
+    .btn-shot.blocked { background: rgba(224,161,58,.14); border-color: rgba(224,161,58,.55); color: #f3dcc2; }
+    .shot-block-msg { display: none; font-size: var(--fs-4); color: var(--amber); text-align: right; margin-top: var(--sp-2); }
+    .shot-block-msg.show { display: block; }
+    .stat-tile.tank { display: none; }
+    .stat-tile.tank.ok, .stat-tile.tank.low { display: block; }
+    .stat-tile.tank.ok .stat-value { color: var(--green); }
+    .stat-tile.tank.low { border-color: rgba(224,161,58,.55); }
+    .stat-tile.tank.low .stat-value { color: var(--amber); }
+    .water-live { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-3); margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--border-soft); font-size: var(--fs-5); }
+    .water-live b.ok { color: var(--green); }
+    .water-live b.low { color: var(--amber); }
     .shot-progress { height: 7px; border-radius: var(--radius-full); background: #100d0b; border: 1px solid var(--border-soft); overflow: hidden; margin-top: var(--sp-4); }
     .shot-progress > span { display: block; height: 100%; width: 0%; border-radius: var(--radius-full); background: var(--text-faint); transition: width .4s linear, background .3s ease; }
     .shot-progress > span.in-window { background: var(--green); }
@@ -551,7 +575,10 @@ const char *index_html = R"rawliteral(
         </div>
       </div>
       <div class="brand-status">
-        <div id="status_pill" class="pill off" aria-live="polite"><span class="dot" aria-hidden="true"></span><span id="mode_status">--</span></div>
+        <div class="status-row">
+          <div id="tank_pill" class="pill tank" aria-live="polite"><span class="tank-icon" aria-hidden="true"></span><span id="tank_pill_text">Tank OK</span></div>
+          <div id="status_pill" class="pill off" aria-live="polite"><span class="dot" aria-hidden="true"></span><span id="mode_status">--</span></div>
+        </div>
         <div id="last_updated" class="last-updated">--</div>
       </div>
     </header>
@@ -561,6 +588,7 @@ const char *index_html = R"rawliteral(
       <div id="fault_banner" class="banner banner-error">Sensor fault &mdash; heater held off. Check the PT100 wiring.</div>
       <div id="pressure_banner" class="banner banner-error"></div>
       <div id="pump_banner" class="banner banner-warn"></div>
+      <div id="water_banner" class="banner banner-warn">Refill the water tank. New shots are paused until it's back.</div>
       <div id="cal_banner" class="banner banner-info">Pump not calibrated &mdash; shots use a default pump model.&nbsp;<a href="#settings" onclick="showTab('settings')">Calibrate</a></div>
          <div id="sleep_banner" class="banner banner-info">
         <span id="sleep_banner_text">Asleep (eco timeout) &mdash; heater off</span>
@@ -585,7 +613,7 @@ const char *index_html = R"rawliteral(
                 <div class="gauge-value"><span id="temp" class="skeleton">--</span><span class="gauge-unit">&deg;C</span></div>
               </div>
             </div>
-            <div class="gauge-target">Target <b><span id="target" class="skeleton">--</span>&deg;C</b></div>
+            <div class="gauge-target"><span id="target_on">Target <b><span id="target" class="skeleton">--</span>&deg;C</b></span><span id="target_off" style="display:none">Heater off</span></div>
           </div>
 
           <div class="gauge-col">
@@ -618,6 +646,7 @@ const char *index_html = R"rawliteral(
           </div>
           <button type="button" onclick="toggleShot()" id="btn_shot" class="btn-shot">Start Shot</button>
         </div>
+        <div id="shot_block_msg" class="shot-block-msg" role="alert">Tank is low. Refill, then tap again.</div>
         <div class="shot-progress"><span id="shot_progress_bar"></span></div>
         <div class="preset-row" id="profile_chip_row"></div>
       </div>
@@ -634,9 +663,9 @@ const char *index_html = R"rawliteral(
             <span class="stat-value"><span id="pump_power" class="skeleton">--</span><small>%</small></span>
             <div class="bar pump"><span id="pump_bar"></span></div>
           </div>
-          <div class="stat-tile">
-            <span class="stat-label">Water (est.)</span>
-            <span class="stat-value"><span id="ml_est" class="skeleton">--</span><small>ml</small></span>
+          <div id="tank_tile" class="stat-tile tank">
+            <span class="stat-label">Tank</span>
+            <span class="stat-value"><span id="tank_value">OK</span></span>
           </div>
            </div>
 
@@ -856,6 +885,21 @@ const char *index_html = R"rawliteral(
           <button type="submit" class="submit">Save</button>
         </form>
         <p class="hint" style="margin-top:var(--sp-3)">Heater force-OFF after this long with no Web UI activity (mode/tuning changes). Steam uses a shorter default because it runs hotter. Status polling does not count as activity.</p>
+      </div>
+
+      <div class="card">
+        <div class="tab-section-title">Water tank sensor</div>
+        <label class="check-row"><input type="checkbox" id="input_water_enabled" onchange="setWater('water_enabled', this.checked ? 1 : 0)"> Sensor installed</label>
+        <div class="field" style="margin-top:var(--sp-3)">
+          <label for="input_water_active_low">Water reads as</label>
+          <select id="input_water_active_low" onchange="setWater('water_active_low', this.value)">
+            <option value="1">LOW (default)</option>
+            <option value="0">HIGH</option>
+          </select>
+        </div>
+        <label class="check-row"><input type="checkbox" id="input_water_interlock" onchange="setWater('water_interlock', this.checked ? 1 : 0)"> Pause shots on low water</label>
+        <div class="water-live"><span>Live reading &middot; GPIO7</span><b id="water_live">--</b></div>
+        <p class="hint" style="margin-top:var(--sp-3)">Mount the sensor flat against the outside of the tank at the "low" height (red 3V3, black GND, yellow GPIO7). Check it with the tank full, empty and removed - a removed tank reads as no water. A running shot always finishes; the heater is never affected.</p>
       </div>
 
       <div class="card">
@@ -1456,8 +1500,10 @@ function applyModeButtons(mode) {
 
 function applyShotButton(running) {
   var btnShot = document.getElementById("btn_shot");
-  btnShot.textContent = running ? "Stop Shot" : "Start Shot";
+  var blocked = !running && waterLow && waterInterlockOn;
+  btnShot.textContent = running ? "Stop Shot" : blocked ? "Refill to brew" : "Start Shot";
   btnShot.classList.toggle("running", running);
+  btnShot.classList.toggle("blocked", blocked);
 }
 
 function applyStatus(json) {
@@ -1481,6 +1527,8 @@ function applyStatus(json) {
   showBanner("fault_banner", !!json.fault);
   setText("temp", json.fault ? "--" : temp.toFixed(1));
   setText("target", hasTarget ? target.toFixed(1) : "--");
+  document.getElementById("target_on").style.display = mode === "off" ? "none" : "";
+  document.getElementById("target_off").style.display = mode === "off" ? "" : "none";
   setText("output", outputPct.toFixed(0));
   setText("pump_power", pumpPct.toFixed(0));
   var pumpBar = document.getElementById("pump_bar");
@@ -1496,7 +1544,7 @@ function applyStatus(json) {
       : "sensor " + (json.pressure_max_bar && json.pressure >= json.pressure_max_bar
         ? json.pressure_max_bar.toFixed(0) + "+" : json.pressure.toFixed(1)) + " bar";
   }
-  setText("ml_est", json.shot_in_progress ? json.ml_est.toFixed(0) : "--");
+  applyWaterStatus(json, mode);
 
   var tempPct = (temp > 0 && hasTarget) ? clamp((temp / target) * 100) : 0;
   var ring = document.getElementById("temp_ring_fill");
@@ -1692,6 +1740,7 @@ setInterval(pollStatus, 2000);
 
 function setMode(mode) {
   applyModeButtons(mode);
+  document.getElementById("sleep_banner").style.display = "none"; // a manual mode change ends any auto-sleep
   xhr("/update?mode=" + mode);
 }
 
@@ -1714,15 +1763,84 @@ function stopAutotune() {
   xhr("/update?autotune=stop");
 }
 
+// ============================================================================
+// Water tank sensor (design spec 2026-10-15). waterLow is only true while
+// the sensor is enabled AND reads low; with the interlock on, Start is
+// replaced by "Refill to brew" (still tappable, explains itself).
+// ============================================================================
+var waterLow = false, waterInterlockOn = true, shotBlockMsgTimer = null;
+
+function applyWaterStatus(json, mode) {
+  if (typeof json.water_state !== "string") return;
+  var en = json.water_state !== "disabled";
+  waterLow = json.water_state === "low";
+  waterInterlockOn = json.water_interlock !== false;
+
+  var pill = document.getElementById("tank_pill");
+  pill.className = "pill tank" + (en ? (waterLow ? " low" : " ok") : "");
+  setText("tank_pill_text", waterLow ? "Low water" : "Tank OK");
+  var tile = document.getElementById("tank_tile");
+  tile.className = "stat-tile tank" + (en ? (waterLow ? " low" : " ok") : "");
+  setText("tank_value", waterLow ? "Low" : "OK");
+  showBanner("water_banner", waterLow, waterLow && !waterInterlockOn
+    ? "Water tank is low. Refill it soon."
+    : "Refill the water tank. New shots are paused until it's back.");
+  if (!waterLow) hideShotBlockMsg();
+  applyShotButton(shotRunning);
+
+  var cbEn = document.getElementById("input_water_enabled");
+  if (cbEn && document.activeElement !== cbEn) cbEn.checked = !!json.water_enabled;
+  var sel = document.getElementById("input_water_active_low");
+  if (sel && document.activeElement !== sel) sel.value = json.water_active_low ? "1" : "0";
+  var cbLock = document.getElementById("input_water_interlock");
+  if (cbLock && document.activeElement !== cbLock) cbLock.checked = !!json.water_interlock;
+  var live = document.getElementById("water_live");
+  if (live) {
+    var raw = json.water_raw_high ? "HIGH" : "LOW";
+    var wet = json.water_active_low ? !json.water_raw_high : json.water_raw_high;
+    live.textContent = raw + " \u00b7 " + (wet ? "water detected" : "no water");
+    live.className = wet ? "ok" : "low";
+  }
+}
+
+function setWater(key, value) {
+  xhr("/update?" + key + "=" + value);
+}
+
+function showShotBlockMsg(text) {
+  var el = document.getElementById("shot_block_msg");
+  if (text) el.textContent = text;
+  el.classList.add("show");
+  clearTimeout(shotBlockMsgTimer);
+  shotBlockMsgTimer = setTimeout(hideShotBlockMsg, 6000);
+}
+function hideShotBlockMsg() {
+  var el = document.getElementById("shot_block_msg");
+  if (el) el.classList.remove("show");
+}
+
 function toggleShot() {
   var next = !shotRunning;
+  if (next && waterLow && waterInterlockOn) {
+    showShotBlockMsg("Tank is low. Refill, then tap again.");
+    return;
+  }
   shotRunning = next;
   if (next) {
     shotElapsedBaseMs = 0;
     shotElapsedCapturedAt = Date.now();
   }
   applyShotButton(next);
-  xhr("/update?shot=" + (next ? "start" : "stop"));
+  xhr("/update?shot=" + (next ? "start" : "stop"), function (status, text) {
+    if (!next || status !== 409) return;
+    // Refused by the controller (e.g. the tank went low since the last
+    // poll) - roll the optimistic timer back and say why.
+    shotRunning = false;
+    shotElapsedBaseMs = 0;
+    shotElapsedCapturedAt = null;
+    applyShotButton(false);
+    showShotBlockMsg(text || "Shot refused");
+  });
 }
 
 // ============================================================================
@@ -2253,6 +2371,13 @@ static void handleStatus(AsyncWebServerRequest *request) {
     snapEst[i] = estPressureHistory[idx];
     snapTgt[i] = targetPressureHistory[idx];
   }
+  bool snapWaterEnabled = waterSensorEnabled, snapWaterActiveLow = waterActiveLow;
+  bool snapWaterInterlock = waterInterlock;
+  WaterState snapWaterState = waterLevelState();
+  bool snapWaterRawHigh = waterLevelRawHigh();
+  String snapShotBlocked =
+      (shotBlockedReason[0] && (long)(millis() - shotBlockedAtMillis) < SHOT_BLOCKED_REPORT_MS)
+          ? shotBlockedReason : "";
   unlockState();
 
   String json = "{";
@@ -2386,7 +2511,14 @@ static void handleStatus(AsyncWebServerRequest *request) {
   json += ",\"phase_type\":\"" + String(snapPlan.phaseIndex >= 0 ? phaseTypeName(snapPlan.phaseType) : "") + "\"";
   json += ",\"phase_target\":" + String(snapPlan.phaseTarget, 2);
   json += ",\"pressure_est\":" + String(snapPlan.pressureEst, 2);
-  json += ",\"ml_est\":" + String(snapPlan.mlEst, 1);
+
+  // Water tank sensor (water_level.cpp, design spec 2026-10-15)
+  json += ",\"water_enabled\":" + String(snapWaterEnabled ? "true" : "false");
+  json += ",\"water_state\":\"" + String(waterStateName(snapWaterState)) + "\"";
+  json += ",\"water_raw_high\":" + String(snapWaterRawHigh ? "true" : "false");
+  json += ",\"water_active_low\":" + String(snapWaterActiveLow ? "true" : "false");
+  json += ",\"water_interlock\":" + String(snapWaterInterlock ? "true" : "false");
+  json += ",\"shot_blocked\":\"" + snapShotBlocked + "\"";
 
   json += ",\"sched\":[";
   for (int i = 0; i < SCHED_MAX_COUNT; i++) {
@@ -2552,6 +2684,27 @@ static void handleUpdate(AsyncWebServerRequest *request) {
     wakeFromSleep();
   }
 
+  // Water tank sensor settings
+  bool waterSettingsChanged = false;
+  if (hasArg("water_enabled")) {
+    waterSensorEnabled = arg("water_enabled") == "1";
+    preferences.putBool("water_en", waterSensorEnabled);
+    waterSettingsChanged = true;
+  }
+  if (hasArg("water_active_low")) {
+    waterActiveLow = arg("water_active_low") == "1";
+    preferences.putBool("water_low_act", waterActiveLow);
+    waterSettingsChanged = true;
+  }
+  if (hasArg("water_interlock")) {
+    waterInterlock = arg("water_interlock") == "1";
+    preferences.putBool("water_lock", waterInterlock);
+  }
+  if (waterSettingsChanged) {
+    applyWaterSettings();
+    mqttWaterDiscoveryDirty = true; // add/remove the HA "Low water" entity
+  }
+
   // PID Autotune - runs the currently-active profile (must be Brew or
   // Steam already, not Off) through a relay-feedback tuning cycle.
   if (hasArg("autotune")) {
@@ -2569,6 +2722,9 @@ static void handleUpdate(AsyncWebServerRequest *request) {
     String s = arg("shot");
     if (s == "start") {
       startShot();
+      if (!shotInProgress && strcmp(shotBlockedReason, "low_water") == 0) {
+        actionErr = "Water tank is low - refill it first";
+      }
     } else if (s == "stop") {
       stopShot();
     }

@@ -92,7 +92,7 @@ pins (USB `GPIO19/20`, flash `GPIO26-32`, OPI PSRAM `GPIO33-37`, strapping
 | Pressure transducer analog in (ADC1_CH0, pull-down) | **1** |
 | Temp module UART RX (ESP receives, module TX) | **18** |
 | Temp module UART TX (ESP sends, module RX) | **17** |
-| *Planned:* water level sensor OUT (digital in) | **7** (not in firmware yet) |
+| Water level sensor OUT (digital in, pull-up) | **7** |
 
 The temp module also needs **3.3V** and **GND** from the DevKit (module is
 5V-rated but works powered from 3V3 — see Section 9 change log for why).
@@ -912,6 +912,27 @@ everything again.
 ---
 
 ## 10. Change Log
+
+### 2026-10-15 — Claude Code (Opus 5.5) — Water tank sensor implemented (firmware + Web UI); "Water (est.)" tile removed
+
+- Rebased the auto-off fix, CI and docs onto `wip/local` (the code flashed
+  Oct 2 12:47, pushed by the user today) as `feature/water-level-sensor`.
+- New `water_level.cpp/.h`: GPIO7 with pull-up, sampled every 100 ms, 2 s
+  debounce; settings `water_en` / `water_low_act` / `water_lock` in NVS
+  (sensor **off by default**). `startShot()` and `pumpCalStartRun()` refuse
+  to start on low water; a running shot is never stopped, the heater is
+  never touched.
+- `/status`: `water_enabled`, `water_state`, `water_raw_high`,
+  `water_active_low`, `water_interlock`, `shot_blocked`; `ml_est` removed.
+  `/update`: `water_enabled`, `water_active_low`, `water_interlock`. MQTT:
+  `water_state` + HA `binary_sensor.water_low` (only while enabled).
+- Web UI: tank chip in the header, amber low-water banner, "Refill to brew"
+  shot button with an inline reason, Tank stat tile (replaces "Water
+  (est.)"), "Heater off" caption when Off, sleep banner hidden on a manual
+  mode change, Settings → Power → "Water tank sensor" card with a live GPIO7
+  reading.
+- Details and decisions: `docs/superpowers/specs/2026-10-15-water-level-sensor-design.md` §7.
+- **Not flashed or bench-tested yet.** CI build only.
 
 ### 2026-10-15 — Claude Code (Opus 5.5) — Water level sensor chosen: non-contact capacitive, planned on GPIO7
 
