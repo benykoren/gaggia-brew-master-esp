@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -29,3 +29,11 @@ jobs:
         with:
           name: firmware-${{ github.sha }}
           path: .pio/build/esp32-s3-devkitc-1/firmware.bin
+      - name: Publish firmware.bin to the ota-bin branch (for browser-based OTA)
+        if: github.ref != 'refs/heads/ota-bin'
+        run: |
+          mkdir /tmp/ota && cp .pio/build/esp32-s3-devkitc-1/firmware.bin /tmp/ota/
+          echo "${GITHUB_SHA} ${GITHUB_REF_NAME}" > /tmp/ota/BUILD.txt
+          cd /tmp/ota && git init -q -b ota-bin && git add . \
+            && git -c user.name=ci -c user.email=ci@users.noreply.github.com commit -qm "firmware ${GITHUB_SHA}" \
+            && git push -qf "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git" ota-bin
