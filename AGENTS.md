@@ -981,6 +981,11 @@ everything again.
   scale/trim folded), Power & schedule (slot 1 shown, 2-3 under "More times"),
   Maintenance (descale), Advanced (collapsed: PID/auto-tune/steam ceiling,
   pressure PID, pump calibration, water sensor, Wi-Fi/OTA, MQTT, backup).
+- Follow-up same night: one combined live chart (`drawLiveChart`: temp + pressure +
+  both targets dashed, phase ticks), live-shot block under the dial (phase strip
+  from the active profile's phase names, big Pressure/Boiler/Pump readouts),
+  −/+ steppers for brew/steam targets that auto-save after 700 ms, tighter
+  tablet spacing so Brew fits 1280×800, phone shot order = timer/Stop first.
 - Old `#tune`/`#history` links map to Settings > Brewing / Brew. No external fonts
   (system stack), ES5 JS kept.
 

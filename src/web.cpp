@@ -346,9 +346,35 @@ const char *index_html = R"rawliteral(
     .legend { display: flex; gap: 14px; font-size: 11px; color: var(--text-2); }
     .legend i { display: inline-block; width: 12px; height: 2px; border-radius: 1px; margin-right: 6px; vertical-align: middle; }
     .chart-wrap { position: relative; }
-    .chart-wrap + .chart-wrap { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-soft); }
-    .chart-label { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-dim); margin-bottom: 4px; }
-    .chart-wrap canvas { display: block; width: 100%; height: 90px; }
+    .chart-wrap canvas { display: block; width: 100%; height: 170px; }
+    .chart-foot { display: flex; justify-content: space-between; margin-top: 6px; font-size: 11px; color: var(--text-dim); }
+
+    /* Live shot block under the dial: phase steps + big readouts. */
+    .shot-live { display: none; flex-direction: column; gap: var(--sp-4); }
+    .app.shooting .shot-live { display: flex; }
+    .phase-steps { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 8px; }
+    .phase-step { font-size: 13px; color: var(--text-dim); padding: 5px 0; }
+    .phase-step.done { color: var(--text-2); }
+    .phase-step.current { color: var(--bg); background: var(--cyan); font-weight: 600; padding: 5px 12px; border-radius: 999px; }
+    .phase-sep { width: 14px; height: 1px; background: rgba(255,255,255,.18); }
+    .live-reads { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .live-read { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    .live-read + .live-read { border-left: 1px solid var(--border); }
+    .live-read b { font-size: 34px; font-weight: 300; letter-spacing: -.03em; line-height: 1.05; }
+    .live-read b small { font-size: 13px; color: var(--text-dim); margin-left: 3px; letter-spacing: 0; font-weight: 400; }
+    .live-read.press b { color: var(--cyan); }
+    .live-read.temp b { color: var(--copper); }
+
+    /* -/+ steppers for the two everyday temperatures; save automatically. */
+    .stepper { display: flex; align-items: center; gap: var(--sp-3); margin-top: var(--sp-3); }
+    .step-btn {
+      flex: none; width: 56px; height: 56px; border-radius: 28px; border: 1px solid var(--border-strong);
+      background: transparent; color: var(--text); font-size: 26px; font-weight: 300; line-height: 1; cursor: pointer;
+    }
+    .step-btn:active { background: var(--surface-2); }
+    .stepper input[type=number] { flex: 1 1 auto; min-width: 0; height: 56px; text-align: center; font-size: 30px; font-weight: 300; letter-spacing: -.02em; -moz-appearance: textfield; }
+    .stepper input::-webkit-outer-spin-button, .stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    .stepper-note { display: flex; justify-content: space-between; align-items: center; min-height: 20px; margin-top: 8px; font-size: 12px; color: var(--text-dim); }
 
     .last-shot-sum { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; color: var(--text-2); font-size: 14px; }
     .last-shot-sum b { color: var(--text); font-weight: 400; font-size: 22px; letter-spacing: -.02em; }
@@ -364,6 +390,11 @@ const char *index_html = R"rawliteral(
     /* Focus mode while a shot runs: nothing to wander off to. */
     .app.shooting .tabbar, .app.shooting .profiles-block, .app.shooting .last-shot-card, .app.shooting .mode-switch { display: none !important; }
     .app.shooting .shot-time { font-size: 96px; }
+    /* Phone during a shot: timer + Stop first (thumb reach), smaller dial. */
+    @media (max-width: 899px) {
+      .app.shooting .brew-col.right { order: -1; }
+      .app.shooting .dial { max-width: 280px; }
+    }
 
     /* ---- Forms ---- */
     .field { display: flex; flex-direction: column; gap: 6px; margin-top: var(--sp-3); }
@@ -456,11 +487,18 @@ const char *index_html = R"rawliteral(
         display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; margin-bottom: 20px;
         border-radius: 20px; border: 1px solid rgba(227,154,98,.5); color: var(--copper); font-size: 16px; font-weight: 600;
       }
-      .topbar { padding-top: 30px; }
+      .topbar { padding-top: 22px; padding-bottom: 12px; }
+      .brew-col.right { gap: 12px; }
+      .brew-col.right .card { padding: 16px 20px; }
+      .taste-row { margin-top: 10px; }
+      .taste-tip { margin-top: 8px; }
       .top-controls { width: auto; }
       .top-controls .mode-switch { flex: none; }
       .top-controls .mode-btn { flex: none; min-width: 82px; }
-      .chart-wrap canvas { height: 64px; }
+      .chart-wrap canvas { height: 120px; }
+      .dial { max-width: 380px; }
+      .app.shooting .dial { max-width: 360px; }
+      .app.shooting .live-read b { font-size: 44px; }
       .card-shot { gap: 10px; }
       .brew-grid { flex-direction: row; align-items: flex-start; gap: 40px; }
       .brew-col { flex: 1 1 0; }
@@ -483,7 +521,7 @@ const char *index_html = R"rawliteral(
       .set-grid > .wide { grid-column: 1 / -1; }
     }
     @media (min-width: 900px) and (max-height: 700px) {
-      .dial { max-width: 340px; }
+      .dial, .app.shooting .dial { max-width: 320px; }
       #temp { font-size: 92px; }
     }
   </style>
@@ -573,6 +611,15 @@ const char *index_html = R"rawliteral(
             </div>
           </section>
 
+          <section class="shot-live" aria-label="Live shot">
+            <div class="phase-steps" id="phase_steps"></div>
+            <div class="live-reads">
+              <div class="live-read press"><span class="label">Pressure</span><b><span id="live_press">--</span><small>bar</small></b></div>
+              <div class="live-read temp"><span class="label">Boiler</span><b><span id="live_temp">--</span><small>&deg;</small></b></div>
+              <div class="live-read"><span class="label">Pump</span><b><span id="live_pump">--</span><small>%</small></b></div>
+            </div>
+          </section>
+
           <section class="profiles-block" aria-label="Shot profile">
             <div class="section-head"><span class="label">Profile</span><a href="#settings" onclick="openSettings('brewing'); return false;">Edit profiles</a></div>
             <div class="preset-row" id="profile_chip_row"></div>
@@ -595,16 +642,10 @@ const char *index_html = R"rawliteral(
           <section class="card chart-card" aria-label="Live charts">
             <div class="chart-head">
               <span class="label">Last 2 min</span>
-              <div class="legend"><span><i style="background:#e39a62"></i>Temp</span><span><i style="background:#46e3f0"></i>Pressure</span><span><i style="background:rgba(255,255,255,.5)"></i>Target</span></div>
+              <div class="legend"><span><i style="background:#e39a62"></i>Temp</span><span><i style="background:#46e3f0"></i>Pressure</span><span><i style="background:none;border-top:1.5px dashed rgba(255,255,255,.6);height:0"></i>Target</span></div>
             </div>
-            <div class="chart-wrap">
-              <div class="chart-label"><span>Temperature</span><span>&deg;C</span></div>
-              <canvas id="temp_chart" aria-hidden="true"></canvas>
-            </div>
-            <div class="chart-wrap">
-              <div class="chart-label"><span>Pressure</span><span id="pressure_label">-- bar</span></div>
-              <canvas id="pressure_chart" aria-hidden="true"></canvas>
-            </div>
+            <div class="chart-wrap"><canvas id="live_chart" aria-hidden="true"></canvas></div>
+            <div class="chart-foot"><span id="temp_range_label">&deg;C</span><span id="pressure_label">-- bar</span></div>
           </section>
 
           <section class="card last-shot-card" id="last_shot_card" aria-label="Last shot" hidden>
@@ -661,15 +702,25 @@ const char *index_html = R"rawliteral(
               <div class="card">
                 <div class="tab-section-title">Brew temperature</div>
                 <form action="/update" method="GET">
-                  <div class="field"><label for="input_brew_target">Boiler target for shots (&deg;C)</label><input type="number" step="0.1" name="brew_target" id="input_brew_target" value=""></div>
-                  <button type="submit" class="submit">Save</button>
+                  <label class="hint" for="input_brew_target" style="display:block">Boiler target for shots (&deg;C)</label>
+                  <div class="stepper">
+                    <button type="button" class="step-btn" aria-label="Lower brew temperature" onclick="stepField('input_brew_target','brew_target',-0.5,80,100)">&minus;</button>
+                    <input type="number" step="0.1" min="80" max="100" name="brew_target" id="input_brew_target" value="">
+                    <button type="button" class="step-btn" aria-label="Raise brew temperature" onclick="stepField('input_brew_target','brew_target',0.5,80,100)">+</button>
+                  </div>
+                  <div class="stepper-note"><span>Saves automatically</span><span class="save-confirm" id="brew_target_saved"></span></div>
                 </form>
               </div>
               <div class="card">
                 <div class="tab-section-title">Steam temperature</div>
                 <form action="/update" method="GET">
-                  <div class="field"><label for="input_steam_target">Boiler target for milk (&deg;C)</label><input type="number" step="0.1" name="steam_target" id="input_steam_target" value=""></div>
-                  <button type="submit" class="submit">Save</button>
+                  <label class="hint" for="input_steam_target" style="display:block">Boiler target for milk (&deg;C)</label>
+                  <div class="stepper">
+                    <button type="button" class="step-btn" aria-label="Lower steam temperature" onclick="stepField('input_steam_target','steam_target',-1,110,150)">&minus;</button>
+                    <input type="number" step="0.1" min="110" max="150" name="steam_target" id="input_steam_target" value="">
+                    <button type="button" class="step-btn" aria-label="Raise steam temperature" onclick="stepField('input_steam_target','steam_target',1,110,150)">+</button>
+                  </div>
+                  <div class="stepper-note"><span>Saves automatically</span><span class="save-confirm" id="steam_target_saved"></span></div>
                 </form>
               </div>
               <div class="card wide">
@@ -1076,28 +1127,12 @@ function trackPhaseMarkers(shotPhase, shotInProgress) {
   lastSeenShotPhase = shotInProgress ? shotPhase : null;
 }
 
-// Draws a dashed horizontal reference line at the given target value,
-// using the same min/max scale as the data line - shared by both charts.
-function drawTargetLine(ctx, w, h, min, max, target) {
-  if (target === null || target === undefined) return;
-  var y = h - ((target - min) / (max - min)) * (h - 6) - 3;
-  ctx.save();
-  ctx.strokeStyle = "rgba(255,255,255,.35)";
-  ctx.lineWidth = 1.5;
-  ctx.setLineDash([4, 3]);
-  ctx.beginPath();
-  ctx.moveTo(0, y);
-  ctx.lineTo(w, y);
-  ctx.stroke();
-  ctx.restore();
-}
-
 // Canvases are sized in CSS (fluid width); match the backing store to the
 // displayed size x devicePixelRatio on every draw so lines stay crisp on
 // the tablet and phone alike. Drawing then happens in CSS pixels.
 function fitCanvas(canvas) {
   var dpr = window.devicePixelRatio || 1;
-  var cw = canvas.clientWidth || 300, ch = canvas.clientHeight || 90;
+  var cw = canvas.clientWidth || 300, ch = canvas.clientHeight || 140;
   if (canvas.width !== Math.round(cw * dpr) || canvas.height !== Math.round(ch * dpr)) {
     canvas.width = Math.round(cw * dpr);
     canvas.height = Math.round(ch * dpr);
@@ -1108,78 +1143,87 @@ function fitCanvas(canvas) {
   return { ctx: ctx, w: cw, h: ch };
 }
 
-function drawSparkline(data, target) {
-  var canvas = document.getElementById("temp_chart");
-  if (!canvas || !data || data.length < 2) return;
+// One combined live chart (2026-10-15 redesign): boiler temp (copper, own
+// auto-scaled axis incl. the target) and pressure (cyan, 0-10 bar) on the
+// same 2-min window, each target dashed, phase changes as cyan ticks.
+function drawLiveChart(temps, tempTarget, est, sensor, pTarget, closedLoop) {
+  var canvas = document.getElementById("live_chart");
+  if (!canvas) return;
   var fit = fitCanvas(canvas);
   var ctx = fit.ctx, w = fit.w, h = fit.h;
-  var scaleValues = (target === null || target === undefined) ? data : data.concat([target]);
-  var min = Math.min.apply(null, scaleValues), max = Math.max.apply(null, scaleValues);
-  if (max - min < 1) { max += 0.5; min -= 0.5; }
+  var top = 6, bottom = h - 4, span = bottom - top;
 
-  phaseMarkers = phaseMarkers.filter(function (m) { return m.age < data.length; });
-  if (phaseMarkers.length) {
-    ctx.save();
-    ctx.strokeStyle = "rgba(70,227,240,.45)"; // phase change marker
-    ctx.lineWidth = 1;
-    ctx.setLineDash([3, 2]);
-    phaseMarkers.forEach(function (m) {
-      var idx = data.length - 1 - m.age;
-      var x = (idx / (data.length - 1)) * w;
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, h);
-      ctx.stroke();
-    });
-    ctx.restore();
+  ctx.strokeStyle = "rgba(255,255,255,.05)";
+  ctx.lineWidth = 1;
+  for (var g = 0; g <= 3; g++) {
+    var gy = Math.round(top + (span * g) / 3) + 0.5;
+    ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(w, gy); ctx.stroke();
   }
 
-  drawTargetLine(ctx, w, h, min, max, target);
-
-  ctx.beginPath();
-  data.forEach(function (v, i) {
-    var x = (i / (data.length - 1)) * w;
-    var y = h - ((v - min) / (max - min)) * (h - 6) - 3;
-    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-  });
-  ctx.strokeStyle = "#e39a62";
-  ctx.lineWidth = 2;
-  ctx.lineJoin = "round";
-  ctx.stroke();
-}
-
-// Pressure chart: the model estimate (or the real reading once the closed
-// loop exists) as the main line, the raw sensor reading as a thin line
-// while it can't read brew pressure, and the profile's pressure target
-// dashed (target < 0 = no pressure target at that sample -> gap).
-function drawPressureChart(est, sensor, target, closedLoop) {
-  var canvas = document.getElementById("pressure_chart");
-  if (!canvas) return;
-  var main = closedLoop ? sensor : est;
-  if (!main || main.length < 2) return;
-  var fit = fitCanvas(canvas);
-  var ctx = fit.ctx, w = fit.w, h = fit.h;
-  var max = 10;
-  function y(v) { return h - (Math.min(max, Math.max(0, v)) / max) * (h - 6) - 3; }
-  function line(data, color, width, dashed, gapsBelowZero) {
-    if (!data || data.length < 2) return;
+  function path(data, yOf, gapsBelowZero) {
     ctx.beginPath();
     var pen = false;
-    data.forEach(function (v, i) {
-      var x = (i / (data.length - 1)) * w;
-      if (gapsBelowZero && v < 0) { pen = false; return; }
-      if (!pen) { ctx.moveTo(x, y(v)); pen = true; } else ctx.lineTo(x, y(v));
-    });
-    ctx.setLineDash(dashed ? [5, 4] : []);
-    ctx.strokeStyle = color;
-    ctx.lineWidth = width;
-    ctx.lineJoin = "round";
-    ctx.stroke();
+    for (var i = 0; i < data.length; i++) {
+      var v = data[i];
+      if (gapsBelowZero && v < 0) { pen = false; continue; }
+      var x = (i / (data.length - 1)) * w, yy = yOf(v);
+      if (!pen) { ctx.moveTo(x, yy); pen = true; } else ctx.lineTo(x, yy);
+    }
+  }
+
+  var main = closedLoop ? sensor : est;
+  var PMAX = 10;
+  function py(v) { return bottom - (Math.min(PMAX, Math.max(0, v)) / PMAX) * span; }
+  if (main && main.length > 1) {
+    path(main, py, false);
+    ctx.lineTo(w, bottom); ctx.lineTo(0, bottom); ctx.closePath();
+    var grad = ctx.createLinearGradient(0, top, 0, bottom);
+    grad.addColorStop(0, "rgba(70,227,240,.18)");
+    grad.addColorStop(1, "rgba(70,227,240,0)");
+    ctx.fillStyle = grad;
+    ctx.fill();
+  }
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  if (pTarget && pTarget.length > 1) {
+    ctx.setLineDash([4, 5]);
+    path(pTarget, py, true);
+    ctx.strokeStyle = "rgba(255,255,255,.45)"; ctx.lineWidth = 1.2; ctx.stroke();
     ctx.setLineDash([]);
   }
-  line(target, "rgba(255,255,255,.45)", 1.2, true, true);
-  if (!closedLoop) line(sensor, "rgba(255,255,255,.18)", 1, false, false);
-  line(main, "#46e3f0", 2, false, false);
+  if (!closedLoop && sensor && sensor.length > 1) {
+    path(sensor, py, false);
+    ctx.strokeStyle = "rgba(255,255,255,.16)"; ctx.lineWidth = 1; ctx.stroke();
+  }
+  if (main && main.length > 1) {
+    path(main, py, false);
+    ctx.strokeStyle = "#46e3f0"; ctx.lineWidth = 2; ctx.stroke();
+  }
+
+  if (temps && temps.length > 1) {
+    var scale = (tempTarget === null || tempTarget === undefined) ? temps : temps.concat([tempTarget]);
+    var tmin = Math.min.apply(null, scale), tmax = Math.max.apply(null, scale);
+    if (tmax - tmin < 4) { var mid = (tmax + tmin) / 2; tmin = mid - 2; tmax = mid + 2; }
+    var pad = (tmax - tmin) * 0.12;
+    tmin -= pad; tmax += pad;
+    var ty = function (v) { return bottom - ((v - tmin) / (tmax - tmin)) * span; };
+    if (tempTarget !== null && tempTarget !== undefined) {
+      ctx.setLineDash([4, 5]);
+      ctx.beginPath(); ctx.moveTo(0, ty(tempTarget)); ctx.lineTo(w, ty(tempTarget));
+      ctx.strokeStyle = "rgba(227,154,98,.45)"; ctx.lineWidth = 1.2; ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    phaseMarkers = phaseMarkers.filter(function (m) { return m.age < temps.length; });
+    ctx.strokeStyle = "rgba(70,227,240,.45)";
+    ctx.lineWidth = 1;
+    phaseMarkers.forEach(function (m) {
+      var mx = ((temps.length - 1 - m.age) / (temps.length - 1)) * w;
+      ctx.beginPath(); ctx.moveTo(mx, top); ctx.lineTo(mx, bottom); ctx.stroke();
+    });
+    path(temps, ty, false);
+    ctx.strokeStyle = "#e39a62"; ctx.lineWidth = 2; ctx.stroke();
+    setText("temp_range_label", tmin.toFixed(0) + "\u2013" + tmax.toFixed(0) + " \u00b0C");
+  }
 }
 
 function formatElapsed(ms) {
@@ -1421,6 +1465,58 @@ function applyShotButton(running) {
   btnShot.classList.toggle("blocked", blocked);
 }
 
+// Phase strip for the running shot, from the active profile's phase names;
+// rebuilt only when the profile changes, then just re-classed per poll.
+var phaseStepsFor = "";
+function renderPhaseSteps(json) {
+  var box = document.getElementById("phase_steps");
+  if (!box) return;
+  var prof = null;
+  for (var i = 0; i < profilesCache.length; i++) if (profilesCache[i].name === json.active_profile_name) prof = profilesCache[i];
+  var phases = prof ? prof.phases : [];
+  var key = (prof ? prof.name : "") + "|" + phases.length;
+  if (key !== phaseStepsFor) {
+    phaseStepsFor = key;
+    box.textContent = "";
+    phases.forEach(function (ph, k) {
+      if (k > 0) { var sep = document.createElement("span"); sep.className = "phase-sep"; box.appendChild(sep); }
+      var el = document.createElement("span");
+      el.className = "phase-step";
+      el.textContent = ph.name || ("Phase " + (k + 1));
+      box.appendChild(el);
+    });
+  }
+  var steps = box.querySelectorAll(".phase-step");
+  for (var j = 0; j < steps.length; j++) {
+    steps[j].classList.toggle("done", json.shot_in_progress && j < json.phase_index);
+    steps[j].classList.toggle("current", json.shot_in_progress && j === json.phase_index);
+  }
+}
+
+// -/+ stepper: change the field, then save after a short pause so a few
+// quick taps send one request.
+var stepTimers = {};
+function stepField(inputId, param, delta, min, max) {
+  var el = document.getElementById(inputId);
+  var v = parseFloat(el.value);
+  if (isNaN(v)) return;
+  v = Math.round(Math.max(min, Math.min(max, v + delta)) * 10) / 10;
+  el.value = v;
+  el.dataset.synced = "1";
+  clearTimeout(stepTimers[param]);
+  stepTimers[param] = setTimeout(function () {
+    xhr("/update?" + param + "=" + v, function (status) {
+      var note = document.getElementById(param + "_saved");
+      if (!note) return;
+      note.textContent = status === 200 ? "Saved " + v + "\u00b0" : "Save failed";
+      note.classList.toggle("error", status !== 200);
+      note.classList.add("show");
+      clearTimeout(note._t);
+      note._t = setTimeout(function () { note.classList.remove("show"); }, 2200);
+    });
+  }, 700);
+}
+
 var DIAL_TICKS = 33, shotPeakBar = 0;
 (function buildDialTicks() {
   var g = document.getElementById("dial_ticks");
@@ -1488,9 +1584,8 @@ function applyStatus(json) {
   document.getElementById("target_off").style.display = mode === "off" ? "" : "none";
 
   trackPhaseMarkers(json.phase_index, json.shot_in_progress);
-  drawSparkline(json.history, hasTarget ? target : null);
   var closedLoop = json.press_available === true && !json.pressure_fault;
-  drawPressureChart(json.est_history, json.pressure_history, json.target_history, closedLoop);
+  drawLiveChart(json.history, hasTarget ? target : null, json.est_history, json.pressure_history, json.target_history, closedLoop);
   var pLabel = document.getElementById("pressure_label");
   if (pLabel) {
     pLabel.textContent = json.pressure_fault ? "sensor fault"
@@ -1525,6 +1620,10 @@ function applyStatus(json) {
       else pRing.classList.add("ready");
     }
   }
+  setText("live_press", pressureVal.toFixed(1));
+  setText("live_temp", json.fault ? "--" : temp.toFixed(1));
+  setText("live_pump", pumpPct.toFixed(0));
+  renderPhaseSteps(json);
   if (json.shot_in_progress) {
     if (!prevShotRunning) shotPeakBar = 0;
     shotPeakBar = Math.max(shotPeakBar, pressureVal);
