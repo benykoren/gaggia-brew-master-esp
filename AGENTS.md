@@ -965,21 +965,6 @@ everything again.
   A Hebrew user-facing copy lives in the user's Claude Doc of the same
   subject. Hardware not installed yet.
 
-### 2026-10-15 — Claude Code (Opus 5.5) — Water reserve: "shots left" after the low-water trigger
-- When the tank sensor turns Low, `trackWaterReserve()` (main.cpp, every control
-  tick) records `dimmerGetFiredCycles()`. Water used since then =
-  strokes × `pumpMlPerClick`; remaining = `water_res_ml` − used. All pump use
-  (shots, flush, calibration) goes through the dimmer, so it is all counted.
-  Free-flow ml/stroke overestimates flow under pressure → estimate is conservative.
-- `waterBlocksPumpStart()` now blocks only when remaining < `WATER_SHOT_ML_ESTIMATE`
-  (60 ml) or the reserve is unknown (`water_res_ml` = 0, default = old behaviour).
-  A running shot is never cut. Back to Ok → counter resets.
-- `/status`: `water_reserve_ml`, `water_remaining_ml` (-1 = n/a), `water_shot_ml`.
-  `/update`: `water_reserve_ml` (0-1500, NVS `water_res_ml`).
-- UI: banner "about N shots left (~X ml)", Tank tile "~N shots", Settings field
-  with how to measure the reserve (empty tank, pour measured water until OK).
-- Built by CI at `2a92248`; not flashed yet.
-
 ### 2026-10-15 — Claude Code (Opus 5.5) — Firmware switched to the 0-16 bar pressure sensor on 5V (HLK-PM01) + divider
 
 - User ordered a "G41 1.6Mpa IN5V" (0-16 bar, 5V, 0.5-4.5 V out) to
