@@ -748,7 +748,7 @@ const char *index_html = R"rawliteral(
 
       <div class="card">
         <div class="tab-section-title">Pump pressure PID</div>
-        <p class="hint">Adds a correction from the 0&ndash;16 bar sensor on top of the pump model during pressure phases (falls back to the model alone if the sensor faults).</p>
+        <p class="hint">With a 0&ndash;16 bar sensor fitted, adds a correction from it on top of the pump model during pressure phases (falls back to the model alone if the sensor faults).</p>
         <details class="disclosure">
           <summary>Kp / Ki / Kd</summary>
           <form action="/update" method="GET">
@@ -764,7 +764,7 @@ const char *index_html = R"rawliteral(
 
       <div class="card">
         <div class="tab-section-title">Shot profiles</div>
-        <p class="hint">Tap a profile to use it. Pressure phases are held by the 0&ndash;16 bar sensor; flow phases use the calibrated pump model. Pump trim: + pushes more water (faster shot), &minus; less (slower shot). Adjust grind first.</p>
+        <p class="hint">Tap a profile to use it. With a 0&ndash;16 bar sensor, pressure phases are held by the sensor; otherwise pressure and flow are estimates from the calibrated pump model. Pump trim: + pushes more water (faster shot), &minus; less (slower shot). Adjust grind first.</p>
         <div id="profile_list_body"></div>
       </div>
 
@@ -1736,7 +1736,7 @@ function pollStatus() {
   });
 }
 pollStatus();
-setInterval(pollStatus, 2000);
+setInterval(pollStatus, 1000); // 1 s so tank / mode changes show up promptly
 
 function setMode(mode) {
   applyModeButtons(mode);

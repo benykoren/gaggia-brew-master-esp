@@ -254,3 +254,7 @@ CI: `.github/workflows/build.yml` must pass before any OTA. Check
 - Checked here: the embedded JS passes `node --check`, and the Now and
   Settings screens were rendered in Chromium against a mock `/status` (OK
   and low-water states, plus the refused Start tap).
+
+- **Faster reaction (user request, 2026-10-15):** debounce changed from
+  20 x 100 ms (2 s) to 4 x 50 ms (0.2 s), and the Web UI polls `/status`
+  every 1 s, so a tank change shows within ~1.2 s.

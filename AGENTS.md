@@ -286,7 +286,7 @@ The temp module also needs **3.3V** and **GND** from the DevKit (module is
 - **Web UI:** connect to the ESP's IP or `http://gaggia.local` — Now tab
   shows temp, pressure, mode, shot timer, heater/pump duty, and
   fault/unreachable/brew-switch banners. Tune/History/Settings hold PID,
-  profiles, shot log, and network. Polls `/status` every 2 s.
+  profiles, shot log, and network. Polls `/status` every 1 s (was 2 s until 2026-10-15).
 - **Wi-Fi setup (captive portal):** on first boot it creates an AP
   **`GaggiaPID_Setup`** — join it and enter your home Wi-Fi credentials.
   **`/wifi_reset`** (Web UI "Reset WiFi Settings" button) clears stored
@@ -920,6 +920,18 @@ everything again.
 ---
 
 ## 10. Change Log
+
+### 2026-10-15 — Claude Code (Opus 5.5) — Water sensor reacts in ~0.2 s; pressure sensor model behind one switch
+
+- User wanted the tank state to show immediately. Water debounce cut from
+  20 x 100 ms (2 s) to 4 x 50 ms (0.2 s), and the Web UI now polls
+  `/status` every 1 s instead of 2 s → the UI reflects a change within
+  ~1.2 s worst case.
+- The 0-16 bar pressure settings (previous entry) are now behind
+  `PRESSURE_SENSOR_IS_16BAR` in `config.h` - **0 (the old 0-5 bar part on
+  3V3) until the new sensor is installed**, then flip to 1 and rebuild.
+  This lets the water-sensor build ship now without breaking pressure
+  readings. GPIO1's pull-down follows the switch.
 
 ### 2026-10-15 — Claude Code (Opus 5.5) — Install guide for HLK power, 16-bar sensor and water sensor
 

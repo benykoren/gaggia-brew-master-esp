@@ -119,11 +119,12 @@
 // Design: docs/superpowers/specs/2026-10-15-water-level-sensor-design.md
 // ============================================================================
 #define PIN_WATER_LEVEL 7
-#define WATER_SAMPLE_INTERVAL_MS 100
+#define WATER_SAMPLE_INTERVAL_MS 50
 // The state only flips after this many consistent raw reads in a row
-// (20 x 100 ms = 2 s), so sloshing at pump start or reseating the tank
-// can't flicker the state or block a shot at random.
-#define WATER_DEBOUNCE_SAMPLES 20
+// (4 x 50 ms = 0.2 s): enough to ignore a single noisy read, short enough
+// that the UI reacts as soon as its next /status poll (user asked for an
+// immediate reaction, 2026-10-15; was 20 x 100 ms = 2 s).
+#define WATER_DEBOUNCE_SAMPLES 4
 #define WATER_SENSOR_ENABLED_DEFAULT false // off until the sensor is installed
 #define WATER_ACTIVE_LOW_DEFAULT true      // datasheet: LOW = water present
 #define WATER_INTERLOCK_DEFAULT true       // refuse shot / calibration start on low water
@@ -168,32 +169,38 @@
 #define PUMP_PREINFUSION_POWER_PCT_DEFAULT 40
 
 
+// Which pressure sensor is fitted - flip to 1 when the 0-16 bar part is
+// installed (HARDWARE_ROADMAP.md item 7, docs/install-guide-2026-10-15-*).
+//   0 = 0-0.5 MPa "G41 0.5Mpa IN5V" on 3V3, straight into GPIO1 (installed now)
+//   1 = 0-1.6 MPa "G41 1.6Mpa IN5V" on 5V (HLK-PM01), 4.3k/10k divider into GPIO1
+// Kept as one switch so the water-sensor work could ship while the new
+// pressure sensor is still in the post - flashing the 16-bar settings with
+// the old part fitted reads below zero and faults.
+#define PRESSURE_SENSOR_IS_16BAR 0
+
 // Pressure transducer calibration - linear mapping from ADC millivolts to
 // bar: bar = (mv - PRESSURE_SENSOR_ZERO_MV) / PRESSURE_SENSOR_MV_PER_BAR.
-//
-// Sensor (2026-10-15): **0-1.6 MPa (0-16 bar), 5V supply** ("G41 1.6Mpa
-// IN5V"), 0.5-4.5 V output. Powered from a real 5V rail (HLK-PM01, which
-// also feeds the DevKit's 5V pin - HARDWARE_ROADMAP.md item 7), with a
-// divider into GPIO1 so the ADC never sees more than ~3.15 V:
-//   signal -- 4.3k -- GPIO1 -- 10k -- GND     ratio 10 / 14.3 = 0.699
-//   0 bar  : 0.5 V x 0.699 = ~350 mV
-//   16 bar : 4.5 V x 0.699 = ~3147 mV          (0.25 V/bar x 0.699 = ~175 mV/bar)
-// Both values are NOMINAL (datasheet + resistor values) until calibrated on
-// the machine: ZERO_MV from pressure_mv with the pump off, MV_PER_BAR from a
-// known reference (the 16-bar safety-valve plateau, or a gauge).
-// The previous 0-5 bar part on 3V3 used ZERO 158 / 290 mV/bar / MAX 5 and
-// closed loop off - flashing THIS build with that old sensor still fitted
-// reads below zero -> pressure fault, so swap the sensor first.
+#if PRESSURE_SENSOR_IS_16BAR
+// 0-16 bar on 5V, 0.5-4.5 V out, divider ratio 10 / 14.3 = 0.699:
+//   0 bar ~350 mV, 16 bar ~3147 mV, ~175 mV/bar. NOMINAL (datasheet +
+//   resistor values) until calibrated: ZERO_MV from pressure_mv with the
+//   pump off, MV_PER_BAR from a reference (safety-valve plateau or a gauge).
 #define PRESSURE_SENSOR_ZERO_MV 350.0f
 #define PRESSURE_SENSOR_MV_PER_BAR 175.0f
-// Rated full scale - readings are clamped here and the plausibility window
-// is derived from it.
 #define PRESSURE_SENSOR_MAX_BAR 16.0f
-// Closed-loop pressure control: in pressure phases the pressure PID adds a
-// +/- PUMP_PRESSURE_PID_TRIM_PCT trim on top of the pump-model duty, so a
-// profile's 9 bar target is held by the real reading. Falls back to the
-// pure model automatically whenever the sensor is faulted.
+// Closed loop: in pressure phases the pressure PID adds a +/-
+// PUMP_PRESSURE_PID_TRIM_PCT trim on the pump-model duty; falls back to the
+// pure model whenever the sensor is faulted.
 #define PRESSURE_CLOSED_LOOP_AVAILABLE true
+#else
+// 0-5 bar on 3V3 (2026-10-01): zero measured 155-160 mV; the output clips at
+// ~1620-1640 mV (supply headroom), MV_PER_BAR is an estimate assuming that
+// ceiling is ~full scale. Below brew pressure, so no closed loop.
+#define PRESSURE_SENSOR_ZERO_MV 158.0f
+#define PRESSURE_SENSOR_MV_PER_BAR 290.0f
+#define PRESSURE_SENSOR_MAX_BAR 5.0f
+#define PRESSURE_CLOSED_LOOP_AVAILABLE false
+#endif
 
 // ============================================================================
 // Open-loop pump model (design spec 2026-10-02 §4.1)

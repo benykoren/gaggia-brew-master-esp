@@ -105,9 +105,9 @@ Then unplug, connect the divider midpoint to GPIO1, insulate, plug back in.
 2. Heater 0%, temperature not rising.
 3. Water sensor (already enabled in Settings): full tank → "Tank OK" within
    ~2 s; tank out → "Low water". Live reading in Settings → Water tank sensor.
-4. OTA the 16-bar firmware (`feature/water-level-sensor`, commit `ae25c04`
-   or later). **Not before the new sensor is fitted** - with the old 5-bar
-   part it reads below zero and faults.
+4. Set `PRESSURE_SENSOR_IS_16BAR` to `1` in `include/config.h`, build, and
+   OTA. **Not before the new sensor is fitted** - with the old 5-bar part the
+   16-bar settings read below zero and fault.
 5. Zero: `pressure_mv` with the pump stopped should be ~350 mV; set
    `PRESSURE_SENSOR_ZERO_MV` from the real value.
 6. Pressure test: very fine coffee, heater off, 5-10 s run while watching the
