@@ -410,6 +410,12 @@ screws so the sensing face is in flat, full contact with the tank wall.
   inverts it.
 - Rated to 80°C: keep it on the tank, away from the boiler and steam path.
 
+**Sensing face (found on the machine, 2026-10-15):** only ONE face senses.
+With the other face against the tank it read HIGH (no water) through a full
+tank while still reacting to a finger. Flipped, it read a steady LOW (water)
+- 30/30 samples. A finger near the sensor reads as water too, so test
+hands-off.
+
 **Mounting:** at the "low water" height on the tank's side or back wall,
 flat against the plastic. Capacitive sensing is sensitive to the gap - the
 face must actually touch the tank when it's seated (a small foam pad or

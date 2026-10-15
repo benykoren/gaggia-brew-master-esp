@@ -921,6 +921,14 @@ everything again.
 
 ## 10. Change Log
 
+### 2026-10-15 — Claude Code (Opus 5.5) — Water sensor working on the machine (sensing face)
+
+- Wired (3V3 / GND / GPIO7) and tested live: against a full tank it first
+  read HIGH (no water) while reacting to a finger - the wrong face was on
+  the tank. Flipped, it reads a steady LOW = water (30/30 samples over
+  9 s) → "Tank OK". Noted in HARDWARE_ROADMAP item 6 and the install guide.
+  Still to do: permanent mounting, and a check with the tank removed / low.
+
 ### 2026-10-15 — Claude Code (Opus 5.5) — Reverted the fast water debounce (back to 2 s) and 2 s UI polling
 
 - User: the 0.2 s / 1 s-poll version "doesn't work well" - asked to go back.

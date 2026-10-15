@@ -80,6 +80,9 @@ the SSR only conducts when GPIO4 drives it.
 - The white JST plug does not fit the DevKit headers: male Dupont pins into
   it (then fix it), or cut it and solder to female Dupont leads (most
   reliable).
+- **Only one face senses** - if it reads "no water" against a full tank but
+  reacts to a finger, flip it (verified on the machine 2026-10-15). Test
+  hands-off: a finger reads as water.
 - Outside the tank wall at the "low" height, face flat against the plastic
   when the tank is seated; a foam pad on the chassis side keeps it pressed.
   Away from boiler and steam (rated 80 °C).
