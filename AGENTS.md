@@ -965,6 +965,25 @@ everything again.
   A Hebrew user-facing copy lives in the user's Claude Doc of the same
   subject. Hardware not installed yet.
 
+### 2026-10-15 — Claude Code (Opus 5.5) — Web UI redesign: two sections, combined dial, tablet layout
+- Frontend-only (`src/web.cpp` index_html); same /status, /update, /shots, /profiles API.
+- Tabs Now/Tune/History/Settings → **Brew** + **Settings**. Phone: bottom tab bar;
+  ≥900 px wide (the user's landscape tablet): left rail, two-column Brew view,
+  master/detail Settings.
+- Brew: one dial (outer copper arc = boiler temp 20-100 °C, 20-160 in Steam,
+  lit ticks, target triangle; inner cyan arc = pressure 0-12 bar with peak dot),
+  profile chips with mini profile charts, shot card, 2-min charts (canvases now
+  sized from CSS × devicePixelRatio), **Last shot** card with one-tap
+  Sour/Balanced/Bitter (saved via shot_note_*; bean/dose/grind form behind a link).
+  While a shot runs (`.app.shooting`) nav, mode switch, chips and last shot hide.
+- Removed from the UI: History table + shot-trend chart, Heater %/Pump % tiles,
+  the duplicate Tank tile. Settings sections: Brewing (temps, profiles, tweak with
+  scale/trim folded), Power & schedule (slot 1 shown, 2-3 under "More times"),
+  Maintenance (descale), Advanced (collapsed: PID/auto-tune/steam ceiling,
+  pressure PID, pump calibration, water sensor, Wi-Fi/OTA, MQTT, backup).
+- Old `#tune`/`#history` links map to Settings > Brewing / Brew. No external fonts
+  (system stack), ES5 JS kept.
+
 ### 2026-10-15 — Claude Code (Opus 5.5) — Firmware switched to the 0-16 bar pressure sensor on 5V (HLK-PM01) + divider
 
 - User ordered a "G41 1.6Mpa IN5V" (0-16 bar, 5V, 0.5-4.5 V out) to
