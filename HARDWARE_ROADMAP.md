@@ -375,24 +375,40 @@ needed pogo-pin contacts at the tank bay. This sensor can stay fixed to the
 chassis with its face pressed against the tank wall, and the wire never
 moves.
 
+**Datasheet (from the seller's listing, 2026-10-15):**
+
+| Parameter | Min | Typical | Max |
+|---|---|---|---|
+| Supply voltage Vs | 3.3 V | 5 V | 5.2 V |
+| Supply current (no load) | 0.8 mA | 1.5 mA | 3 mA |
+| Output, **no water** | | **= Vs (HIGH)** | |
+| Output, **water present** | | **0 V (LOW)** | |
+| Output sink / source current | 8 / 3.75 mA | 16 / 7.5 mA | |
+| Operating temperature | -40 °C | | 80 °C |
+
+Push-pull output, **active-LOW for "water present"**. Wire colors per the
+listing: **red = VCC, black = GND, yellow = signal**. Mount with tape or
+screws so the sensing face is in flat, full contact with the tank wall.
+
 **Wire (planned):**
 
 | Sensor wire | ESP32-S3 |
 |---|---|
-| VCC | **3V3** (same rail as the temp module, pressure sensor and dimmer logic) |
-| GND | **GND** |
-| OUT | **GPIO7** (`PIN_WATER_LEVEL`, to add in `config.h`) |
+| Red (VCC) | **3V3** (same rail as the temp module, pressure sensor and dimmer logic) |
+| Black (GND) | **GND** |
+| Yellow (OUT) | **GPIO7** (`PIN_WATER_LEVEL`, to add in `config.h`) |
 
-- Powered from 3V3, so OUT can never exceed 3.3V - safe straight into a
-  GPIO, no divider. (The board's 5V pin is input-only on USB power anyway -
-  see item 7.)
-- Wire colors on these modules vary by seller - confirm VCC/GND/OUT from
-  the listing or the PCB silkscreen before connecting.
-- Use `INPUT_PULLUP` in firmware - harmless with a push-pull output and
-  required if this unit turns out to be open-collector.
-- Output polarity (HIGH = water or LOW = water) also varies: check it on
-  the bench with the tank full vs. empty before writing the logic, and keep
-  it as a `config.h` constant.
+- Powered from 3V3, OUT swings 0-3.3V - safe straight into a GPIO, no
+  divider.
+- **Caveat:** 3.3V is the sensor's *minimum* supply, and this board's 3V3
+  rail measured 3.26V (see item 7). Bench-test it on 3V3 first. If it's
+  flaky, power it from the USB wall-wart's 5V directly (the DevKit's own
+  5V pin doesn't output on USB power) and add a divider on OUT so the
+  GPIO never sees more than ~3.3V (e.g. 10k series + 20k to GND -> 3.33V).
+- Firmware default: `INPUT_PULLUP`, LOW = water, HIGH = low water. Keep
+  the polarity a persisted setting anyway, in case a different batch
+  inverts it.
+- Rated to 80°C: keep it on the tank, away from the boiler and steam path.
 
 **Mounting:** at the "low water" height on the tank's side or back wall,
 flat against the plastic. Capacitive sensing is sensitive to the gap - the

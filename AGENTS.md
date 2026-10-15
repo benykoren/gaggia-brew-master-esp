@@ -60,7 +60,7 @@ README.
 | Boiler thermostats (factory) | Brew **95°C** / Steam **127°C**, both Gaggia `US-622AXTDNO` | T2 (steam, 127°C) is the one reused as the mains-wiring overheat cutoff — see Section 7 |
 | Pump | ULKA **EP5/S GW**, 230V-50Hz (Gaggia P/N `12000140`) | Vibration pump, factory spec |
 | Boiler safety valve | **16 bar** discharge rating (factory) | Relevant ceiling for roadmap item 7's pressure transducer range |
-| Water level sensor (bought 2026-10-15, not yet installed) | **Non-contact capacitive liquid level switch, 3.3-5V**, 3-wire JST lead, screw-mount tabs (AliExpress "3.3V-5V Non Contact Water Level Sensor") | Planned on **GPIO7**, powered from 3V3 - see roadmap item 6. Replaces the float-switch plan |
+| Water level sensor (bought 2026-10-15, not yet installed) | **Non-contact capacitive liquid level switch, 3.3-5V**, 3-wire JST lead, screw-mount tabs (AliExpress "3.3V-5V Non Contact Water Level Sensor"); red VCC / black GND / yellow OUT, OUT LOW = water present, 1.5 mA, 3.3-5.2 V | Planned on **GPIO7**, powered from 3V3 (its minimum - bench-test first) - see roadmap item 6. Replaces the float-switch plan |
 
 **Official OEM reference documents** (added 2026-08-30, user-supplied — this
 project's exact machine, "New Espresso 06 / Pure & Color"): electrical
