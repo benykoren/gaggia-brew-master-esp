@@ -871,9 +871,6 @@ everything again.
   removal of the "Water (est.)" tile). **Blocked:** the firmware on the
   machine (build Oct 2 12:47) contains local changes not on GitHub - must
   be pushed before implementing, or an OTA from `main` would drop them.
-- **Android 4.4 tablet support dropped** (user decision). The Web UI only
-  needs to work in modern browsers; the old-engine compatibility rules from
-  the 2026-09-15 Web UI redesign spec no longer apply.
 
 ### 2026-10-15 — Claude Code (Opus 5.5) — Fix: auto-off stopped working after the first auto-sleep
 
