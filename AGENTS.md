@@ -932,7 +932,12 @@ everything again.
   mode change, Settings → Power → "Water tank sensor" card with a live GPIO7
   reading.
 - Details and decisions: `docs/superpowers/specs/2026-10-15-water-level-sensor-design.md` §7.
-- **Not flashed or bench-tested yet.** CI build only.
+- **Flashed via OTA 2026-10-15 ~17:46** (CI build `ca1545c`, fw_build
+  "Oct 15 2026 14:42:59" - CI clock is UTC). Pre-checks: Off, no shot, pump
+  0%, no calibration/autotune. After reboot: Off, `water_state` "disabled",
+  `auto_sleeping` false, "Heater off" caption shown, no stuck sleep banner.
+  Sensor not installed yet; the Steam auto-off check and the bench test
+  plan (spec §5) are still to do.
 
 ### 2026-10-15 — Claude Code (Opus 5.5) — Water level sensor chosen: non-contact capacitive, planned on GPIO7
 
