@@ -864,6 +864,13 @@ everything again.
   float switch + pogo-pin plan, since this one mounts outside the tank.
 - GPIO7 picked because it's free, not a strapping/flash/PSRAM/USB pin,
   and sits next to GPIO6 on the DevKitC-1 J1 header.
+- Full backend + frontend design approved and written up in
+  `docs/superpowers/specs/2026-10-15-water-level-sensor-design.md`
+  (debounced `water_level` module, shot-start interlock, `/status` +
+  `/update` + MQTT/HA fields, Now-tab chip/banner/tile, Settings card,
+  removal of the "Water (est.)" tile). **Blocked:** the firmware on the
+  machine (build Oct 2 12:47) contains local changes not on GitHub - must
+  be pushed before implementing, or an OTA from `main` would drop them.
 
 ### 2026-10-15 — Claude Code (Opus 5.5) — Fix: auto-off stopped working after the first auto-sleep
 
