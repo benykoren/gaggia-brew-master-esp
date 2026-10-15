@@ -258,3 +258,5 @@ CI: `.github/workflows/build.yml` must pass before any OTA. Check
 - **Faster reaction (user request, 2026-10-15):** debounce changed from
   20 x 100 ms (2 s) to 4 x 50 ms (0.2 s), and the Web UI polls `/status`
   every 1 s, so a tank change shows within ~1.2 s.
+- **Reverted the same evening** at the user's request: back to 20 x 100 ms
+  (2 s) and 2 s polling.

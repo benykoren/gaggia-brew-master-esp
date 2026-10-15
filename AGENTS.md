@@ -286,7 +286,7 @@ The temp module also needs **3.3V** and **GND** from the DevKit (module is
 - **Web UI:** connect to the ESP's IP or `http://gaggia.local` — Now tab
   shows temp, pressure, mode, shot timer, heater/pump duty, and
   fault/unreachable/brew-switch banners. Tune/History/Settings hold PID,
-  profiles, shot log, and network. Polls `/status` every 1 s (was 2 s until 2026-10-15).
+  profiles, shot log, and network. Polls `/status` every 2 s.
 - **Wi-Fi setup (captive portal):** on first boot it creates an AP
   **`GaggiaPID_Setup`** — join it and enter your home Wi-Fi credentials.
   **`/wifi_reset`** (Web UI "Reset WiFi Settings" button) clears stored
@@ -920,6 +920,12 @@ everything again.
 ---
 
 ## 10. Change Log
+
+### 2026-10-15 — Claude Code (Opus 5.5) — Reverted the fast water debounce (back to 2 s) and 2 s UI polling
+
+- User: the 0.2 s / 1 s-poll version "doesn't work well" - asked to go back.
+  Water debounce is 20 x 100 ms (2 s) again and the Web UI polls every 2 s.
+  `PRESSURE_SENSOR_IS_16BAR` stays at 0 (unchanged - the old 5-bar settings).
 
 ### 2026-10-15 — Claude Code (Opus 5.5) — Water sensor reacts in ~0.2 s; pressure sensor model behind one switch
 

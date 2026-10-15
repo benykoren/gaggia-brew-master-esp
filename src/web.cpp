@@ -1736,7 +1736,7 @@ function pollStatus() {
   });
 }
 pollStatus();
-setInterval(pollStatus, 1000); // 1 s so tank / mode changes show up promptly
+setInterval(pollStatus, 2000);
 
 function setMode(mode) {
   applyModeButtons(mode);

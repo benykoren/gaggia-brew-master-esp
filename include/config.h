@@ -119,12 +119,12 @@
 // Design: docs/superpowers/specs/2026-10-15-water-level-sensor-design.md
 // ============================================================================
 #define PIN_WATER_LEVEL 7
-#define WATER_SAMPLE_INTERVAL_MS 50
+#define WATER_SAMPLE_INTERVAL_MS 100
 // The state only flips after this many consistent raw reads in a row
-// (4 x 50 ms = 0.2 s): enough to ignore a single noisy read, short enough
-// that the UI reacts as soon as its next /status poll (user asked for an
-// immediate reaction, 2026-10-15; was 20 x 100 ms = 2 s).
-#define WATER_DEBOUNCE_SAMPLES 4
+// (20 x 100 ms = 2 s), so sloshing at pump start or reseating the tank
+// can't flicker the state or block a shot at random. (A 4 x 50 ms = 0.2 s
+// version was tried on 2026-10-15 and reverted at the user's request.)
+#define WATER_DEBOUNCE_SAMPLES 20
 #define WATER_SENSOR_ENABLED_DEFAULT false // off until the sensor is installed
 #define WATER_ACTIVE_LOW_DEFAULT true      // datasheet: LOW = water present
 #define WATER_INTERLOCK_DEFAULT true       // refuse shot / calibration start on low water
