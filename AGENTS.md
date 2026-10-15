@@ -192,6 +192,9 @@ The temp module also needs **3.3V** and **GND** from the DevKit (module is
   which restores `modeBeforeSleep` and resets the activity timer).
 - Autotune (below) is exempt from eco-sleep while running — they don't fight
   each other.
+- Any switch INTO `BREW`/`STEAM` through `setOpMode()` (mode button, MQTT,
+  scheduled warm-up, wake) clears `autoSleeping` and resets the activity
+  timer, so each new session gets a fresh auto-off window (fix 2026-10-15).
 
 ### PID Autotune (relay feedback / Ziegler-Nichols)
 - Hand-built in `main.cpp` (`AutotuneState` enum in `config.h`) — no external
@@ -847,6 +850,23 @@ everything again.
 ---
 
 ## 10. Change Log
+
+### 2026-10-15 — Claude Code (Opus 5.5) — Fix: auto-off stopped working after the first auto-sleep
+
+- **Bug (seen live):** the machine sat on Steam at 120°C for a long time
+  even though Steam auto-off is 2 min. `/status` showed
+  `auto_sleeping: true` while the mode had been Steam.
+- **Cause:** after an auto-sleep, `autoSleeping` was only cleared by the
+  "Wake Up" button (`wakeFromSleep()`) or autotune. Turning the machine
+  back on with the Brew/Steam button (or MQTT / a scheduled warm-up) left
+  it `true`, and `checkEcoSleep()` returns early while `autoSleeping` is
+  set - so auto-off never fired again until a reboot.
+- **Fix:** `setOpMode()` now clears `autoSleeping` and calls
+  `noteActivity()` whenever it switches into Brew or Steam. The second part
+  also stops a scheduled warm-up from being put to sleep immediately (its
+  `lastActivityTime` could be hours old).
+- Not compiled or flashed here (no PlatformIO in the session) - needs a
+  build + OTA by the user.
 
 ### 2026-10-01 — Claude Code (Opus 5.5) — Pre-infusion back to profile pulses; pressure fill gated off for the 5-bar sensor
 

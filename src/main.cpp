@@ -104,8 +104,22 @@ void refreshActiveProfileIfChanged() {
   if (currentMode != OpMode::OFF) applyActiveProfile();
 }
 
+extern bool autoSleeping;   // defined in the Eco / auto-sleep block below
+void noteActivity();
+
 void setOpMode(OpMode newMode) {
   currentMode = newMode;
+
+  // Any switch INTO Brew/Steam (Web UI button, MQTT, scheduled warm-up,
+  // wake) starts a fresh eco/steam auto-off window. Without this, turning
+  // the machine back on with the Brew/Steam button after an auto-sleep left
+  // autoSleeping stuck at true, so checkEcoSleep() bailed out forever and
+  // the machine never auto-switched off again until a reboot. It also stops
+  // a scheduled warm-up from being put to sleep the instant it fires.
+  if (newMode != OpMode::OFF) {
+    autoSleeping = false;
+    noteActivity();
+  }
 
   if (newMode == OpMode::OFF) {
     myPID.SetMode(MANUAL);
