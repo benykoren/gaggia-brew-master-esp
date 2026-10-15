@@ -926,6 +926,10 @@ everything again.
 - User: the 0.2 s / 1 s-poll version "doesn't work well" - asked to go back.
   Water debounce is 20 x 100 ms (2 s) again and the Web UI polls every 2 s.
   `PRESSURE_SENSOR_IS_16BAR` stays at 0 (unchanged - the old 5-bar settings).
+- **Flashed via OTA ~22:50** (CI `fbbbdb6`, fw_build "Oct 15 2026
+  19:47:31" UTC). Pre-checks: Off, no shot, pump 0%. After reboot: 5-bar
+  pressure settings (158 mV, no fault); water sensor enabled, raw pin HIGH
+  (= no water detected) - still to be checked against the real tank.
 
 ### 2026-10-15 — Claude Code (Opus 5.5) — Water sensor reacts in ~0.2 s; pressure sensor model behind one switch
 
