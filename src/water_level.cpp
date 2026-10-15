@@ -50,16 +50,16 @@ void waterLevelTick(unsigned long now) {
 }
 
 WaterState waterLevelState() {
-  if (!enabled) return WaterState::DISABLED;
-  return waterPresent ? WaterState::OK : WaterState::LOW_WATER;
+  if (!enabled) return WaterState::Disabled;
+  return waterPresent ? WaterState::Ok : WaterState::Low;
 }
 
 bool waterLevelRawHigh() { return rawHigh; }
 
 const char *waterStateName(WaterState s) {
   switch (s) {
-    case WaterState::OK: return "ok";
-    case WaterState::LOW_WATER: return "low";
+    case WaterState::Ok: return "ok";
+    case WaterState::Low: return "low";
     default: return "disabled";
   }
 }

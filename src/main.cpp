@@ -560,7 +560,7 @@ unsigned long shotBlockedAtMillis = 0;
 
 bool waterBlocksPumpStart() {
   return waterSensorEnabled && waterInterlock &&
-         waterLevelState() == WaterState::LOW_WATER;
+         waterLevelState() == WaterState::Low;
 }
 
 void applyWaterSettings() { waterLevelConfigure(waterSensorEnabled, waterActiveLow); }

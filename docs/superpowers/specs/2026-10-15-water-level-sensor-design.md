@@ -49,7 +49,7 @@ Same shape as `pressure_sensor.*`/`temp_sensor.*`: a small module with no
 web or MQTT knowledge.
 
 ```cpp
-enum class WaterState : uint8_t { DISABLED, OK, LOW };
+enum class WaterState : uint8_t { Disabled, Ok, Low };
 
 void waterLevelInit();                 // pinMode(PIN_WATER_LEVEL, INPUT_PULLUP)
 void waterLevelTick(unsigned long now);// sample + debounce, called from controlTick()
@@ -232,8 +232,8 @@ CI: `.github/workflows/build.yml` must pass before any OTA. Check
 
 - Built on `wip/local` (the code actually running on the machine), not
   `main`.
-- The enum value is `WaterState::LOW_WATER`, not `LOW`: `LOW` is an
-  Arduino macro.
+- The enum is `WaterState::{Disabled, Ok, Low}` (CamelCase): `DISABLED`
+  and `LOW` are Arduino core macros and broke the first build.
 - The interlock also refuses a **pump calibration run** on low water (it
   runs the pump at 100% for 10 s), through the same `waterBlocksPumpStart()`.
 - A refused shot start returns **409 + reason** from `/update` (the existing

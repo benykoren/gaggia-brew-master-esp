@@ -10,7 +10,8 @@
 // or reseating the tank never flickers the state. No web/MQTT knowledge
 // here - main.cpp owns the settings and the shot interlock.
 
-enum class WaterState : uint8_t { DISABLED, OK, LOW_WATER };
+// CamelCase on purpose: DISABLED, OK-style and LOW are Arduino core macros.
+enum class WaterState : uint8_t { Disabled, Ok, Low };
 
 void waterLevelInit();
 
@@ -21,7 +22,7 @@ void waterLevelConfigure(bool enabled, bool activeLow);
 // Call every control tick; samples at WATER_SAMPLE_INTERVAL_MS.
 void waterLevelTick(unsigned long now);
 
-// Debounced state. DISABLED when the sensor is switched off in Settings.
+// Debounced state. Disabled when the sensor is switched off in Settings.
 WaterState waterLevelState();
 
 // Raw pin level from the most recent sample (true = HIGH), regardless of
