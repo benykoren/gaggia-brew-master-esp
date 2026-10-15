@@ -62,8 +62,6 @@ extern void startShot();
 extern void stopShot();
 extern bool waterSensorEnabled, waterActiveLow, waterInterlock;
 extern void applyWaterSettings();
-extern unsigned long waterReserveMl;
-extern float waterRemainingMl();
 extern const char *shotBlockedReason;
 extern unsigned long shotBlockedAtMillis;
 extern ShotPhase currentShotPhase;
@@ -900,14 +898,6 @@ const char *index_html = R"rawliteral(
           </select>
         </div>
         <label class="check-row"><input type="checkbox" id="input_water_interlock" onchange="setWater('water_interlock', this.checked ? 1 : 0)"> Pause shots on low water</label>
-        <form action="/update" method="GET" style="margin-top:var(--sp-3)">
-          <div class="field">
-            <label for="input_water_reserve">Water left below the sensor (ml, 0 = pause shots as soon as it reads low)</label>
-            <input type="number" step="10" min="0" max="1500" name="water_reserve_ml" id="input_water_reserve" value="">
-          </div>
-          <button type="submit" class="submit">Save</button>
-        </form>
-        <p class="hint">Measure it once: empty the tank, then pour in water from a measuring jug until the live reading switches to "water detected". That amount is what is left when it reads low. Shots then keep going until about one shot's worth (~60 ml) remains.</p>
         <div class="water-live"><span>Live reading &middot; GPIO7</span><b id="water_live">--</b></div>
         <p class="hint" style="margin-top:var(--sp-3)">Mount the sensor flat against the outside of the tank at the "low" height (red 3V3, black GND, yellow GPIO7). Check it with the tank full, empty and removed - a removed tank reads as no water. A running shot always finishes; the heater is never affected.</p>
       </div>
@@ -1510,7 +1500,7 @@ function applyModeButtons(mode) {
 
 function applyShotButton(running) {
   var btnShot = document.getElementById("btn_shot");
-  var blocked = !running && waterBlocked;
+  var blocked = !running && waterLow && waterInterlockOn;
   btnShot.textContent = running ? "Stop Shot" : blocked ? "Refill to brew" : "Start Shot";
   btnShot.classList.toggle("running", running);
   btnShot.classList.toggle("blocked", blocked);
@@ -1778,7 +1768,7 @@ function stopAutotune() {
 // the sensor is enabled AND reads low; with the interlock on, Start is
 // replaced by "Refill to brew" (still tappable, explains itself).
 // ============================================================================
-var waterLow = false, waterInterlockOn = true, waterBlocked = false, shotBlockMsgTimer = null;
+var waterLow = false, waterInterlockOn = true, shotBlockMsgTimer = null;
 
 function applyWaterStatus(json, mode) {
   if (typeof json.water_state !== "string") return;
@@ -1791,22 +1781,10 @@ function applyWaterStatus(json, mode) {
   setText("tank_pill_text", waterLow ? "Low water" : "Tank OK");
   var tile = document.getElementById("tank_tile");
   tile.className = "stat-tile tank" + (en ? (waterLow ? " low" : " ok") : "");
-  // Reserve known: how many shots are left before the interlock kicks in.
-  var rem = typeof json.water_remaining_ml === "number" ? json.water_remaining_ml : -1;
-  var shotMl = json.water_shot_ml || 60;
-  var shotsLeft = rem >= 0 ? Math.floor(rem / shotMl) : -1;
-  waterBlocked = waterLow && waterInterlockOn && (rem < 0 || rem < shotMl);
-  setText("tank_value", !waterLow ? "OK" : shotsLeft > 0 ? "~" + shotsLeft + (shotsLeft === 1 ? " shot" : " shots") : "Low");
-  var bannerText;
-  if (waterLow && shotsLeft > 0) {
-    bannerText = "Water is getting low: about " + shotsLeft + (shotsLeft === 1 ? " shot" : " shots") + " left (~" + Math.round(rem) + " ml). Refill soon.";
-  } else if (waterLow && !waterInterlockOn) {
-    bannerText = "Water tank is low. Refill it soon.";
-  } else {
-    bannerText = "Refill the water tank. New shots are paused until it's back.";
-  }
-  showBanner("water_banner", waterLow, bannerText);
-  setVal("input_water_reserve", json.water_reserve_ml);
+  setText("tank_value", waterLow ? "Low" : "OK");
+  showBanner("water_banner", waterLow, waterLow && !waterInterlockOn
+    ? "Water tank is low. Refill it soon."
+    : "Refill the water tank. New shots are paused until it's back.");
   if (!waterLow) hideShotBlockMsg();
   applyShotButton(shotRunning);
 
@@ -1843,7 +1821,7 @@ function hideShotBlockMsg() {
 
 function toggleShot() {
   var next = !shotRunning;
-  if (next && waterBlocked) {
+  if (next && waterLow && waterInterlockOn) {
     showShotBlockMsg("Tank is low. Refill, then tap again.");
     return;
   }
@@ -2397,8 +2375,6 @@ static void handleStatus(AsyncWebServerRequest *request) {
   bool snapWaterInterlock = waterInterlock;
   WaterState snapWaterState = waterLevelState();
   bool snapWaterRawHigh = waterLevelRawHigh();
-  unsigned long snapWaterReserve = waterReserveMl;
-  float snapWaterRemaining = waterRemainingMl();
   String snapShotBlocked =
       (shotBlockedReason[0] && (long)(millis() - shotBlockedAtMillis) < SHOT_BLOCKED_REPORT_MS)
           ? shotBlockedReason : "";
@@ -2543,9 +2519,6 @@ static void handleStatus(AsyncWebServerRequest *request) {
   json += ",\"water_active_low\":" + String(snapWaterActiveLow ? "true" : "false");
   json += ",\"water_interlock\":" + String(snapWaterInterlock ? "true" : "false");
   json += ",\"shot_blocked\":\"" + snapShotBlocked + "\"";
-  json += ",\"water_reserve_ml\":" + String(snapWaterReserve);
-  json += ",\"water_remaining_ml\":" + String(snapWaterRemaining, 0);
-  json += ",\"water_shot_ml\":" + String(WATER_SHOT_ML_ESTIMATE, 0);
 
   json += ",\"sched\":[";
   for (int i = 0; i < SCHED_MAX_COUNT; i++) {
@@ -2722,10 +2695,6 @@ static void handleUpdate(AsyncWebServerRequest *request) {
     waterActiveLow = arg("water_active_low") == "1";
     preferences.putBool("water_low_act", waterActiveLow);
     waterSettingsChanged = true;
-  }
-  if (hasArg("water_reserve_ml")) {
-    waterReserveMl = constrain(arg("water_reserve_ml").toInt(), 0, WATER_RESERVE_ML_MAX);
-    preferences.putULong("water_res_ml", waterReserveMl);
   }
   if (hasArg("water_interlock")) {
     waterInterlock = arg("water_interlock") == "1";

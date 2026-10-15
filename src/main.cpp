@@ -558,36 +558,9 @@ bool waterInterlock = WATER_INTERLOCK_DEFAULT;
 const char *shotBlockedReason = "";
 unsigned long shotBlockedAtMillis = 0;
 
-// Reserve tracking: once the tank reads Low, every pump stroke the dimmer
-// fires (shots, flushes, calibration - all pump use goes through it) is
-// counted at the calibrated ml/stroke. The free-flow ml/stroke OVERestimates
-// flow under brew pressure, so the remaining estimate errs on the safe side.
-unsigned long waterReserveMl = WATER_RESERVE_ML_DEFAULT; // NVS water_res_ml
-static bool waterWasLow = false;
-static uint32_t waterLowStartCycles = 0;
-
-float waterUsedSinceLowMl() {
-  if (!waterWasLow) return 0.0f;
-  return (float)(dimmerGetFiredCycles() - waterLowStartCycles) * pumpMlPerClick;
-}
-
-// -1 = not applicable (sensor off, tank OK, or reserve unknown).
-float waterRemainingMl() {
-  if (waterLevelState() != WaterState::Low || waterReserveMl == 0) return -1.0f;
-  float rem = (float)waterReserveMl - waterUsedSinceLowMl();
-  return rem > 0.0f ? rem : 0.0f;
-}
-
-static void trackWaterReserve() {
-  bool low = waterLevelState() == WaterState::Low;
-  if (low && !waterWasLow) waterLowStartCycles = dimmerGetFiredCycles();
-  waterWasLow = low;
-}
-
 bool waterBlocksPumpStart() {
-  if (!(waterSensorEnabled && waterInterlock && waterLevelState() == WaterState::Low)) return false;
-  float rem = waterRemainingMl();
-  return rem < 0.0f || rem < WATER_SHOT_ML_ESTIMATE; // unknown reserve, or not enough for a shot
+  return waterSensorEnabled && waterInterlock &&
+         waterLevelState() == WaterState::Low;
 }
 
 void applyWaterSettings() { waterLevelConfigure(waterSensorEnabled, waterActiveLow); }
@@ -791,7 +764,6 @@ void setup() {
   waterSensorEnabled = preferences.getBool("water_en", WATER_SENSOR_ENABLED_DEFAULT);
   waterActiveLow = preferences.getBool("water_low_act", WATER_ACTIVE_LOW_DEFAULT);
   waterInterlock = preferences.getBool("water_lock", WATER_INTERLOCK_DEFAULT);
-  waterReserveMl = preferences.getULong("water_res_ml", WATER_RESERVE_ML_DEFAULT);
   preferences.end();
   applyWaterSettings();
 
@@ -1082,7 +1054,6 @@ static void controlTick(unsigned long now) {
 
   // Water tank level (debounced; drives the shot-start interlock above).
   waterLevelTick(now);
-  trackWaterReserve();
 
   // Scheduled warm-up (see config.h) - minute-granularity, so checking once a
   // second is more than enough and avoids a redundant time()/gmtime_r() call
