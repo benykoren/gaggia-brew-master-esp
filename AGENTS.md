@@ -369,6 +369,11 @@ $pio = "C:\Users\benny.koren\Desktop\esp32esso\.venv\Scripts\pio.exe"
    small, recurring, unsupervised risk rather than a one-off. **Do not
    silently re-add this as a blocker without checking whether the user has
    changed their mind.**
+   **Re-confirmed 2026-10-15** for the planned HLK-PM01 power: with the ESP32
+   fed from the machine's own mains, the boot window now coincides with
+   every plug-in / mains glitch (heater mains present at the same moment).
+   User was told and explicitly accepts the short boot pulse - no
+   pull-down.
 2. **ESP32 power source — external USB wall-wart (reverted 2026-08-14,
    was internal HLK-PM01 2026-08-01→2026-08-14).** User decided against the
    HLK-PM01 integration. Power the ESP32 the same way as on the bench: a
