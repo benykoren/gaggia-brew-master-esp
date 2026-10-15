@@ -60,6 +60,7 @@ README.
 | Boiler thermostats (factory) | Brew **95°C** / Steam **127°C**, both Gaggia `US-622AXTDNO` | T2 (steam, 127°C) is the one reused as the mains-wiring overheat cutoff — see Section 7 |
 | Pump | ULKA **EP5/S GW**, 230V-50Hz (Gaggia P/N `12000140`) | Vibration pump, factory spec |
 | Boiler safety valve | **16 bar** discharge rating (factory) | Relevant ceiling for roadmap item 7's pressure transducer range |
+| Water level sensor (bought 2026-10-15, not yet installed) | **Non-contact capacitive liquid level switch, 3.3-5V**, 3-wire JST lead, screw-mount tabs (AliExpress "3.3V-5V Non Contact Water Level Sensor") | Planned on **GPIO7**, powered from 3V3 - see roadmap item 6. Replaces the float-switch plan |
 
 **Official OEM reference documents** (added 2026-08-30, user-supplied — this
 project's exact machine, "New Espresso 06 / Pure & Color"): electrical
@@ -91,6 +92,7 @@ pins (USB `GPIO19/20`, flash `GPIO26-32`, OPI PSRAM `GPIO33-37`, strapping
 | Pressure transducer analog in (ADC1_CH0, pull-down) | **1** |
 | Temp module UART RX (ESP receives, module TX) | **18** |
 | Temp module UART TX (ESP sends, module RX) | **17** |
+| *Planned:* water level sensor OUT (digital in) | **7** (not in firmware yet) |
 
 The temp module also needs **3.3V** and **GND** from the DevKit (module is
 5V-rated but works powered from 3V3 — see Section 9 change log for why).
@@ -689,14 +691,14 @@ everything again.
    pump at a target weight still needs item 8's active pump control.
 
 6. **Water tank level sensor.**
-   **Hardware:** one magnetic float switch (~$2-5), one free GPIO (digital
-   input, internal pull-up). **The tank is removable, not fixed** - the
-   Gaggia Espresso Color's water tank lifts out to refill, so a float
-   switch mounted inside it needs a connection that survives repeated
-   removal, not a bare soldered wire. Standard fix: spring-loaded contacts
-   (pogo pins) at the tank bay, mating with the tank's underside when
-   seated - the wire stays fixed to the chassis, only the contact tips
-   separate. Full reasoning in `HARDWARE_ROADMAP.md` item 6.
+   **Hardware (bought 2026-10-15):** a **non-contact capacitive** liquid
+   level switch (3.3-5V, 3 wires: VCC / GND / OUT), mounted on the
+   *outside* of the tank wall. It senses water through the plastic, so
+   nothing goes inside the tank and the removable-tank problem (pogo pins
+   for a float switch) goes away - the sensor can stay fixed to the
+   chassis, pressed against the tank wall when it's seated. Wiring:
+   VCC -> 3V3, GND -> GND, OUT -> **GPIO7**. Full detail in
+   `HARDWARE_ROADMAP.md` item 6.
    **Why:** low-water warning now; becomes a real pump interlock once
    item 8 (pump on/off + phase control, folded former item 4's role) exists.
 
@@ -853,6 +855,15 @@ everything again.
 ---
 
 ## 10. Change Log
+
+### 2026-10-15 — Claude Code (Opus 5.5) — Water level sensor chosen: non-contact capacitive, planned on GPIO7
+
+- User bought a 3.3-5V non-contact capacitive liquid level switch
+  (3-wire). Docs updated: hardware table, pin map (GPIO7 reserved,
+  firmware not written yet), roadmap item 6 in both files. Replaces the
+  float switch + pogo-pin plan, since this one mounts outside the tank.
+- GPIO7 picked because it's free, not a strapping/flash/PSRAM/USB pin,
+  and sits next to GPIO6 on the DevKitC-1 J1 header.
 
 ### 2026-10-15 — Claude Code (Opus 5.5) — Fix: auto-off stopped working after the first auto-sleep
 
