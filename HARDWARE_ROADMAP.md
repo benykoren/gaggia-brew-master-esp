@@ -356,36 +356,55 @@ service. No GPIO/wiring at all.
 
 ## Item 6 — Water tank level sensor
 
-**Status:** not started. **Depends on:** nothing. (Originally "item 5.")
+**Status:** sensor bought 2026-10-15, not installed; no firmware yet.
+**Depends on:** nothing. (Originally "item 5.")
 
 **What it's for:** low-water warning now; becomes a real pump interlock
-once item 8 (pump on/off + phase control, folded former item 4) exists.
+(refuse/stop a shot on low water) now that item 8's pump control exists.
 
-**Buy:**
+**Part (bought):**
 
 | Part | Spec | Cost |
 |---|---|---|
-| Magnetic float switch | Normally-open or normally-closed (either works, just flip the logic in firmware) | ~$2-5 |
+| Non-contact capacitive liquid level switch | 3.3-5V supply, 3 wires (VCC / GND / OUT) on a JST plug, screw-mount tabs, digital output | ~₪6 (AliExpress) |
 
-**The tank is removable, not fixed — this affects the wiring.** The Gaggia
-Espresso Color's water tank lifts out to refill, so a float switch mounted
-inside it needs a connection that survives being pulled out and reseated
-repeatedly. A bare wire soldered to the switch would mean disconnecting/
-reconnecting by hand every refill — the same nuisance as item 10's milk
-probe. The standard fix: **spring-loaded contacts (pogo pins) at the bottom
-of the tank bay**, mating with a corresponding contact on the tank's
-underside when it's seated. The wire then stays fixed to the machine
-chassis permanently; only the contact tips touch/separate as the tank goes
-in and out, no manual plugging involved. Choose contacts rated for
-corrosion resistance given the proximity to water.
+**Why this instead of the float switch planned earlier:** it senses water
+*through* the tank's plastic wall, so nothing goes inside the tank. The
+Gaggia Espresso Color's tank lifts out to refill; a float switch would have
+needed pogo-pin contacts at the tank bay. This sensor can stay fixed to the
+chassis with its face pressed against the tank wall, and the wire never
+moves.
 
-**Wire:** one free GPIO (digital input, internal pull-up enabled in
-firmware — `INPUT_PULLUP`), other switch leg → GND, routed through the
-pogo-pin contacts above. No external resistor needed.
+**Wire (planned):**
 
-**Firmware:** debounce the same way the temperature sensor's fault handling
-already does (see `AGENTS.md` §9 change log) — float switches chatter
-mechanically, don't trust a single read.
+| Sensor wire | ESP32-S3 |
+|---|---|
+| VCC | **3V3** (same rail as the temp module, pressure sensor and dimmer logic) |
+| GND | **GND** |
+| OUT | **GPIO7** (`PIN_WATER_LEVEL`, to add in `config.h`) |
+
+- Powered from 3V3, so OUT can never exceed 3.3V - safe straight into a
+  GPIO, no divider. (The board's 5V pin is input-only on USB power anyway -
+  see item 7.)
+- Wire colors on these modules vary by seller - confirm VCC/GND/OUT from
+  the listing or the PCB silkscreen before connecting.
+- Use `INPUT_PULLUP` in firmware - harmless with a push-pull output and
+  required if this unit turns out to be open-collector.
+- Output polarity (HIGH = water or LOW = water) also varies: check it on
+  the bench with the tank full vs. empty before writing the logic, and keep
+  it as a `config.h` constant.
+
+**Mounting:** at the "low water" height on the tank's side or back wall,
+flat against the plastic. Capacitive sensing is sensitive to the gap - the
+face must actually touch the tank when it's seated (a small foam pad or
+spring bracket on the chassis side helps). Keep it away from the boiler's
+heat and from metal right behind it. Test with the tank in and out:
+seated-and-full, seated-and-empty, and tank removed (which should read as
+"no water" - correct behavior for an interlock).
+
+**Firmware (to do):** debounce like the temp sensor's fault window (several
+consistent reads before changing state); show it in `/status` and the Web
+UI; then block shot start / stop the pump on low water.
 
 ---
 
