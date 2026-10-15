@@ -152,9 +152,11 @@ estimate. To confirm when reading the `wip/local` code.
 
 ## 4. Frontend (embedded Web UI in `src/web.cpp`)
 
-Constraints from the 2026-09-15 redesign spec still apply: one embedded
-string, no external assets, Android 4.4 tablet Firefox as the baseline
-(no `inset` shorthand; keep syntax conservative).
+Still one embedded string with no external assets. **The Android 4.4
+tablet is no longer a target** (user, 2026-10-15: dropped, the UI runs in a
+modern web browser), so the old ~2016-engine syntax baseline from the
+2026-09-15 redesign spec no longer applies. Modern evergreen JS/CSS is
+fine.
 
 ### 4.1 Now tab
 
@@ -213,7 +215,7 @@ Bench (USB only, mains off, per AGENTS.md §6):
 8. Reboot with the tank full: no false "Low water" at boot.
 9. MQTT on: `water_state` in `gaggia/status`; the HA `binary_sensor`
    appears only when enabled.
-10. Android 4.4 tablet: Now and Settings render and work.
+10. Desktop and phone browsers: Now and Settings render and work.
 
 CI: `.github/workflows/build.yml` must pass before any OTA. Check
 `shot_in_progress` is false before flashing.
