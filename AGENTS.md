@@ -203,8 +203,8 @@ The temp module also needs **3.3V** and **GND** from the DevKit (module is
   types: `pressure` (bar), `flow` (ml/s), `power` (% duty), `soak` (pump off);
   each has a curve/ramp, optional limit, a hard `duration_s`, and optional
   `press_gte`/`press_lte` stops (only honored when the pressure sensor is usable).
-- **6 built-ins** (flash, undeletable): Classic 9 bar, Londinium, Lever, IUIUIU
-  Classic, Blooming, Flush (Flush is a utility: no temp, not logged; utility
+- **5 built-ins** (flash, undeletable; set revised 2026-10-15): Classic 9 bar,
+  Lever (Londinium-style declining), Blooming, Turbo, Flush (Flush is a utility: no temp, not logged; utility
   profiles may have up to 10 phases). No Backflush: this machine has no 3-way valve. Per profile: **Tweak** (temp 80-100 C, `max_sec`,
   `pressure_scale` 0.7-1.1, `trim_pct` +-20; stored as overrides for built-ins),
   **Copy**, **Rename**, **Delete** (user profiles only, max 8), **Reset**
@@ -964,6 +964,19 @@ everything again.
   [`docs/install-guide-2026-10-15-hlk-pressure-water.md`](docs/install-guide-2026-10-15-hlk-pressure-water.md).
   A Hebrew user-facing copy lives in the user's Claude Doc of the same
   subject. Hardware not installed yet.
+
+### 2026-10-15 — Claude Code (Opus 5.5) — Built-in profiles revised to four distinct styles + Flush
+- Researched (Decent profile guide, Cameron/Hendon "Systematically Improving
+  Espresso" Matter 2020 turbo shot, home-barista pressure-profiling threads).
+- `src/profile_codec.cpp` BUILTIN_PROFILES_JSON now: **Classic 9 bar** (unchanged,
+  daily/medium), **Lever** (Londinium-style: fill to 3 bar, 8 s soak, 9 bar 5 s,
+  decline to 4 bar over 18 s, 92 C; medium-dark), **Blooming** (fill, 25 s bloom,
+  rise to 8 bar, decline to 6 bar, 94 C; light roasts), **Turbo** (6 bar, ~20 s,
+  92 C, coarser grind, 1:2.5-3; light-medium), **Flush**.
+- Removed: Londinium (merged into Lever), old Lever (88 C - use Tweak on Lever for
+  dark roasts), IUIUIU Classic (its flow phases need a real flow measurement).
+  An active profile that no longer exists falls back to Classic 9 bar (main.cpp);
+  stored overrides for removed names are ignored.
 
 ### 2026-10-15 — Claude Code (Opus 5.5) — Web UI redesign: two sections, combined dial, tablet layout
 - Frontend-only (`src/web.cpp` index_html); same /status, /update, /shots, /profiles API.

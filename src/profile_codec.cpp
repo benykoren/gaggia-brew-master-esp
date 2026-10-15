@@ -6,8 +6,10 @@
 #include <string.h>
 
 // ============================================================================
-// Built-in profiles (design spec 2026-10-02 §3.3) - translated from
-// Gaggiuino/GaggiMate defaults so every phase also exits on its own
+// Built-in profiles (design spec 2026-10-02 §3.3; set revised 2026-10-15 to
+// four distinct styles + Flush: Classic flat 9 bar, Lever = Londinium-style
+// declining, Blooming = long soak for light roasts, Turbo = 6 bar fast shot
+// after Cameron/Hendon et al., Matter 2020). Every phase also exits on its own
 // duration_s (no usable sensor yet). Pressure/flow values are model targets
 // (pump_model.cpp), not measurements. "stop" conditions only apply once a
 // 0-16 bar sensor is fitted (PRESSURE_CLOSED_LOOP_AVAILABLE).
@@ -17,28 +19,21 @@ static const char BUILTIN_PROFILES_JSON[] = R"json([
  {"name":"Fill","type":"flow","target":4,"limit":4,"duration_s":6,"stop":{"press_gte":4}},
  {"name":"Ramp","type":"pressure","target":9,"curve":"linear","ramp_s":3,"duration_s":3},
  {"name":"Hold","type":"pressure","target":9,"duration_s":26}]},
-{"name":"Londinium","temp":92,"max_sec":45,"phases":[
- {"name":"Fill","type":"flow","target":6,"limit":4,"duration_s":8,"stop":{"press_gte":4}},
- {"name":"Soak","type":"soak","duration_s":10},
- {"name":"Rise","type":"pressure","target":9,"curve":"ease-out","ramp_s":2,"duration_s":2},
- {"name":"Hold","type":"pressure","target":9,"limit":3,"duration_s":4},
- {"name":"Decline","type":"pressure","target":3,"limit":3,"curve":"linear","ramp_s":20,"duration_s":20}]},
-{"name":"Lever","temp":88,"max_sec":50,"phases":[
- {"name":"Pre-infuse","type":"pressure","target":1.5,"duration_s":8},
- {"name":"Hold","type":"pressure","target":1.5,"duration_s":7},
- {"name":"Rise","type":"pressure","target":9,"curve":"ease-in-out","ramp_s":8,"duration_s":8},
- {"name":"Decline","type":"pressure","target":3,"curve":"linear","ramp_s":25,"duration_s":25}]},
-{"name":"IUIUIU Classic","temp":93,"max_sec":45,"phases":[
- {"name":"Pre-infuse","type":"flow","target":3,"limit":4,"duration_s":10,"stop":{"press_gte":4}},
+{"name":"Lever","temp":92,"max_sec":45,"phases":[
+ {"name":"Fill","type":"flow","target":6,"limit":3,"duration_s":8,"stop":{"press_gte":3}},
  {"name":"Soak","type":"soak","duration_s":8},
- {"name":"Rise","type":"pressure","target":7.5,"curve":"ease-out","ramp_s":5,"duration_s":5},
- {"name":"Ease","type":"pressure","target":6,"limit":3,"curve":"ease-in-out","ramp_s":4,"duration_s":4},
- {"name":"Flow","type":"flow","target":1,"start":2.5,"limit":6,"curve":"ease-in-out","ramp_s":15,"duration_s":15}]},
-{"name":"Blooming","temp":93,"max_sec":55,"phases":[
+ {"name":"Rise","type":"pressure","target":9,"curve":"ease-out","ramp_s":2,"duration_s":2},
+ {"name":"Hold","type":"pressure","target":9,"limit":3,"duration_s":5},
+ {"name":"Decline","type":"pressure","target":4,"limit":3,"curve":"linear","ramp_s":18,"duration_s":18}]},
+{"name":"Blooming","temp":94,"max_sec":60,"phases":[
  {"name":"Fill","type":"flow","target":4,"limit":4,"duration_s":8,"stop":{"press_gte":4}},
  {"name":"Bloom","type":"soak","duration_s":25},
- {"name":"Ramp","type":"flow","target":2,"limit":6,"curve":"ease-out","ramp_s":5,"duration_s":5},
- {"name":"Flow","type":"flow","target":2,"limit":6,"duration_s":15}]},
+ {"name":"Rise","type":"pressure","target":8,"curve":"ease-out","ramp_s":4,"duration_s":4},
+ {"name":"Decline","type":"pressure","target":6,"curve":"linear","ramp_s":18,"duration_s":18}]},
+{"name":"Turbo","temp":92,"max_sec":25,"phases":[
+ {"name":"Fill","type":"flow","target":4,"limit":3,"duration_s":4,"stop":{"press_gte":2}},
+ {"name":"Rise","type":"pressure","target":6,"curve":"ease-out","ramp_s":2,"duration_s":2},
+ {"name":"Hold","type":"pressure","target":6,"duration_s":14}]},
 {"name":"Flush","utility":true,"temp":0,"max_sec":10,"phases":[
  {"name":"Flush","type":"power","target":100,"duration_s":5}]}
 ])json";
