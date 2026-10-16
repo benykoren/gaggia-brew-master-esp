@@ -120,7 +120,7 @@ const char *index_html = R"rawliteral(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0e0b09">
+  <meta name="theme-color" content="#0e0f11">
   <link rel="manifest" href="/manifest.json">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/icon.svg">
@@ -129,457 +129,496 @@ const char *index_html = R"rawliteral(
   <meta name="apple-mobile-web-app-title" content="BrewMaster">
   <title>GaggiaBrewMasterESP</title>
   <style>
+    /* ---- Tokens (2026-10-15 redesign: matte charcoal, copper = heat,
+       cyan = pressure/water, white = primary data). ---- */
     :root {
-      --bg: #0e0b09;
-      --bg-grad: radial-gradient(1400px 700px at 50% -14%, #241a13 0%, #0e0b09 55%);
-      --surface: #1a1512;
-      --surface-2: #221b16;
-      --elevated: #2a221c;
-      --border: #392e26;
-      --border-soft: #2a221c;
-      --text: #f6efe6;
-      --text-muted: #b3a294;
-      --text-faint: #7d7166;
-
-      --primary: #d98c3f;
-      --primary-deep: #b06a2c;
-      --primary-light: #f2b46f;
-      --accent: #4fa3d8;
-      --success: #48b583;
-      --danger: #e5544b;
-      --warning: #e0a13a;
-      --info: #4fa3d8;
-
-      /* Aliases so existing rules keep working while new rules use roles. */
-      --text-dim: var(--text-muted);
-      --copper: var(--primary);
-      --copper-deep: var(--primary-deep);
-      --copper-light: var(--primary-light);
-      --steam: var(--accent);
-      --green: var(--success);
-      --red: var(--danger);
-      --amber: var(--warning);
-
-      --radius-sm: 8px;
-      --radius-md: 12px;
-      --radius-lg: 16px;
-      --radius-full: 999px;
-
-      --shadow-sm: none;
-      --shadow-md: none;
-
-      --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px;
-      --ease: cubic-bezier(.22,.7,.32,1);
-
-      --fs-caption: 11px;
-      --fs-label: 12.5px;
-      --fs-body: 15px;
-      --fs-title: 17px;
-      --fs-1: var(--fs-caption); --fs-2: var(--fs-caption); --fs-3: 11.5px;
-      --fs-4: 12px; --fs-5: var(--fs-label); --fs-6: 13px;
-      --fs-7: 14px; --fs-8: 14.5px; --fs-9: var(--fs-body);
-      --fs-10: var(--fs-title); --fs-11: 19px; --fs-12: 21px; --fs-13: 22px;
+      --bg: #0e0f11;
+      --surface: rgba(255,255,255,.035);
+      --surface-2: rgba(255,255,255,.06);
+      --border: rgba(255,255,255,.07);
+      --border-soft: rgba(255,255,255,.05);
+      --border-strong: rgba(255,255,255,.12);
+      --text: #f5f5f3;
+      --text-2: #a1a4a8;
+      --text-dim: #80838a;
+      --copper: #e39a62;
+      --copper-deep: #d98c55;
+      --copper-ink: #1c0f06;
+      --cyan: #46e3f0;
+      --danger: #f0716a;
+      --warn: #e8b04b;
+      --ok: #5fd39a;
+      --radius: 22px;
+      --radius-sm: 14px;
+      --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-8: 32px;
+      --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }
     * { box-sizing: border-box; }
-    html, body { margin: 0; }
-    /* Visible, on-brand focus ring for keyboard/switch navigation. Plain
-       :focus first (works everywhere, including the Android 4.4 tablet's
-       browser), then :focus-visible narrows it to keyboard focus only on
-       browsers that support that distinction (~2020+) - an unsupported
-       browser just never matches the second rule and keeps the safe
-       plain-:focus outline on every focus, including touch/click. */
-    :focus { outline: 2px solid var(--copper-light); outline-offset: 2px; }
-    :focus:not(:focus-visible) { outline: none; }
-    :focus-visible { outline: 2px solid var(--copper-light); outline-offset: 2px; }
+    html, body { margin: 0; background: var(--bg); color: var(--text); }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      background: var(--bg-grad), var(--bg);
-      color: var(--text);
-      min-height: 100vh;
-      -webkit-font-smoothing: antialiased;
+      font-family: var(--font); font-size: 15px; line-height: 1.4;
+      -webkit-font-smoothing: antialiased; -webkit-text-size-adjust: 100%;
+      font-variant-numeric: tabular-nums;
     }
-    .app { max-width: 720px; margin: 0 auto; padding: var(--sp-5) var(--sp-4) calc(96px + env(safe-area-inset-bottom)); }
+    a { color: var(--text); }
+    button, input, select { font-family: inherit; }
+    :focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+    [hidden] { display: none !important; }
+    @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 
-    @media (prefers-reduced-motion: reduce) {
-      *, *::before, *::after {
-        animation-duration: 0.01ms !important;
-        animation-iteration-count: 1 !important;
-        transition-duration: 0.01ms !important;
-        scroll-behavior: auto !important;
-      }
-    }
-    .topbar {
-      position: sticky; top: 0; z-index: 20;
-      display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3);
-      margin: calc(var(--sp-5) * -1) calc(var(--sp-4) * -1) var(--sp-4);
-      padding: var(--sp-5) var(--sp-4) var(--sp-4);
-      background: var(--bg);
-    }
-    .brand { display: flex; align-items: center; gap: var(--sp-3); }
-    .logo {
-      width: 40px; height: 40px; border-radius: var(--radius-md); flex: none;
-      background: var(--primary); color: #1a1206;
-      display: grid; place-items: center; font-size: var(--fs-13);
-    }
-    .brand-text h1 { font-size: var(--fs-10); margin: 0; letter-spacing: .2px; }
-    .brand-text small { display: block; color: var(--text-dim); font-size: var(--fs-3); font-weight: 500; }
-    .brand-status { text-align: right; }
+    .label { font-size: 11px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; color: var(--text-dim); }
+    .hint { color: var(--text-2); font-size: 13px; line-height: 1.5; margin: var(--sp-2) 0 0; }
+    .hint-link { display: inline-block; margin-top: var(--sp-3); color: var(--text-2); font-size: 13px; }
 
-    .pill {
-      display: inline-flex; align-items: center; gap: var(--sp-2);
-      padding: 7px 13px; border-radius: var(--radius-full); font-size: var(--fs-5); font-weight: 700;
-      background: var(--surface); border: 1px solid var(--border);
-    }
-    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); }
-    .pill.brew .dot { background: var(--green); box-shadow: 0 0 0 4px rgba(72,181,131,.18); animation: pulse-dot 2s var(--ease) infinite; }
-    .pill.steam .dot { background: var(--steam); box-shadow: 0 0 0 4px rgba(79,163,216,.18); animation: pulse-dot 2s var(--ease) infinite; }
-    .pill.fault { border-color: rgba(229,84,75,.5); }
-    .pill.fault .dot { background: var(--red); box-shadow: 0 0 0 4px rgba(229,84,75,.2); animation: pulse-dot 1.1s var(--ease) infinite; }
-    @keyframes pulse-dot { 0%,100% { opacity: 1 } 50% { opacity: .45 } }
-    .last-updated { font-size: var(--fs-1); color: var(--text-dim); margin-top: 5px; }
-    /* Water tank chip (water_level.cpp) - sits left of the mode pill. Amber,
-       not red, when low: red stays reserved for safety faults. */
-    .status-row { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-2); }
-    .pill.tank { display: none; font-weight: 700; }
-    .pill.tank.ok { display: inline-flex; color: #bfe6d3; border-color: rgba(72,181,131,.45); }
-    .pill.tank.low { display: inline-flex; color: #f3dcc2; border-color: rgba(224,161,58,.6); background: rgba(224,161,58,.12); }
-    .tank-icon { width: 9px; height: 12px; border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%; background: currentColor; opacity: .85; }
-
-    .alerts { display: flex; flex-direction: column; gap: var(--sp-2); margin-bottom: var(--sp-4); }
-    .banner {
-      display: none; align-items: center; justify-content: space-between; gap: var(--sp-3);
-      padding: 11px 15px; border-radius: var(--radius-md); font-size: var(--fs-6); font-weight: 700;
-    }
-    .banner-error { background: rgba(229,84,75,.14); border: 1px solid rgba(229,84,75,.4); color: #f3c6c2; }
-    .banner-info { background: rgba(79,163,216,.14); border: 1px solid rgba(79,163,216,.4); color: #cfe8f7; }
-    .banner-warn { background: rgba(224,161,58,.14); border: 1px solid rgba(224,161,58,.4); color: #f3dcc2; }
-    .app.degraded .gauge-value, .app.degraded .shot-time, .app.degraded .stat-value { opacity: .55; }
-    .sr-only {
-      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-      overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
-    }
-    .btn-chip {
-      border: 1px solid var(--steam); background: var(--steam); color: #071824;
-      padding: 6px 13px; border-radius: var(--radius-sm); font-size: var(--fs-4); font-weight: 700; cursor: pointer; flex: none;
-    }
-
-    .card {
-      background: var(--surface);
-      border: 1px solid var(--border-soft); border-radius: var(--radius-lg);
-      padding: var(--sp-5); margin-bottom: var(--sp-4);
-    }
-
-    .hero-card { text-align: center; }
-    /* Two gauges side by side (temp, pressure) - sized smaller than a
-       single full-width gauge would be, so both fit on a phone screen. */
-    .gauge-row { display: flex; justify-content: center; align-items: flex-start; gap: var(--sp-4); flex-wrap: wrap; margin-bottom: var(--sp-3); }
-    .gauge-col { display: flex; flex-direction: column; align-items: center; }
-    .gauge-wrap { position: relative; width: clamp(130px, 38vw, 170px); height: clamp(130px, 38vw, 170px); margin: 0 auto var(--sp-2); }
-    .gauge { width: 100%; height: 100%; transform: rotate(-90deg); }
-    .gauge-track { fill: none; stroke: var(--border); stroke-width: 14; }
-    .gauge-fill { fill: none; stroke: var(--text-faint); stroke-width: 14; stroke-linecap: round; transition: stroke-dashoffset .6s var(--ease), stroke .4s ease; }
-    /* Ring color is a functional signal, not decoration: blue while still
-       climbing to target, green once at/near it (readable without parsing
-       the number - also covers a shot's temperature sag, which is just
-       "below target" again), red once over. */
-    .gauge-fill.heating { stroke: var(--accent); }
-    .gauge-fill.ready { stroke: var(--success); }
-    .gauge-fill.over { stroke: var(--danger); }
-    /* Pressure ring reuses the same heating/ready/over classes as the temp
-       ring above - fill amount is a fixed 0-16 bar scale (this machine's
-       safety-valve rating, a real manometer reading), but color answers a
-       different question: not "% of scale" (9 bar brew target would only
-       ever show ~56% full and never look "done"), but "how close to the
-       9 bar brew target, while a shot is actually running." Grey/idle the
-       rest of the time, same as the temp ring with no active target. */
-    /* The number is the ONLY thing centered against this box, which exactly
-       covers the ring (inset: 0 on .gauge-wrap) - so its flex centering
-       lands on the ring's true geometric midpoint regardless of viewport
-       size. The "Target XX C" caption used to live inside this same box,
-       stacked under the number - that made flex/grid center the *pair* as a
-       group instead of the number alone, which visibly dragged the number
-       upward off the ring's actual center. It now lives outside, below the
-       ring, in normal document flow (see .gauge-target). */
-    .gauge-center { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: flex; align-items: center; justify-content: center; }
-    .gauge-value { display: flex; align-items: baseline; justify-content: center; font-size: clamp(2rem, 8vw, 2.8rem); font-weight: 800; line-height: 1; letter-spacing: -1px; font-variant-numeric: tabular-nums; }
-    .gauge-unit { font-size: clamp(0.8rem, 2.6vw, 1rem); color: var(--text-dim); font-weight: 600; margin-left: 3px; }
-    .gauge-target { color: var(--text-dim); margin: 0; font-size: var(--fs-7); }
-    .gauge-target b { color: var(--text); }
-
-    .mode-switch { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--sp-3); margin: var(--sp-4) 0; }
-    .mode-btn {
-      border: 1px solid var(--border); color: var(--text); background: var(--surface);
-      padding: 15px 10px; border-radius: var(--radius-md); font-size: var(--fs-9); font-weight: 700;
-      cursor: pointer; min-height: 52px;
-      transition: transform .05s ease, background .15s ease, border-color .15s ease, color .15s ease;
-    }
-    .mode-btn:active { transform: translateY(1px); }
-    .mode-off.active { background: var(--red); border-color: var(--red); color: #1a0d0c; }
-    .mode-brew.active { background: var(--green); border-color: var(--green); color: #0d1a13; }
-    .mode-steam.active { background: var(--steam); border-color: var(--steam); color: #071824; }
-
-    /* Generic small-metric tile - reused today for Heater Output; the same
-       component is meant for future roadmap readouts (pump pressure, water
-       level, scale weight) without any layout changes - just add another
-       .stat-tile and the auto-fit grid reflows. */
-    .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--sp-3); margin-top: var(--sp-4); text-align: left; }
-    .stat-tile { background: var(--surface); border: 1px solid var(--border-soft); border-radius: var(--radius-md); padding: 13px 14px; }
-    .stat-label { display: block; font-size: var(--fs-2); color: var(--text-dim); text-transform: uppercase; letter-spacing: .6px; font-weight: 700; margin-bottom: 6px; }
-    .stat-value { font-size: var(--fs-12); font-weight: 800; font-variant-numeric: tabular-nums; }
-    .stat-value small { font-size: var(--fs-6); color: var(--text-dim); font-weight: 600; margin-left: 2px; }
-
-    .bar { height: 9px; border-radius: var(--radius-full); background: #100d0b; border: 1px solid var(--border-soft); overflow: hidden; margin-top: 9px; }
-    .bar > span { display: block; height: 100%; width: 0%; border-radius: var(--radius-full); transition: width .5s ease; }
-    .bar.heat > span { background: var(--primary); }
-    .bar.pump > span { background: var(--accent); }
-
-    /* Generic chart card - reused today for the temp sparkline; a future
-       pressure graph (roadmap item 7) is meant to drop in as a second
-       .chart-card with its own canvas id, same label/legend pattern. */
-    .chart-card { margin-top: var(--sp-4); text-align: left; }
-    .chart-card canvas { width: 100%; height: 60px; display: block; }
-    .chart-label { display: flex; justify-content: space-between; font-size: var(--fs-2); color: var(--text-dim); margin-bottom: 6px; }
-
-    .shot-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); }
-    .shot-time { font-size: clamp(2.6rem, 13vw, 4rem); font-weight: 800; font-variant-numeric: tabular-nums; color: var(--text-dim); line-height: 1; transition: color .2s ease; }
-    .shot-time.in-window { color: var(--green); }
-    .shot-time.over { color: var(--red); }
-    .shot-sub { font-size: var(--fs-4); color: var(--text-dim); margin-top: 4px; }
-    .btn-shot {
-      border: 1px solid rgba(72,181,131,.4); cursor: pointer; padding: 15px 22px; border-radius: var(--radius-md);
-      font-size: var(--fs-7); font-weight: 700; color: #cdeede; background: rgba(72,181,131,.14); flex: none;
-      transition: transform .05s ease, background .15s ease;
-    }
-    .btn-shot:active { transform: translateY(1px); }
-    .btn-shot.running { background: var(--red); border-color: var(--red); color: #1a0d0c; }
-    .btn-shot.blocked { background: rgba(224,161,58,.14); border-color: rgba(224,161,58,.55); color: #f3dcc2; }
-    .shot-block-msg { display: none; font-size: var(--fs-4); color: var(--amber); text-align: right; margin-top: var(--sp-2); }
-    .shot-block-msg.show { display: block; }
-    .stat-tile.tank { display: none; }
-    .stat-tile.tank.ok, .stat-tile.tank.low { display: block; }
-    .stat-tile.tank.ok .stat-value { color: var(--green); }
-    .stat-tile.tank.low { border-color: rgba(224,161,58,.55); }
-    .stat-tile.tank.low .stat-value { color: var(--amber); }
-    .water-live { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-3); margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--border-soft); font-size: var(--fs-5); }
-    .water-live b.ok { color: var(--green); }
-    .water-live b.low { color: var(--amber); }
-    .shot-progress { height: 7px; border-radius: var(--radius-full); background: #100d0b; border: 1px solid var(--border-soft); overflow: hidden; margin-top: var(--sp-4); }
-    .shot-progress > span { display: block; height: 100%; width: 0%; border-radius: var(--radius-full); background: var(--text-faint); transition: width .4s linear, background .3s ease; }
-    .shot-progress > span.in-window { background: var(--green); }
-    .shot-progress > span.over { background: var(--red); }
-
-    /* Flex-wrap, not a fixed grid - profile count is dynamic (1-PROFILE_MAX_COUNT),
-       unlike the old fixed 3-button preset row this replaced. */
-    .preset-row { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-4); }
-    .btn-preset {
-      border: 1px solid var(--border); cursor: pointer; padding: 10px 14px; border-radius: var(--radius-full);
-      font-size: var(--fs-5); font-weight: 700; color: var(--text-dim); background: var(--surface);
-      transition: transform .05s ease, border-color .15s ease, color .15s ease;
-    }
-    .btn-preset:active { transform: translateY(1px); }
-    .btn-preset.active { color: var(--copper-light); border-color: var(--copper); background: rgba(217,140,63,.12); }
-
-    .btn-autotune {
-      width: 100%; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: var(--sp-2);
-      padding: 15px 16px; border-radius: var(--radius-md); font-size: var(--fs-8); font-weight: 700;
-      color: var(--primary-light); background: transparent; border: 1px solid var(--primary);
-      transition: transform .05s ease, opacity .15s ease, background .15s ease, color .15s ease;
-    }
-    .btn-autotune:active:not(:disabled) { transform: translateY(1px); }
-    .btn-autotune:disabled { opacity: .4; cursor: default; }
-    .btn-autotune.running { background: var(--danger); border-color: var(--danger); color: #1a0d0c; }
-    .autotune-status { display: block; margin-top: var(--sp-3); font-size: var(--fs-5); color: var(--text-dim); text-align: center; }
-
-    .tab-section-title { font-size: var(--fs-4); font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: var(--sp-3); }
-    .tab-section-title.mt { margin-top: var(--sp-5); }
-    .group-title {
-      font-size: var(--fs-caption); font-weight: 700; color: var(--text-faint);
-      text-transform: uppercase; letter-spacing: 1px; margin: var(--sp-5) 0 var(--sp-3);
-    }
-    .group-title:first-child { margin-top: 0; }
-    .disclosure {
-      border: 1px solid var(--border-soft); border-radius: var(--radius-md);
-      padding: 0 var(--sp-4) var(--sp-4); margin: var(--sp-4) 0 0; background: var(--elevated);
-    }
-    .disclosure > summary {
-      cursor: pointer; font-size: var(--fs-label); font-weight: 700; color: var(--text-muted);
-      padding: var(--sp-4) 0; list-style: none;
-    }
-    .disclosure > summary::-webkit-details-marker { display: none; }
-    .disclosure > summary::after {
-      content: "Show"; float: right; color: var(--primary); font-weight: 600;
-    }
-    .disclosure[open] > summary::after { content: "Hide"; }
-    .hint { font-size: var(--fs-4); color: var(--text-dim); margin: 0 0 var(--sp-3); line-height: 1.5; }
-    .hint-link { display: inline-block; margin-top: var(--sp-3); font-size: var(--fs-6); color: var(--copper); text-decoration: none; font-weight: 600; }
-
-    label { display: block; font-size: var(--fs-4); color: var(--text-dim); margin-bottom: 6px; font-weight: 600; }
-    .field { margin-bottom: var(--sp-3); }
-    input {
-      width: 100%; padding: 12px 13px; border-radius: var(--radius-sm); font-size: var(--fs-9);
-      background: #100d0b; border: 1px solid var(--border); color: var(--text);
-      outline: none; transition: border-color .15s ease, box-shadow .15s ease;
-    }
-    input:focus { border-color: var(--copper); box-shadow: 0 0 0 3px rgba(217,140,63,.18); }
-    .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
-    .field-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--sp-3); }
-    .check-row { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-7); color: var(--text); cursor: pointer; }
-    .sched-slot { padding: var(--sp-3) 0; border-bottom: 1px solid var(--border-soft); }
-    .sched-slot:first-child { padding-top: 0; }
-    .sched-slot .field-row { margin-top: var(--sp-3); }
-    .check-row input { width: auto; }
-    select { width: 100%; padding: 12px 13px; border-radius: var(--radius-sm); font-size: var(--fs-9); background: #100d0b; border: 1px solid var(--border); color: var(--text); outline: none; }
-
-    .submit, .btn-secondary, .btn-danger { width: 100%; border: none; cursor: pointer; padding: 14px; border-radius: var(--radius-md); font-size: var(--fs-8); font-weight: 700; margin-top: var(--sp-1); }
-    .submit { color: #1a1206; background: var(--primary); }
-    .submit:active { transform: translateY(1px); }
-    .btn-secondary { color: var(--text); background: var(--surface); border: 1px solid var(--border); margin-top: var(--sp-4); }
-    .btn-danger { color: #1a0d0c; background: var(--red); }
-
-    table.history { width: 100%; border-collapse: collapse; font-size: var(--fs-6); }
-    table.history th, table.history td { text-align: left; padding: 9px 6px; border-bottom: 1px solid var(--border-soft); }
-    table.history th { color: var(--text-dim); font-weight: 600; font-size: var(--fs-1); text-transform: uppercase; letter-spacing: .5px; }
-    table.history td.num { text-align: right; font-variant-numeric: tabular-nums; }
-    .table-scroll { overflow-x: auto; }
-    .empty-hint { color: var(--text-dim); font-size: var(--fs-6); padding: 6px 0; }
-    .metric-row { display: flex; align-items: center; justify-content: space-between; margin: 0 0 var(--sp-3); font-size: var(--fs-7); color: var(--text-dim); }
-    .metric-row b { color: var(--text); font-size: var(--fs-9); }
-
-    .profile-row {
-      display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3);
-      padding: var(--sp-3) 0; border-bottom: 1px solid var(--border-soft);
-    }
-    .profile-row:last-child { border-bottom: none; }
-    .profile-row.active { border-left: 2px solid var(--copper); padding-left: var(--sp-2); margin-left: calc(var(--sp-2) * -1); }
-    .profile-row-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-    .profile-row-main b { font-size: var(--fs-8); }
-    .profile-row-main span { font-size: var(--fs-4); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .profile-row-actions { display: flex; gap: var(--sp-2); flex: none; }
-    .profile-row-main { cursor: pointer; flex: 1; }
-    .profile-mini { width: 120px; height: 32px; flex: none; margin: 0 var(--sp-2); }
-    @media (max-width: 420px) { .profile-mini { display: none; } }
-    .btn-chip-sm {
-      border: 1px solid var(--border); background: var(--surface); color: var(--text-dim);
-      padding: 6px 11px; border-radius: var(--radius-sm); font-size: var(--fs-3); font-weight: 700; cursor: pointer;
-    }
-    .btn-chip-sm.danger { border-color: rgba(229,84,75,.4); color: #f3c6c2; }
-    .btn-chip-sm.danger.armed { background: var(--red); border-color: var(--red); color: #fff; }
-
-    .footer { text-align: center; color: var(--text-dim); font-size: var(--fs-3); margin: var(--sp-5) 0 var(--sp-3); }
-    .footer a { color: var(--copper); text-decoration: none; }
-
-    .view[hidden] { display: none; }
-
-    /* Inline "Saved"/"Restarting..."/"Save failed" confirmation, created
-       on demand next to whichever submit button was just used. */
-    .save-confirm {
-      display: block; text-align: center; margin-top: var(--sp-2);
-      font-size: var(--fs-6); font-weight: 700; color: var(--green);
-      opacity: 0; transition: opacity .3s var(--ease);
-    }
-    .save-confirm.show { opacity: 1; }
-    .save-confirm.error { color: var(--red); }
-
-    /* Loading-skeleton placeholder for the gauge/stat values before the
-       first /status response lands - swapped for the real value the
-       instant it does (see the poll handler's firstStatusReceived flag). */
-    .skeleton {
-      color: transparent; background: linear-gradient(90deg, var(--surface-2), var(--border), var(--surface-2));
-      background-size: 200% 100%; border-radius: var(--radius-sm);
-    }
-    @media (prefers-reduced-motion: no-preference) {
-      .skeleton { animation: skeleton-pulse 1.5s ease-in-out infinite; }
-    }
-    @keyframes skeleton-pulse {
-      0% { background-position: 200% 0; }
-      100% { background-position: -200% 0; }
-    }
-
+    /* ---- Shell: phone = bottom tab bar, wide screens = left rail ---- */
+    .app { min-height: 100vh; padding: 0 var(--sp-4) 104px; max-width: 1400px; margin: 0 auto; }
+    .app.degraded main { opacity: .55; }
     .tabbar {
-      position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
-      display: flex; justify-content: center; gap: var(--sp-2);
-      padding: var(--sp-2) var(--sp-3) calc(var(--sp-2) + env(safe-area-inset-bottom));
-      background: var(--bg);
-      border-top: 1px solid var(--border-soft);
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+      display: flex; justify-content: center; gap: 48px;
+      padding: 8px 0 10px;
+      padding: 8px 0 calc(10px + env(safe-area-inset-bottom));
+      background: rgba(14,15,17,.94); border-top: 1px solid var(--border-soft);
     }
     .tab {
-      flex: 1; max-width: 200px; display: flex; flex-direction: column; align-items: center; gap: 3px;
-      border: none; background: none; color: var(--text-faint); font-size: var(--fs-caption); font-weight: 700;
-      padding: 8px 4px 6px; min-height: 48px; cursor: pointer; border-radius: var(--radius-md); transition: color .15s ease;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+      min-width: 76px; min-height: 52px; border: 0; border-radius: 16px; background: transparent;
+      color: var(--text-dim); font-size: 11px; font-weight: 500; cursor: pointer;
     }
-    .tab-icon { font-size: var(--fs-11); filter: grayscale(1); opacity: .65; }
-    .tab.active,
-    .tab[aria-selected="true"] { color: var(--copper-light); }
-    .tab.active .tab-icon,
-    .tab[aria-selected="true"] .tab-icon { filter: none; opacity: 1; }
+    .tab svg { width: 22px; height: 22px; }
+    .tab.active { color: var(--text); background: var(--surface-2); }
+    .tab .rail-logo { display: none; }
 
-    /* Compact landscape layout for the "Now" tab only (live status at a
-       glance on a tablet mounted sideways) - gated on max-height, not just
-       orientation, so a tall landscape screen (e.g. a laptop) doesn't get
-       squeezed into this. Tune/History/Settings stay single-column scrolling
-       forms; they aren't something you need to see all at once. */
-    @media (orientation: landscape) and (max-height: 600px) {
-      .app { padding-top: var(--sp-3); }
-      /* :not([hidden]) matters here: this selector (class + attribute) is
-         otherwise more specific than the UA default `[hidden] { display:
-         none }`, so without it, switching tabs away from "now" would leave
-         this view forced visible via `display: grid` regardless of the
-         `hidden` attribute showTab() sets on it. */
-      .view[data-view="now"]:not([hidden]) {
-        display: grid;
-        grid-template-columns: minmax(190px, 260px) 1fr;
-        grid-template-areas: "hero shot" "hero stats";
-        gap: var(--sp-3);
-        align-items: start;
-      }
-      .view[data-view="now"] > .hero-card { grid-area: hero; margin: 0; }
-      .view[data-view="now"] > .card-shot { grid-area: shot; margin: 0; }
-      .view[data-view="now"] > .card-stats { grid-area: stats; margin: 0; }
+    /* ---- Header ---- */
+    .topbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-3); padding: 28px 0 var(--sp-4); }
+    .brand-status { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .status-line { display: flex; align-items: center; gap: 10px; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-dim); flex: none; }
+    #mode_status { font-size: 22px; font-weight: 500; letter-spacing: -.02em; }
+    .pill.brew .status-dot, .pill.steam .status-dot { background: var(--copper); box-shadow: 0 0 0 4px rgba(227,154,98,.15); }
+    .pill.ready .status-dot { background: var(--ok); box-shadow: 0 0 0 4px rgba(95,211,154,.15); }
+    .pill.shot .status-dot { background: var(--cyan); box-shadow: 0 0 0 4px rgba(70,227,240,.16); }
+    .pill.fault .status-dot { background: var(--danger); box-shadow: 0 0 0 4px rgba(240,113,106,.16); }
+    .last-updated { font-size: 11px; color: var(--text-dim); }
+    .top-controls { display: flex; align-items: center; gap: var(--sp-2); width: 100%; }
+    .top-controls .mode-switch { flex: 1 1 auto; }
+    .top-controls .mode-btn { flex: 1 1 0; min-width: 0; }
+    .tank-pill {
+      display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 16px;
+      border-radius: 22px; background: var(--surface); border: 1px solid var(--border); font-size: 14px; color: var(--text-2);
+    }
+    .tank-pill svg { width: 12px; height: 16px; }
+    .tank-pill.ok { color: var(--text); }
+    .tank-pill.low { color: #1a0d0c; background: var(--danger); border-color: var(--danger); }
+    .tank-pill.low svg path { stroke: #1a0d0c; }
+    .mode-switch { display: flex; padding: 3px; border-radius: var(--radius-sm); background: var(--surface); border: 1px solid var(--border); }
+    .mode-btn {
+      min-width: 82px; height: 38px; border: 0; border-radius: 11px; background: transparent;
+      color: var(--text-2); font-size: 14px; cursor: pointer;
+    }
+    .mode-btn.active { background: rgba(255,255,255,.09); color: var(--text); font-weight: 600; }
+    .mode-btn.mode-off.active { color: var(--text); }
+    .mode-btn.mode-steam.active { color: #ffd2a6; }
 
-      /* The narrow hero column (190-260px) can't fit two side-by-side
-         circles at their portrait size - .gauge-row's existing flex-wrap
-         already stacks them here automatically; this just shrinks each one
-         so the stacked pair still fits the same vertical budget a single
-         circle used before. */
-      .view[data-view="now"] .gauge-row { gap: var(--sp-1); margin-bottom: var(--sp-2); }
-      .view[data-view="now"] .gauge-wrap {
-        width: clamp(70px, 11vh, 100px); height: clamp(70px, 11vh, 100px);
-        margin-bottom: var(--sp-1);
-      }
-      .view[data-view="now"] .gauge-value { font-size: clamp(1.1rem, 4vh, 1.5rem); letter-spacing: 0; }
-      .view[data-view="now"] .gauge-unit { font-size: clamp(0.55rem, 2vh, 0.7rem); }
-      .view[data-view="now"] .gauge-target { font-size: var(--fs-1); margin-bottom: var(--sp-1); }
+    /* ---- Banners ---- */
+    .alerts { display: flex; flex-direction: column; gap: var(--sp-2); }
+    .alerts:not(:empty) { margin-bottom: var(--sp-2); }
+    .banner {
+      display: none; align-items: center; justify-content: space-between; gap: var(--sp-3);
+      padding: 12px 16px; border-radius: var(--radius-sm); font-size: 14px; line-height: 1.4;
+      background: var(--surface); border: 1px solid var(--border);
+    }
+    .banner a { color: inherit; font-weight: 600; }
+    .banner-error { background: rgba(240,113,106,.12); border-color: rgba(240,113,106,.45); color: #ffd6d3; }
+    .banner-warn { background: rgba(232,176,75,.10); border-color: rgba(232,176,75,.40); color: #ffe6b8; }
+    .banner-info { background: rgba(70,227,240,.06); border-color: rgba(70,227,240,.25); color: #d4f8fb; }
+    .btn-chip, .btn-chip-sm {
+      border: 1px solid var(--border-strong); background: transparent; color: var(--text);
+      border-radius: 999px; cursor: pointer; white-space: nowrap;
+    }
+    .btn-chip { height: 36px; padding: 0 14px; font-size: 13px; font-weight: 600; }
+    .btn-chip-sm { height: 32px; min-width: 32px; padding: 0 12px; font-size: 12px; }
+    .btn-chip-sm.danger { color: var(--danger); border-color: rgba(240,113,106,.4); }
+    .btn-chip-sm.armed { background: var(--danger); color: #1a0d0c; border-color: var(--danger); }
 
-      /* The two charts sit side-by-side instead of stacked, roughly halving
-         the vertical space this card needs. */
-      .view[data-view="now"] > .card-stats {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        grid-template-areas: "stat stat" "chart1 chart2";
-        gap: var(--sp-3);
+    /* ---- Cards ---- */
+    .card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: var(--sp-5); box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
+    }
+    .card + .card { margin-top: var(--sp-3); }
+    .tab-section-title { font-size: 17px; font-weight: 600; letter-spacing: -.01em; margin-bottom: var(--sp-2); }
+    .metric-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); padding: 10px 0; border-bottom: 1px solid var(--border-soft); font-size: 14px; color: var(--text-2); }
+    .metric-row b { color: var(--text); font-weight: 500; margin-left: auto; }
+    .empty-hint { color: var(--text-dim); font-size: 14px; }
+
+    /* ---- Brew view ---- */
+    .brew-grid { display: flex; flex-direction: column; gap: var(--sp-4); }
+    .brew-col { display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; }
+
+    .dial { position: relative; width: 100%; max-width: 400px; margin: 0 auto; }
+    .dial::before { content: ""; display: block; padding-top: 100%; }
+    .dial-glow {
+      position: absolute; top: 6%; right: 6%; bottom: 6%; left: 6%; border-radius: 50%; pointer-events: none;
+      background: radial-gradient(circle, rgba(227,154,98,.13) 0%, rgba(227,154,98,0) 68%);
+      transition: opacity .6s;
+    }
+    .dial.off .dial-glow { opacity: 0; }
+    .dial svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; overflow: visible; }
+    .dial-track { fill: none; stroke: rgba(255,255,255,.05); stroke-width: 3; stroke-linecap: round; }
+    .dial-temp { fill: none; stroke: url(#dialCopper); stroke-width: 3; stroke-linecap: round; transition: stroke-dasharray .8s ease; }
+    .dial-temp-glow { fill: none; stroke: var(--copper); stroke-opacity: .55; stroke-width: 4; stroke-linecap: round; filter: url(#dialBlur); transition: stroke-dasharray .8s ease; }
+    .dial-temp.over, .dial-temp-glow.over { stroke: var(--danger); }
+    .dial-press-track { fill: none; stroke: rgba(70,227,240,.09); stroke-width: 2; stroke-linecap: round; }
+    .dial-temp.zero, .dial-temp-glow.zero, .dial-press.zero { opacity: 0; }
+    .dial-press { fill: none; stroke: var(--cyan); stroke-width: 2.5; stroke-linecap: round; transition: stroke-dasharray .5s ease; }
+    .dial-press.ready { stroke: var(--cyan); }
+    .dial-press.heating { stroke: rgba(70,227,240,.6); }
+    .dial-press.over { stroke: var(--warn); }
+    .tick { stroke: #fff; stroke-opacity: .16; stroke-width: 1.2; stroke-linecap: round; transition: stroke .4s, stroke-opacity .4s; }
+    .tick.major { stroke-opacity: .32; stroke-width: 1.6; }
+    .tick.lit { stroke: var(--copper); stroke-opacity: .55; }
+    .tick.major.lit { stroke-opacity: .95; }
+    .dial-marker { transition: transform .8s ease; }
+    /* At working temperature (2026-10-16): a soft green halo along the arc up
+       to the target marker, a pulse at the temp dot, the marker turns green
+       and the caption reads "At temp" - so "ready" is visible from across
+       the kitchen, not only as a number. .at-temp is set by updateDial(). */
+    .dial-ready-halo { fill: none; stroke: var(--ok); stroke-width: 10; stroke-linecap: round; opacity: 0; filter: url(#dialBlur); transition: opacity .6s ease; }
+    .dial.at-temp .dial-ready-halo { opacity: .5; }
+    .dial-pulse { fill: none; stroke: var(--ok); stroke-width: 1.5; opacity: 0; }
+    .dial.at-temp .dial-pulse { opacity: 1; animation: dialPulse 1.8s ease-out infinite; }
+    @keyframes dialPulse { 0% { r: 6px; stroke-opacity: .9; } 100% { r: 20px; stroke-opacity: 0; } }
+    .dial.at-temp #dial_target polygon { fill: var(--ok); }
+    .gauge-target .ready-mark { display: none; color: var(--ok); font-weight: 600; }
+    .dial.at-temp .gauge-target .ready-mark { display: inline; }
+    .dial.at-temp .gauge-target .target-word { display: none; }
+    .dial.at-temp .gauge-target b { color: var(--ok); }
+    .dial-center {
+      position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      text-align: center; pointer-events: none;
+    }
+    .dial-temp-value { display: flex; align-items: flex-start; margin-top: 2px; }
+    #temp { font-size: 84px; font-weight: 200; letter-spacing: -.05em; line-height: 1; }
+    .deg { font-size: 26px; font-weight: 300; color: var(--copper); margin: 8px 0 0 2px; }
+    .gauge-target { margin-top: 6px; font-size: 14px; color: var(--text-2); }
+    .gauge-target b { color: var(--text); font-weight: 600; }
+    .dial-press-line { margin-top: 18px; display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-2); }
+    .dial-press-line .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--cyan); }
+    .dial-press-line b { color: var(--text); font-weight: 500; }
+    .dial-press-line .sep { width: 1px; height: 12px; background: rgba(255,255,255,.14); }
+
+    .section-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+    .section-head a { font-size: 13px; color: var(--text-2); text-decoration: none; }
+    .preset-row { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+    .btn-preset {
+      flex: 1 1 22%; min-width: 72px; min-height: 80px; padding: 10px 6px;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+      border-radius: 16px; background: var(--surface); border: 1px solid var(--border);
+      color: var(--text-2); font-size: 13px; font-weight: 500; cursor: pointer;
+      transition: border-color .2s, background .2s, box-shadow .2s;
+    }
+    .btn-preset .profile-mini { width: 64px; height: 20px; }
+    .btn-preset.active {
+      color: var(--text); background: rgba(70,227,240,.07); border-color: rgba(70,227,240,.45);
+      box-shadow: 0 0 24px -8px rgba(70,227,240,.5);
+    }
+
+    .card-shot { display: flex; flex-direction: column; gap: var(--sp-3); }
+    .shot-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-4); }
+    .shot-time { font-size: 56px; font-weight: 200; letter-spacing: -.05em; line-height: 1; transition: color .3s; }
+    .shot-time.in-window { color: var(--ok); }
+    .shot-time.over { color: var(--warn); }
+    .shot-sub { margin-top: 6px; font-size: 13px; color: var(--text-2); }
+    .shot-progress { height: 4px; border-radius: 2px; background: rgba(255,255,255,.07); overflow: hidden; }
+    .shot-progress span { display: block; height: 100%; width: 0; border-radius: 2px; background: linear-gradient(90deg, #b8703f, #eaa672); transition: width 1s linear; }
+    .shot-progress span.in-window { background: var(--ok); }
+    .shot-progress span.over { background: var(--warn); }
+    .btn-shot {
+      position: relative; width: 100%; height: 72px; border: 0; border-radius: 36px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; gap: 12px;
+      font-size: 18px; font-weight: 600; letter-spacing: -.01em;
+      color: var(--copper-ink); background: linear-gradient(180deg, #eaa672 0%, #d98c55 100%);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 14px 36px -12px rgba(227,154,98,.65);
+      transition: background .2s, color .2s, box-shadow .2s;
+    }
+    .btn-shot::before {
+      content: ""; width: 0; height: 0; border-style: solid; border-width: 8px 0 8px 13px;
+      border-color: transparent transparent transparent var(--copper-ink);
+    }
+    .btn-shot.running {
+      color: var(--text); background: var(--surface-2); border: 1px solid var(--border-strong);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
+    }
+    .btn-shot.running::before { width: 13px; height: 13px; border: 0; border-radius: 3px; background: var(--text); }
+    .btn-shot.blocked { color: var(--text-2); background: var(--surface); border: 1px solid var(--border); box-shadow: none; }
+    .btn-shot.blocked::before { border-color: transparent transparent transparent var(--text-dim); }
+    .shot-block-msg { display: none; padding: 10px 14px; border-radius: var(--radius-sm); background: rgba(240,113,106,.12); border: 1px solid rgba(240,113,106,.45); color: #ffd6d3; font-size: 14px; }
+    .shot-block-msg.show { display: block; }
+
+    .chart-card { padding: 16px 18px 12px; }
+    .chart-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .legend { display: flex; gap: 14px; font-size: 11px; color: var(--text-2); }
+    .legend i { display: inline-block; width: 12px; height: 2px; border-radius: 1px; margin-right: 6px; vertical-align: middle; }
+    .chart-wrap { position: relative; }
+    .chart-wrap canvas { display: block; width: 100%; height: 170px; }
+    .chart-foot { display: flex; justify-content: space-between; margin-top: 6px; font-size: 11px; color: var(--text-dim); }
+
+    /* Live shot block under the dial: phase steps + big readouts. */
+    .shot-live { display: none; flex-direction: column; gap: var(--sp-4); }
+    .app.shooting .shot-live { display: flex; }
+    .phase-steps { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 8px; }
+    .phase-step { font-size: 13px; color: var(--text-dim); padding: 5px 0; }
+    .phase-step.done { color: var(--text-2); }
+    .phase-step.current { color: var(--bg); background: var(--cyan); font-weight: 600; padding: 5px 12px; border-radius: 999px; }
+    .phase-sep { width: 14px; height: 1px; background: rgba(255,255,255,.18); }
+    .live-reads { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .live-read { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    .live-read + .live-read { border-left: 1px solid var(--border); }
+    .live-read b { font-size: 34px; font-weight: 300; letter-spacing: -.03em; line-height: 1.05; }
+    .live-read b small { font-size: 13px; color: var(--text-dim); margin-left: 3px; letter-spacing: 0; font-weight: 400; }
+    .live-read.press b { color: var(--cyan); }
+    .live-read.temp b { color: var(--copper); }
+
+    /* -/+ steppers for the two everyday temperatures; save automatically. */
+    .stepper { display: flex; align-items: center; gap: var(--sp-3); margin-top: var(--sp-3); }
+    .step-btn {
+      flex: none; width: 56px; height: 56px; border-radius: 28px; border: 1px solid var(--border-strong);
+      background: transparent; color: var(--text); font-size: 26px; font-weight: 300; line-height: 1; cursor: pointer;
+    }
+    .step-btn:active { background: var(--surface-2); }
+    .stepper input[type=number] { flex: 1 1 auto; min-width: 0; height: 56px; text-align: center; font-size: 30px; font-weight: 300; letter-spacing: -.02em; -moz-appearance: textfield; }
+    .stepper input::-webkit-outer-spin-button, .stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    .stepper-note { display: flex; justify-content: space-between; align-items: center; min-height: 20px; margin-top: 8px; font-size: 12px; color: var(--text-dim); }
+
+    .last-shot-sum { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; color: var(--text-2); font-size: 14px; }
+    .last-shot-sum b { color: var(--text); font-weight: 400; font-size: 22px; letter-spacing: -.02em; }
+    .taste-row { display: flex; gap: var(--sp-2); margin-top: var(--sp-3); }
+    .taste-btn {
+      flex: 1 1 0; height: 48px; border-radius: var(--radius-sm); cursor: pointer;
+      background: var(--surface); border: 1px solid var(--border); color: var(--text-2); font-size: 14px;
+    }
+    .taste-btn.active { color: var(--text); font-weight: 600; background: rgba(227,154,98,.12); border-color: rgba(227,154,98,.55); }
+    .taste-tip { min-height: 20px; margin: 10px 0 0; font-size: 13px; color: var(--text-2); }
+    .link-btn { border: 0; background: none; padding: 8px 0; color: var(--text-2); font-size: 13px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+
+    /* Focus mode while a shot runs: nothing to wander off to. */
+    .app.shooting .tabbar, .app.shooting .profiles-block, .app.shooting .last-shot-card, .app.shooting .mode-switch { display: none !important; }
+    .app.shooting .shot-time { font-size: 96px; }
+    /* Phone during a shot: timer + Stop first (thumb reach), smaller dial. */
+    @media (max-width: 899px) {
+      .app.shooting .brew-col.right { order: -1; }
+      .app.shooting .dial { max-width: 280px; }
+    }
+
+    /* ---- Forms ---- */
+    .field { display: flex; flex-direction: column; gap: 6px; margin-top: var(--sp-3); }
+    .field label, .check-row { font-size: 13px; color: var(--text-2); }
+    .field-row, .field-row-3 { display: grid; grid-gap: var(--sp-3); gap: var(--sp-3); }
+    .field-row { grid-template-columns: 1fr 1fr; }
+    .field-row-3 { grid-template-columns: 1fr 1fr 1fr; }
+    input[type=number], input[type=text], input[type=password], input[type=time], select {
+      width: 100%; height: 48px; padding: 0 14px; border-radius: 12px;
+      background: rgba(0,0,0,.25); border: 1px solid var(--border-strong); color: var(--text); font-size: 16px;
+      -webkit-appearance: none; appearance: none;
+    }
+    select { background-image: linear-gradient(45deg, transparent 50%, var(--text-dim) 50%), linear-gradient(135deg, var(--text-dim) 50%, transparent 50%); background-position: calc(100% - 20px) 21px, calc(100% - 15px) 21px; background-size: 5px 5px; background-repeat: no-repeat; }
+    input:focus, select:focus { border-color: var(--cyan); outline: none; }
+    .check-row { display: flex; align-items: center; gap: 12px; min-height: 44px; margin-top: var(--sp-2); color: var(--text); font-size: 15px; cursor: pointer; }
+    .check-row input { width: 22px; height: 22px; accent-color: var(--cyan); }
+    .submit, .btn-secondary, .btn-danger, .btn-autotune {
+      display: inline-flex; align-items: center; justify-content: center; min-height: 46px; padding: 0 22px;
+      margin-top: var(--sp-4); margin-right: var(--sp-2); border-radius: 23px; cursor: pointer;
+      font-size: 15px; font-weight: 600; text-decoration: none;
+    }
+    .submit { border: 0; background: var(--text); color: var(--bg); }
+    .submit:disabled, .btn-autotune:disabled, .btn-secondary:disabled { opacity: .45; cursor: default; }
+    .btn-secondary { border: 1px solid var(--border-strong); background: transparent; color: var(--text); }
+    .btn-danger { border: 1px solid rgba(240,113,106,.5); background: transparent; color: var(--danger); }
+    .btn-autotune { border: 1px solid rgba(227,154,98,.5); background: rgba(227,154,98,.1); color: #ffd2a6; }
+    .btn-autotune.running { background: var(--copper); color: var(--copper-ink); }
+    .autotune-status { display: block; margin-top: var(--sp-2); font-size: 13px; color: var(--text-2); }
+    .save-confirm { display: inline-block; font-size: 13px; color: var(--ok); opacity: 0; transition: opacity .2s; vertical-align: middle; }
+    .save-confirm.show { opacity: 1; }
+    .save-confirm.error { color: var(--danger); }
+
+    /* ---- Settings ---- */
+    .settings-layout { display: flex; flex-direction: column; gap: var(--sp-4); }
+    .settings-nav { display: flex; gap: var(--sp-2); overflow-x: auto; padding-bottom: 2px; -webkit-overflow-scrolling: touch; }
+    .settings-nav-title { display: none; }
+    .sec-btn {
+      flex: none; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3);
+      min-height: 44px; padding: 0 16px; border-radius: 22px; border: 1px solid var(--border);
+      background: var(--surface); color: var(--text-2); font-size: 14px; cursor: pointer; text-align: left;
+    }
+    .sec-btn small { display: none; }
+    .sec-btn svg { display: none; }
+    .sec-btn.active { color: var(--bg); background: var(--text); border-color: var(--text); font-weight: 600; }
+    .set-panel h2 { margin: 0 0 var(--sp-3); font-size: 22px; font-weight: 500; letter-spacing: -.02em; }
+    .set-grid { display: grid; grid-template-columns: 1fr; grid-gap: var(--sp-3); gap: var(--sp-3); }
+    .set-grid > .card + .card { margin-top: 0; }
+    .adv { border-top: 1px solid var(--border-soft); }
+    .adv:first-of-type { border-top: 0; }
+    .adv > summary {
+      list-style: none; display: flex; justify-content: space-between; align-items: center; gap: var(--sp-3);
+      min-height: 64px; padding: 10px 0; cursor: pointer;
+    }
+    .adv > summary::-webkit-details-marker { display: none; }
+    .adv > summary span { display: flex; flex-direction: column; gap: 2px; }
+    .adv > summary small { font-size: 12px; color: var(--text-dim); }
+    .adv > summary::after { content: ""; width: 8px; height: 8px; border-right: 2px solid var(--text-dim); border-bottom: 2px solid var(--text-dim); transform: rotate(-45deg); transition: transform .2s; flex: none; margin-right: 6px; }
+    .adv[open] > summary::after { transform: rotate(45deg); }
+    .adv-body { padding: 0 0 var(--sp-5); }
+    .adv-body + .adv-body { border-top: 1px dashed var(--border-soft); padding-top: var(--sp-4); }
+    .sub-title { font-size: 14px; font-weight: 600; margin: var(--sp-2) 0 0; }
+    .disclosure { margin-top: var(--sp-3); border-top: 1px solid var(--border-soft); padding-top: var(--sp-2); }
+    .disclosure > summary { cursor: pointer; min-height: 40px; display: flex; align-items: center; color: var(--text-2); font-size: 14px; }
+    .sched-slot { padding: var(--sp-3) 0; border-bottom: 1px solid var(--border-soft); }
+    .water-live { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-3); margin-top: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--border-soft); font-size: 14px; color: var(--text-2); }
+    .water-live b.ok { color: var(--cyan); }
+    .water-live b.low { color: var(--danger); }
+    .profile-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); padding: 14px 0; border-top: 1px solid var(--border-soft); }
+    .profile-row:first-child { border-top: 0; }
+    .profile-row-main { flex: 1 1 200px; display: flex; flex-direction: column; gap: 2px; cursor: pointer; min-width: 0; }
+    .profile-row-main b { font-weight: 500; font-size: 15px; }
+    .profile-row-main span { font-size: 12px; color: var(--text-dim); }
+    .profile-row .profile-mini { width: 90px; height: 26px; flex: none; }
+    .profile-row.active .profile-row-main b::after { content: "Active"; margin-left: 10px; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; color: var(--cyan); background: rgba(70,227,240,.1); }
+    .profile-row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+    .footer { margin-top: var(--sp-8); text-align: center; font-size: 12px; color: var(--text-dim); }
+    .footer a { color: var(--text-2); }
+
+    .skeleton { color: transparent !important; background: rgba(255,255,255,.06); border-radius: 8px; }
+
+    /* ---- Tablet / landscape: left rail, two columns ---- */
+    @media (min-width: 900px) {
+      .app { padding: 0 40px 32px 136px; }
+      .tabbar {
+        top: 0; right: auto; width: 96px; flex-direction: column; justify-content: flex-start; align-items: center;
+        gap: 8px; padding: 28px 0; border-top: 0; border-right: 1px solid var(--border-soft); background: var(--bg);
       }
-      .view[data-view="now"] > .card-stats > .stat-grid { grid-area: stat; margin-top: 0; }
-      .view[data-view="now"] > .card-stats > .chart-card { grid-area: chart1; margin-top: 0; }
-      .view[data-view="now"] > .card-stats > .chart-card + .chart-card { grid-area: chart2; }
+      .tab { width: 72px; min-height: 64px; }
+      .tab .rail-logo {
+        display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; margin-bottom: 20px;
+        border-radius: 20px; border: 1px solid rgba(227,154,98,.5); color: var(--copper); font-size: 16px; font-weight: 600;
+      }
+      .topbar { padding-top: 22px; padding-bottom: 12px; }
+      .brew-col.right { gap: 12px; }
+      .brew-col.right .card { padding: 16px 20px; }
+      .taste-row { margin-top: 10px; }
+      .taste-tip { margin-top: 8px; }
+      .top-controls { width: auto; }
+      .top-controls .mode-switch { flex: none; }
+      .top-controls .mode-btn { flex: none; min-width: 82px; }
+      .chart-wrap canvas { height: 120px; }
+      .dial { max-width: 380px; }
+      .app.shooting .dial { max-width: 360px; }
+      .app.shooting .live-read b { font-size: 44px; }
+      .card-shot { gap: 10px; }
+      .brew-grid { flex-direction: row; align-items: flex-start; gap: 40px; }
+      .brew-col { flex: 1 1 0; }
+      .brew-col.right { padding-top: 4px; }
+      #temp { font-size: 108px; }
+      .deg { font-size: 32px; margin-top: 10px; }
+      .shot-time { font-size: 64px; }
+      .app.shooting { padding-left: 40px; }
+      .app.shooting .shot-time { font-size: 140px; }
+      .settings-layout { flex-direction: row; align-items: flex-start; gap: 40px; }
+      .settings-nav { flex-direction: column; width: 280px; flex: none; overflow: visible; position: sticky; top: 24px; }
+      .settings-nav-title { display: block; margin: 0 12px 18px; font-size: 30px; font-weight: 400; letter-spacing: -.03em; }
+      .sec-btn { min-height: 64px; padding: 10px 14px; border: 0; border-radius: 16px; background: transparent; }
+      .sec-btn span { display: flex; flex-direction: column; gap: 2px; }
+      .sec-btn small { display: block; font-size: 12px; color: var(--text-dim); font-weight: 400; }
+      .sec-btn svg { display: block; width: 14px; height: 14px; }
+      .sec-btn.active { color: var(--text); background: var(--surface-2); }
+      .set-panels { flex: 1 1 0; min-width: 0; padding-top: 6px; }
+      .set-grid { grid-template-columns: 1fr 1fr; align-items: start; }
+      .set-grid > .wide { grid-column: 1 / -1; }
+    }
+    /* No flexbox `gap` (Chrome < 84, e.g. the kitchen tablet): the script adds
+       .no-flexgap to <html> and these margins stand in for it. Keep in sync with
+       the gap values above. */
+    .no-flexgap .tabbar > * + * { margin-left: 48px; }
+    .no-flexgap .btn-shot::before { margin-right: 12px; }
+    .no-flexgap .tab > * + * { margin-top: 4px; }
+    .no-flexgap .brand-status > * + * { margin-top: 4px; }
+    .no-flexgap .status-line > * + * { margin-left: 10px; }
+    .no-flexgap .top-controls > * + * { margin-left: 8px; }
+    .no-flexgap .tank-pill > * + * { margin-left: 8px; }
+    .no-flexgap .alerts > * + * { margin-top: 8px; }
+    .no-flexgap .banner > * + * { margin-left: 12px; }
+    .no-flexgap .metric-row > * + * { margin-left: 12px; }
+    .no-flexgap .brew-grid > * + * { margin-top: 16px; }
+    .no-flexgap .brew-col > * + * { margin-top: 16px; }
+    .no-flexgap .dial-press-line > * + * { margin-left: 10px; }
+    .no-flexgap .btn-preset > * + * { margin-top: 8px; }
+    .no-flexgap .card-shot > * + * { margin-top: 12px; }
+    .no-flexgap .shot-head > * + * { margin-left: 16px; }
+    .no-flexgap .btn-shot > * + * { margin-left: 12px; }
+    .no-flexgap .legend > * + * { margin-left: 14px; }
+    .no-flexgap .shot-live > * + * { margin-top: 16px; }
+    .no-flexgap .live-read > * + * { margin-top: 4px; }
+    .no-flexgap .stepper > * + * { margin-left: 12px; }
+    .no-flexgap .taste-row > * + * { margin-left: 8px; }
+    .no-flexgap .field > * + * { margin-top: 6px; }
+    .no-flexgap .check-row > * + * { margin-left: 12px; }
+    .no-flexgap .settings-layout > * + * { margin-top: 16px; }
+    .no-flexgap .settings-nav > * + * { margin-left: 8px; }
+    .no-flexgap .sec-btn > * + * { margin-left: 12px; }
+    .no-flexgap .adv > summary > * + * { margin-left: 12px; }
+    .no-flexgap .adv > summary span > * + * { margin-top: 2px; }
+    .no-flexgap .water-live > * + * { margin-left: 12px; }
+    .no-flexgap .profile-row-main > * + * { margin-top: 2px; }
+    .no-flexgap .topbar > * { margin: 0 12px 12px 0; }
+    .no-flexgap .preset-row > * { margin: 0 8px 8px 0; }
+    .no-flexgap .phase-steps > * { margin: 0 8px 6px 0; }
+    .no-flexgap .last-shot-sum > * { margin: 0 14px 6px 0; }
+    .no-flexgap .profile-row > * { margin: 0 12px 12px 0; }
+    .no-flexgap .profile-row-actions > * { margin: 0 6px 6px 0; }
+    @media (min-width: 900px) {
+      .no-flexgap .tabbar > * + * { margin-left: 0; margin-top: 8px; }
+      .no-flexgap .brew-grid > * + *, .no-flexgap .settings-layout > * + * { margin-top: 0; margin-left: 40px; }
+      .no-flexgap .settings-nav > * + * { margin-left: 0; margin-top: 8px; }
+      .no-flexgap .brew-col.right > * + * { margin-top: 12px; }
+      .no-flexgap .card-shot > * + * { margin-top: 10px; }
+      .no-flexgap .sec-btn span > * + * { margin-top: 2px; }
+    }
+    @media (min-width: 900px) and (max-height: 700px) {
+      .dial, .app.shooting .dial { max-width: 320px; }
+      #temp { font-size: 92px; }
     }
   </style>
 </head>
 <body>
   <div class="app" id="app_root">
+    <nav class="tabbar" role="tablist" aria-label="Sections">
+      <button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="view-now" id="tab-now" data-tab="now">
+        <span class="rail-logo" aria-hidden="true">G</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M5 9h12v5a5 5 0 0 1-5 5h-2a5 5 0 0 1-5-5z"/><path d="M17 11h1.5a2 2 0 0 1 0 4H17"/><path d="M9 3v3M13 3v3"/></svg>
+        <span>Brew</span>
+      </button>
+      <button type="button" class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="view-settings" id="tab-settings" data-tab="settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
+        <span>Settings</span>
+      </button>
+    </nav>
+
     <header class="topbar">
-      <div class="brand">
-        <div class="logo" aria-hidden="true">&#9749;</div>
-        <div class="brand-text">
-          <h1>BrewMaster</h1>
-          <small>Gaggia Espresso Color</small>
-        </div>
-      </div>
       <div class="brand-status">
-        <div class="status-row">
-          <div id="tank_pill" class="pill tank" aria-live="polite"><span class="tank-icon" aria-hidden="true"></span><span id="tank_pill_text">Tank OK</span></div>
-          <div id="status_pill" class="pill off" aria-live="polite"><span class="dot" aria-hidden="true"></span><span id="mode_status">--</span></div>
-        </div>
+        <span class="label">Gaggia Classic</span>
+        <div id="status_pill" class="pill off status-line" aria-live="polite"><span class="status-dot" aria-hidden="true"></span><span id="mode_status">--</span></div>
         <div id="last_updated" class="last-updated">--</div>
+      </div>
+      <div class="top-controls">
+        <div id="tank_pill" class="tank-pill" aria-live="polite">
+          <svg viewBox="0 0 12 16" aria-hidden="true"><path d="M6 1.5C4 4.4 1.5 7.3 1.5 10a4.5 4.5 0 0 0 9 0C10.5 7.3 8 4.4 6 1.5z" fill="none" stroke="#46e3f0" stroke-width="1.4"/></svg>
+          <span id="tank_pill_text">Tank OK</span>
+        </div>
+        <div class="mode-switch" role="group" aria-label="Boiler mode">
+          <button type="button" onclick="setMode('off')" id="btn_off" class="mode-btn mode-off" aria-pressed="false">Off</button>
+          <button type="button" onclick="setMode('brew')" id="btn_brew" class="mode-btn mode-brew" aria-pressed="false">Brew</button>
+          <button type="button" onclick="setMode('steam')" id="btn_steam" class="mode-btn mode-steam" aria-pressed="false">Steam</button>
+        </div>
       </div>
     </header>
 
@@ -589,410 +628,418 @@ const char *index_html = R"rawliteral(
       <div id="pressure_banner" class="banner banner-error"></div>
       <div id="pump_banner" class="banner banner-warn"></div>
       <div id="water_banner" class="banner banner-warn">Refill the water tank. New shots are paused until it's back.</div>
-      <div id="cal_banner" class="banner banner-info">Pump not calibrated &mdash; shots use a default pump model.&nbsp;<a href="#settings" onclick="showTab('settings')">Calibrate</a></div>
-         <div id="sleep_banner" class="banner banner-info">
+      <div id="cal_banner" class="banner banner-info"><span>Pump not calibrated &mdash; shots use a default pump model.</span><a href="#settings" onclick="openSettings('advanced','adv_pump'); return false;">Calibrate</a></div>
+      <div id="sleep_banner" class="banner banner-info">
         <span id="sleep_banner_text">Asleep (eco timeout) &mdash; heater off</span>
-        <button type="button" onclick="wake()" class="btn-chip">Wake Up</button>
-        <button type="button" onclick="dismissSleepBanner()" class="btn-chip-sm" aria-label="Dismiss sleep notice">&times;</button>
+        <span>
+          <button type="button" onclick="wake()" class="btn-chip">Wake up</button>
+          <button type="button" onclick="dismissSleepBanner()" class="btn-chip-sm" aria-label="Dismiss sleep notice">&times;</button>
+        </span>
       </div>
-      <div id="descale_banner_top" class="banner banner-warn">Descale recommended &mdash; see History</div>
+      <div id="descale_banner_top" class="banner banner-warn"><span>Descale recommended.</span><a href="#settings" onclick="openSettings('maint'); return false;">Details</a></div>
     </div>
 
     <main>
     <div class="view" data-view="now" id="view-now" role="tabpanel" aria-labelledby="tab-now">
-      <div class="card hero-card">
-        <div class="gauge-row">
-          <div class="gauge-col">
-            <div class="gauge-wrap">
-              <svg class="gauge" viewBox="0 0 220 220" aria-hidden="true">
-                <circle class="gauge-track" cx="110" cy="110" r="96"></circle>
-                <circle id="temp_ring_fill" class="gauge-fill" cx="110" cy="110" r="96"
-                        stroke-dasharray="603" stroke-dashoffset="603"></circle>
-              </svg>
-              <div class="gauge-center">
-                <div class="gauge-value"><span id="temp" class="skeleton">--</span><span class="gauge-unit">&deg;C</span></div>
+      <div class="brew-grid">
+        <div class="brew-col left">
+          <section class="dial" id="dial" aria-label="Boiler temperature and pump pressure">
+            <div class="dial-glow" aria-hidden="true"></div>
+            <svg viewBox="0 0 320 320" aria-hidden="true">
+              <defs>
+                <linearGradient id="dialCopper" x1="0" y1="1" x2="1" y2="0">
+                  <stop offset="0" stop-color="#6e3a1a"/><stop offset=".55" stop-color="#d88c55"/><stop offset="1" stop-color="#ffd2a6"/>
+                </linearGradient>
+                <filter id="dialBlur" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="6"/></filter>
+              </defs>
+              <g id="dial_ticks"></g>
+              <circle class="dial-track" cx="160" cy="160" r="136" stroke-dasharray="640.9 854.5" transform="rotate(135 160 160)"/>
+              <circle id="temp_ready_halo" class="dial-ready-halo" cx="160" cy="160" r="136" stroke-dasharray="0 854.5" transform="rotate(135 160 160)"/>
+              <circle id="temp_ring_glow" class="dial-temp-glow" cx="160" cy="160" r="136" stroke-dasharray="0 854.5" transform="rotate(135 160 160)"/>
+              <circle id="temp_ring_fill" class="dial-temp" cx="160" cy="160" r="136" stroke-dasharray="0 854.5" transform="rotate(135 160 160)"/>
+              <g id="dial_target" class="dial-marker" transform="rotate(135 160 160)" style="display:none"><polygon points="300,160 310,155 310,165" fill="#f5f5f3" transform="rotate(180 305 160)"/></g>
+              <g id="dial_dot" class="dial-marker" transform="rotate(135 160 160)" style="display:none"><circle class="dial-pulse" cx="296" cy="160" r="6"/><circle cx="296" cy="160" r="9" fill="#e39a62" fill-opacity=".35" filter="url(#dialBlur)"/><circle cx="296" cy="160" r="5" fill="#fff4ea"/></g>
+              <circle class="dial-press-track" cx="160" cy="160" r="118" stroke-dasharray="556.1 741.4" transform="rotate(135 160 160)"/>
+              <circle id="pressure_ring_fill" class="dial-press" cx="160" cy="160" r="118" stroke-dasharray="0 741.4" transform="rotate(135 160 160)"/>
+              <g id="press_peak" class="dial-marker" transform="rotate(135 160 160)" style="display:none"><circle cx="278" cy="160" r="3" fill="#46e3f0"/></g>
+            </svg>
+            <div class="dial-center">
+              <span class="label">Boiler</span>
+              <div class="dial-temp-value"><span id="temp" class="skeleton">--</span><span class="deg">&deg;</span></div>
+              <div class="gauge-target" aria-live="polite"><span id="target_on"><span class="ready-mark">&#10003; At temp &middot; </span><span class="target-word">Target </span><b><span id="target" class="skeleton">--</span>&deg;</b></span><span id="target_off" style="display:none">Heater off</span></div>
+              <div class="dial-press-line">
+                <span class="dot" aria-hidden="true"></span><span><b id="pressure_gauge_val">--</b> bar</span>
+                <span class="sep" aria-hidden="true"></span>
+                <span id="pressure_target_caption">pressure</span>
               </div>
             </div>
-            <div class="gauge-target"><span id="target_on">Target <b><span id="target" class="skeleton">--</span>&deg;C</b></span><span id="target_off" style="display:none">Heater off</span></div>
-          </div>
+          </section>
 
-          <div class="gauge-col">
-            <div class="gauge-wrap">
-              <svg class="gauge" viewBox="0 0 220 220" aria-hidden="true">
-                <circle class="gauge-track" cx="110" cy="110" r="96"></circle>
-                <circle id="pressure_ring_fill" class="gauge-fill" cx="110" cy="110" r="96"
-                        stroke-dasharray="603" stroke-dashoffset="603"></circle>
-              </svg>
-              <div class="gauge-center">
-                <div class="gauge-value"><span id="pressure_gauge_val" class="skeleton">--</span><span class="gauge-unit">bar</span></div>
+          <section class="shot-live" aria-label="Live shot">
+            <div class="phase-steps" id="phase_steps"></div>
+            <div class="live-reads">
+              <div class="live-read press"><span class="label">Pressure</span><b><span id="live_press">--</span><small>bar</small></b></div>
+              <div class="live-read temp"><span class="label">Boiler</span><b><span id="live_temp">--</span><small>&deg;</small></b></div>
+              <div class="live-read"><span class="label">Pump</span><b><span id="live_pump">--</span><small>%</small></b></div>
+            </div>
+          </section>
+
+          <section class="profiles-block" aria-label="Shot profile">
+            <div class="section-head"><span class="label">Profile</span><a href="#settings" onclick="openSettings('brewing'); return false;">Edit profiles</a></div>
+            <div class="preset-row" id="profile_chip_row"></div>
+          </section>
+        </div>
+
+        <div class="brew-col right">
+          <section class="card card-shot" aria-label="Shot">
+            <div class="shot-head">
+              <div>
+                <div id="shot_time" class="shot-time" aria-live="polite">0:00</div>
+                <div id="shot_auto_stop_label" class="shot-sub">--</div>
               </div>
             </div>
-            <div class="gauge-target" id="pressure_target_caption">Pressure</div>
-          </div>
-        </div>
+            <div class="shot-progress"><span id="shot_progress_bar"></span></div>
+            <div id="shot_block_msg" class="shot-block-msg" role="alert">Tank is low. Refill, then tap again.</div>
+            <button type="button" onclick="toggleShot()" id="btn_shot" class="btn-shot">Start shot</button>
+          </section>
 
-        <div class="mode-switch" role="group" aria-label="Boiler mode">
-          <button type="button" onclick="setMode('off')" id="btn_off" class="mode-btn mode-off" aria-pressed="false">Off</button>
-          <button type="button" onclick="setMode('brew')" id="btn_brew" class="mode-btn mode-brew" aria-pressed="false">Brew</button>
-          <button type="button" onclick="setMode('steam')" id="btn_steam" class="mode-btn mode-steam" aria-pressed="false">Steam</button>
-        </div>
-      </div>
-
-      <div class="card card-shot">
-        <div class="shot-head">
-          <div>
-            <div id="shot_time" class="shot-time" aria-live="polite">0:00</div>
-            <div id="shot_auto_stop_label" class="shot-sub">--</div>
-          </div>
-          <button type="button" onclick="toggleShot()" id="btn_shot" class="btn-shot">Start Shot</button>
-        </div>
-        <div id="shot_block_msg" class="shot-block-msg" role="alert">Tank is low. Refill, then tap again.</div>
-        <div class="shot-progress"><span id="shot_progress_bar"></span></div>
-        <div class="preset-row" id="profile_chip_row"></div>
-      </div>
-
-      <div class="card card-stats">
-        <div class="stat-grid">
-          <div class="stat-tile">
-            <span class="stat-label">Heater</span>
-            <span class="stat-value"><span id="output" class="skeleton">--</span><small>%</small></span>
-            <div class="bar heat"><span id="output_bar"></span></div>
-          </div>
-          <div class="stat-tile">
-            <span class="stat-label">Pump</span>
-            <span class="stat-value"><span id="pump_power" class="skeleton">--</span><small>%</small></span>
-            <div class="bar pump"><span id="pump_bar"></span></div>
-          </div>
-          <div id="tank_tile" class="stat-tile tank">
-            <span class="stat-label">Tank</span>
-            <span class="stat-value"><span id="tank_value">OK</span></span>
-          </div>
-           </div>
-
-        <div class="chart-card">
-          <div class="chart-label"><span>Temp &middot; last 2 min</span><span>&deg;C</span></div>
-          <canvas id="temp_chart" width="300" height="60" aria-hidden="true"></canvas>
-        </div>
-
-        <div class="chart-card">
-          <div class="chart-label"><span>Pressure (est.) &middot; last 2 min</span><span id="pressure_label">-- bar</span></div>
-          <canvas id="pressure_chart" width="300" height="60" aria-hidden="true"></canvas>
-        </div>
-      </div>
-    </div>
-
-    <div class="view" data-view="tune" id="view-tune" role="tabpanel" aria-labelledby="tab-tune" hidden>
-      <div class="card">
-        <div class="tab-section-title">Brew temperature</div>
-        <form action="/update" method="GET">
-          <div class="field">
-            <label for="input_brew_target">Target (&deg;C)</label>
-            <input type="number" step="0.1" name="brew_target" id="input_brew_target" value="">
-          </div>
-          <button type="submit" class="submit">Save target</button>
-        </form>
-        <details class="disclosure">
-          <summary>Idle PID gains</summary>
-          <form action="/update" method="GET">
-            <div class="field-row-3">
-              <div class="field"><label for="input_brew_kp">Kp</label><input type="number" step="any" name="brew_kp" id="input_brew_kp" value=""></div>
-              <div class="field"><label for="input_brew_ki">Ki</label><input type="number" step="any" name="brew_ki" id="input_brew_ki" value=""></div>
-              <div class="field"><label for="input_brew_kd">Kd</label><input type="number" step="any" name="brew_kd" id="input_brew_kd" value=""></div>
+          <section class="card chart-card" aria-label="Live charts">
+            <div class="chart-head">
+              <span class="label">Last 2 min</span>
+              <div class="legend"><span><i style="background:#e39a62"></i>Temp</span><span><i style="background:#46e3f0"></i>Pressure</span><span><i style="background:none;border-top:1.5px dashed rgba(255,255,255,.6);height:0"></i>Target</span></div>
             </div>
-            <button type="submit" class="submit">Save idle gains</button>
-          </form>
-        </details>
-        <details class="disclosure">
-          <summary>Gains during a shot</summary>
-          <p class="hint">Switches in when a shot starts, reverts when it stops. More aggressive so flow does not pull boiler temperature down.</p>
-          <form action="/update" method="GET">
-            <div class="field-row-3">
-              <div class="field"><label for="input_brew_akp">Kp</label><input type="number" step="any" name="brew_akp" id="input_brew_akp" value=""></div>
-              <div class="field"><label for="input_brew_aki">Ki</label><input type="number" step="any" name="brew_aki" id="input_brew_aki" value=""></div>
-              <div class="field"><label for="input_brew_akd">Kd</label><input type="number" step="any" name="brew_akd" id="input_brew_akd" value=""></div>
+            <div class="chart-wrap"><canvas id="live_chart" aria-hidden="true"></canvas></div>
+            <div class="chart-foot"><span id="temp_range_label">&deg;C</span><span id="pressure_label">-- bar</span></div>
+          </section>
+
+          <section class="card last-shot-card" id="last_shot_card" aria-label="Last shot" hidden>
+            <div class="section-head"><span class="label" id="last_shot_title">Last shot</span></div>
+            <div class="last-shot-sum" id="last_shot_sum"></div>
+            <div class="taste-row" role="group" aria-label="How did it taste?">
+              <button type="button" class="taste-btn" data-taste="Sour" onclick="quickTaste('Sour')">Sour</button>
+              <button type="button" class="taste-btn" data-taste="Balanced" onclick="quickTaste('Balanced')">Balanced</button>
+              <button type="button" class="taste-btn" data-taste="Bitter" onclick="quickTaste('Bitter')">Bitter</button>
             </div>
-            <button type="submit" class="submit">Save shot gains</button>
-          </form>
-        </details>
-      </div>
-
-      <div class="card">
-        <div class="tab-section-title">Auto-tune</div>
-        <p class="hint">Cycles the heater around the current Brew or Steam target for several minutes. Stay by the machine.</p>
-        <button type="button" onclick="startAutotune()" id="btn_autotune" class="btn-autotune">Start Auto-Tune</button>
-        <span id="autotune_status" class="autotune-status"></span>
-      </div>
-
-      <div class="card">
-        <div class="tab-section-title">Steam</div>
-        <form action="/update" method="GET">
-          <div class="field">
-            <label for="input_steam_target">Target temperature (&deg;C)</label>
-            <input type="number" step="0.1" name="steam_target" id="input_steam_target" value="">
-          </div>
-          <details class="disclosure">
-            <summary>Steam PID and safety ceiling</summary>
-            <div class="field-row-3">
-              <div class="field"><label for="input_steam_kp">Kp</label><input type="number" step="any" name="steam_kp" id="input_steam_kp" value=""></div>
-              <div class="field"><label for="input_steam_ki">Ki</label><input type="number" step="any" name="steam_ki" id="input_steam_ki" value=""></div>
-              <div class="field"><label for="input_steam_kd">Kd</label><input type="number" step="any" name="steam_kd" id="input_steam_kd" value=""></div>
+            <p class="taste-tip" id="taste_tip">How did it taste?</p>
+            <button type="button" class="link-btn" onclick="toggleShotDetails()">Bean, dose &amp; grind</button>
+            <div id="shot_notes_card" hidden>
+              <span id="shot_notes_title" hidden>Shot notes</span>
+              <form onsubmit="submitShotNotes(event)">
+                <input type="hidden" id="input_shot_note_index" value="-1">
+                <div class="field-row">
+                  <div class="field"><label for="input_shot_note_bean">Bean</label><input type="text" id="input_shot_note_bean" maxlength="24" placeholder="e.g. Ethiopia Yirgacheffe"></div>
+                  <div class="field"><label for="input_shot_note_dose">Dose in (g)</label><input type="number" step="0.1" id="input_shot_note_dose" value="18"></div>
+                </div>
+                <div class="field-row">
+                  <div class="field"><label for="input_shot_note_grind">Grind setting</label><input type="text" id="input_shot_note_grind" maxlength="16" placeholder="e.g. 3.2"></div>
+                  <div class="field">
+                    <label for="input_shot_note_rating">Rating</label>
+                    <select id="input_shot_note_rating">
+                      <option value="0">Unrated</option><option value="1">1 - Poor</option><option value="2">2</option>
+                      <option value="3">3 - OK</option><option value="4">4</option><option value="5">5 - Great</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="field"><label for="input_shot_note_text">Notes</label><input type="text" id="input_shot_note_text" maxlength="60" placeholder="e.g. sour, tighten grind next time"></div>
+                <button type="submit" class="submit">Save notes</button>
+              </form>
             </div>
-            <div class="field">
-              <label for="input_steam_max_safety">Max safety ceiling (&deg;C)</label>
-              <input type="number" step="1" min="100" max="150" name="steam_max_safety" id="input_steam_max_safety" value="">
-            </div>
-          </details>
-          <button type="submit" class="submit">Save Steam</button>
-        </form>
-      </div>
-
-      <div class="card">
-        <div class="tab-section-title">Pump pressure PID</div>
-        <p class="hint">With a 0&ndash;16 bar sensor fitted, adds a correction from it on top of the pump model during pressure phases (falls back to the model alone if the sensor faults).</p>
-        <details class="disclosure">
-          <summary>Kp / Ki / Kd</summary>
-          <form action="/update" method="GET">
-            <div class="field-row-3">
-              <div class="field"><label for="input_press_kp">Kp</label><input type="number" step="any" name="press_kp" id="input_press_kp" value=""></div>
-              <div class="field"><label for="input_press_ki">Ki</label><input type="number" step="0.01" name="press_ki" id="input_press_ki" value=""></div>
-              <div class="field"><label for="input_press_kd">Kd</label><input type="number" step="any" name="press_kd" id="input_press_kd" value=""></div>
-            </div>
-            <button type="submit" class="submit">Save pump pressure</button>
-          </form>
-        </details>
-      </div>
-
-      <div class="card">
-        <div class="tab-section-title">Shot profiles</div>
-        <p class="hint">Tap a profile to use it. With a 0&ndash;16 bar sensor, pressure phases are held by the sensor; otherwise pressure and flow are estimates from the calibrated pump model. Pump trim: + pushes more water (faster shot), &minus; less (slower shot). Adjust grind first.</p>
-        <div id="profile_list_body"></div>
-      </div>
-
-      <div class="card" id="profile_tweak_card" hidden>
-        <div class="tab-section-title" id="profile_tweak_title">Tweak</div>
-        <form onsubmit="submitProfileTweak(event)">
-          <input type="hidden" id="input_tweak_name" value="">
-          <div class="field-row">
-            <div class="field" id="tweak_temp_field"><label for="input_tweak_temp">Temperature (&deg;C)</label><input type="number" step="0.5" min="80" max="100" id="input_tweak_temp"></div>
-            <div class="field"><label for="input_tweak_max_sec">Max shot time (s)</label><input type="number" step="1" min="5" max="120" id="input_tweak_max_sec"></div>
-          </div>
-          <div class="field-row">
-            <div class="field"><label for="input_tweak_scale">Pressure scale</label><input type="number" step="0.05" min="0.7" max="1.1" id="input_tweak_scale"></div>
-            <div class="field"><label for="input_tweak_trim">Pump trim (%)</label><input type="number" step="1" min="-20" max="20" id="input_tweak_trim"></div>
-          </div>
-          <button type="submit" id="profile_tweak_submit" class="submit">Save</button>
-          <button type="button" onclick="closeProfileTweak()" class="btn-secondary">Cancel</button>
-        </form>
-      </div>
-    </div>
-
-    <div class="view" data-view="history" id="view-history" role="tabpanel" aria-labelledby="tab-history" hidden>
-      <div class="card">
-        <div class="tab-section-title">Shot History</div>
-        <div id="shot_history_empty" class="empty-hint">No shots logged yet.</div>
-        <div class="table-scroll">
-          <table class="history" id="shot_history_table" style="display:none">
-            <thead><tr><th>When</th><th>Duration</th><th>Peak &deg;C</th><th>End &deg;C</th><th id="shot_weight_th" hidden>Weight</th><th>Notes</th></tr></thead>
-            <tbody id="shot_history_body"></tbody>
-          </table>
+          </section>
         </div>
-        <div class="chart-card">
-          <div class="chart-label"><span>Peak (&#9679;) &amp; end (&mdash;) temp &middot; last 20 shots</span><span>&deg;C</span></div>
-          <canvas id="shot_trend_chart" width="300" height="70"></canvas>
-        </div>
-      </div>
-
-      <div class="card" id="shot_notes_card" hidden>
-        <div class="tab-section-title" id="shot_notes_title">Shot Notes</div>
-        <p class="hint">Filled in after tasting, not at pull time - bean/dose/grind/rating are a dial-in journal, not something you'd want to stop and type mid-shot.</p>
-        <form onsubmit="submitShotNotes(event)">
-          <input type="hidden" id="input_shot_note_index" value="-1">
-          <div class="field-row">
-            <div class="field"><label for="input_shot_note_bean">Bean</label><input type="text" id="input_shot_note_bean" maxlength="24" placeholder="e.g. Ethiopia Yirgacheffe"></div>
-            <div class="field"><label for="input_shot_note_dose">Dose in (g)</label><input type="number" step="0.1" id="input_shot_note_dose" value="18"></div>
-          </div>
-          <div class="field-row">
-            <div class="field"><label for="input_shot_note_grind">Grind setting</label><input type="text" id="input_shot_note_grind" maxlength="16" placeholder="e.g. 3.2"></div>
-            <div class="field">
-              <label for="input_shot_note_rating">Rating</label>
-              <select id="input_shot_note_rating">
-                <option value="0">Unrated</option>
-                <option value="1">1 - Poor</option>
-                <option value="2">2</option>
-                <option value="3">3 - OK</option>
-                <option value="4">4</option>
-                <option value="5">5 - Great</option>
-              </select>
-            </div>
-          </div>
-          <div class="field">
-            <label for="input_shot_note_text">Notes</label>
-            <input type="text" id="input_shot_note_text" maxlength="60" placeholder="e.g. sour, tighten grind next time">
-          </div>
-          <button type="submit" class="submit">Save Shot Notes</button>
-        </form>
-      </div>
-
-      <div class="card">
-        <div class="tab-section-title">Maintenance</div>
-        <div class="metric-row"><span>Shots since last descale</span><b><span id="descale_shots">--</span></b></div>
-        <div class="metric-row"><span>Days since last descale</span><b><span id="descale_days">--</span></b></div>
-        <form action="/update" method="GET">
-          <div class="field-row">
-            <div class="field"><label for="input_descale_shots">Shot threshold</label><input type="number" step="1" min="1" name="descale_shot_threshold" id="input_descale_shots" value=""></div>
-            <div class="field"><label for="input_descale_days">Day threshold</label><input type="number" step="1" min="1" name="descale_day_threshold" id="input_descale_days" value=""></div>
-          </div>
-          <button type="submit" class="submit">Save Thresholds</button>
-        </form>
-        <button type="button" onclick="markDescaled()" class="btn-secondary">Mark Descaled Today</button>
       </div>
     </div>
 
     <div class="view" data-view="settings" id="view-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
-      <div class="group-title">Brewing</div>
-      <div class="card" id="pump_cal_card">
-        <div class="tab-section-title">Pump calibration</div>
-        <p class="hint">Teaches the pump model how much water your pump moves. Remove the portafilter, put a cup on a scale under the group and tare it, and turn the Brew switch on. Each run pumps at full power for 10 s. Three runs are averaged; a run more than 10% off the others has to be redone.</p>
-        <div class="metric-row"><span>Current value</span><b><span id="pump_cal_current">--</span></b></div>
-        <div id="pump_cal_runs"></div>
-        <p id="pump_cal_status" class="hint" aria-live="polite"></p>
-        <p id="pump_cal_error" class="hint" style="color:var(--danger)" aria-live="assertive"></p>
-        <div id="pump_cal_grams_row" hidden>
-          <div class="field">
-            <label for="input_pump_cal_grams">Grams in the cup</label>
-            <input type="number" step="0.1" min="1" max="500" id="input_pump_cal_grams">
-          </div>
-          <button type="button" onclick="submitCalGrams()" class="submit">Record</button>
+      <div class="settings-layout">
+        <nav class="settings-nav" aria-label="Settings sections">
+          <h1 class="settings-nav-title">Settings</h1>
+          <button type="button" class="sec-btn active" data-sec="brewing" onclick="showSection('brewing')"><span>Brewing<small>Temperatures, profiles</small></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+          <button type="button" class="sec-btn" data-sec="power" onclick="showSection('power')"><span>Power &amp; schedule<small>Auto sleep, warm-up</small></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+          <button type="button" class="sec-btn" data-sec="maint" onclick="showSection('maint')"><span>Maintenance<small>Descale reminder</small></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+          <button type="button" class="sec-btn" data-sec="advanced" onclick="showSection('advanced')"><span>Advanced<small>PID, calibration, network</small></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+        </nav>
+
+        <div class="set-panels">
+          <section class="set-panel" data-sec="brewing">
+            <h2>Brewing</h2>
+            <div class="set-grid">
+              <div class="card">
+                <div class="tab-section-title">Brew temperature</div>
+                <form action="/update" method="GET">
+                  <label class="hint" for="input_brew_target" style="display:block">Boiler target for shots (&deg;C)</label>
+                  <div class="stepper">
+                    <button type="button" class="step-btn" aria-label="Lower brew temperature" onclick="stepField('input_brew_target','brew_target',-0.5,80,100)">&minus;</button>
+                    <input type="number" step="0.1" min="80" max="100" name="brew_target" id="input_brew_target" value="">
+                    <button type="button" class="step-btn" aria-label="Raise brew temperature" onclick="stepField('input_brew_target','brew_target',0.5,80,100)">+</button>
+                  </div>
+                  <div class="stepper-note"><span>Saves automatically</span><span class="save-confirm" id="brew_target_saved"></span></div>
+                </form>
+              </div>
+              <div class="card">
+                <div class="tab-section-title">Steam temperature</div>
+                <form action="/update" method="GET">
+                  <label class="hint" for="input_steam_target" style="display:block">Boiler target for milk (&deg;C)</label>
+                  <div class="stepper">
+                    <button type="button" class="step-btn" aria-label="Lower steam temperature" onclick="stepField('input_steam_target','steam_target',-1,110,150)">&minus;</button>
+                    <input type="number" step="0.1" min="110" max="150" name="steam_target" id="input_steam_target" value="">
+                    <button type="button" class="step-btn" aria-label="Raise steam temperature" onclick="stepField('input_steam_target','steam_target',1,110,150)">+</button>
+                  </div>
+                  <div class="stepper-note"><span>Saves automatically</span><span class="save-confirm" id="steam_target_saved"></span></div>
+                </form>
+              </div>
+              <div class="card wide">
+                <div class="tab-section-title">Shot profiles</div>
+                <p class="hint">Tap a profile to use it. Tweak changes its temperature and stop time; Copy makes your own version to rename or delete.</p>
+                <div id="profile_list_body"></div>
+              </div>
+              <div class="card wide" id="profile_tweak_card" hidden>
+                <div class="tab-section-title" id="profile_tweak_title">Tweak</div>
+                <form onsubmit="submitProfileTweak(event)">
+                  <input type="hidden" id="input_tweak_name" value="">
+                  <div class="field-row">
+                    <div class="field" id="tweak_temp_field"><label for="input_tweak_temp">Temperature (&deg;C)</label><input type="number" step="0.5" min="80" max="100" id="input_tweak_temp"></div>
+                    <div class="field"><label for="input_tweak_max_sec">Max shot time (s)</label><input type="number" step="1" min="5" max="120" id="input_tweak_max_sec"></div>
+                  </div>
+                  <details class="disclosure">
+                    <summary>Pressure scale and pump trim</summary>
+                    <div class="field-row">
+                      <div class="field"><label for="input_tweak_scale">Pressure scale</label><input type="number" step="0.05" min="0.7" max="1.1" id="input_tweak_scale"></div>
+                      <div class="field"><label for="input_tweak_trim">Pump trim (%)</label><input type="number" step="1" min="-20" max="20" id="input_tweak_trim"></div>
+                    </div>
+                    <p class="hint">Trim + pushes more water (faster shot), &minus; less. Adjust the grind first.</p>
+                  </details>
+                  <button type="submit" id="profile_tweak_submit" class="submit">Save</button>
+                  <button type="button" onclick="closeProfileTweak()" class="btn-secondary">Cancel</button>
+                </form>
+              </div>
+            </div>
+          </section>
+
+          <section class="set-panel" data-sec="power" hidden>
+            <h2>Power &amp; schedule</h2>
+            <div class="set-grid">
+              <div class="card">
+                <div class="tab-section-title">Auto sleep</div>
+                <form action="/update" method="GET">
+                  <div class="field"><label for="input_eco_min">Brew: heater off after (min, 0 = never)</label><input type="number" step="1" min="0" name="eco_timeout_min" id="input_eco_min" value=""></div>
+                  <div class="field"><label for="input_steam_off_min">Steam: off after (min, 0 = never)</label><input type="number" step="1" min="0" name="steam_auto_off_min" id="input_steam_off_min" value=""></div>
+                  <button type="submit" class="submit">Save</button>
+                </form>
+                <p class="hint">Counts from the last thing you did in this app. Status polling doesn't count.</p>
+              </div>
+              <div class="card">
+                <div class="tab-section-title">Morning warm-up</div>
+                <div id="ntp_banner" class="banner banner-warn" style="margin-top:var(--sp-2)">Clock not synced yet &mdash; warm-up won't fire until it is.</div>
+                <form action="/update" method="GET">
+                  <div class="sched-slot">
+                    <label class="check-row"><input type="checkbox" id="input_sched0_en_cb" onchange="setSchedEnabled(0,this.checked)"> On</label>
+                    <div class="field-row">
+                      <div class="field"><label for="input_sched0_time">Time</label><input type="time" name="sched0_time" id="input_sched0_time" value="07:00"></div>
+                      <div class="field"><label for="input_sched0_steam">Mode</label><select name="sched0_steam" id="input_sched0_steam"><option value="0">Brew</option><option value="1">Steam</option></select></div>
+                    </div>
+                  </div>
+                  <details class="disclosure">
+                    <summary>More times</summary>
+                    <div class="sched-slot">
+                      <label class="check-row"><input type="checkbox" id="input_sched1_en_cb" onchange="setSchedEnabled(1,this.checked)"> Time 2</label>
+                      <div class="field-row">
+                        <div class="field"><label for="input_sched1_time">Time</label><input type="time" name="sched1_time" id="input_sched1_time" value="07:00"></div>
+                        <div class="field"><label for="input_sched1_steam">Mode</label><select name="sched1_steam" id="input_sched1_steam"><option value="0">Brew</option><option value="1">Steam</option></select></div>
+                      </div>
+                    </div>
+                    <div class="sched-slot">
+                      <label class="check-row"><input type="checkbox" id="input_sched2_en_cb" onchange="setSchedEnabled(2,this.checked)"> Time 3</label>
+                      <div class="field-row">
+                        <div class="field"><label for="input_sched2_time">Time</label><input type="time" name="sched2_time" id="input_sched2_time" value="07:00"></div>
+                        <div class="field"><label for="input_sched2_steam">Mode</label><select name="sched2_steam" id="input_sched2_steam"><option value="0">Brew</option><option value="1">Steam</option></select></div>
+                      </div>
+                    </div>
+                  </details>
+                  <input type="hidden" name="sched_tz_min" id="input_sched_tz_min" value="0">
+                  <button type="submit" class="submit">Save times</button>
+                </form>
+                <p class="hint">Fires once a day. Time zone (<span id="sched_tz_display">--</span>) follows this device.</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="set-panel" data-sec="maint" hidden>
+            <h2>Maintenance</h2>
+            <div class="card">
+              <div class="tab-section-title">Descale</div>
+              <div class="metric-row"><span>Shots since last descale</span><b><span id="descale_shots">--</span></b></div>
+              <div class="metric-row"><span>Days since last descale</span><b><span id="descale_days">--</span></b></div>
+              <form action="/update" method="GET">
+                <div class="field-row">
+                  <div class="field"><label for="input_descale_shots">Remind after (shots)</label><input type="number" step="1" min="1" name="descale_shot_threshold" id="input_descale_shots" value=""></div>
+                  <div class="field"><label for="input_descale_days">or after (days)</label><input type="number" step="1" min="1" name="descale_day_threshold" id="input_descale_days" value=""></div>
+                </div>
+                <button type="submit" class="submit">Save</button>
+              </form>
+              <button type="button" onclick="markDescaled()" class="btn-secondary">Mark descaled today</button>
+            </div>
+          </section>
+
+          <section class="set-panel" data-sec="advanced" hidden>
+            <h2>Advanced</h2>
+            <p class="hint" style="margin:-6px 0 var(--sp-4)">Set once and forget &mdash; nothing here is needed day to day.</p>
+            <div class="card">
+              <details class="adv" id="adv_temp">
+                <summary><span>Temperature control<small>PID gains, auto-tune, steam safety limit</small></span></summary>
+                <div class="adv-body">
+                  <div class="sub-title">Brew &middot; idle gains</div>
+                  <form action="/update" method="GET">
+                    <div class="field-row-3">
+                      <div class="field"><label for="input_brew_kp">Kp</label><input type="number" step="any" name="brew_kp" id="input_brew_kp" value=""></div>
+                      <div class="field"><label for="input_brew_ki">Ki</label><input type="number" step="any" name="brew_ki" id="input_brew_ki" value=""></div>
+                      <div class="field"><label for="input_brew_kd">Kd</label><input type="number" step="any" name="brew_kd" id="input_brew_kd" value=""></div>
+                    </div>
+                    <button type="submit" class="submit">Save</button>
+                  </form>
+                </div>
+                <div class="adv-body">
+                  <div class="sub-title">Brew &middot; gains during a shot</div>
+                  <p class="hint">Used while a shot runs, so flow doesn't pull the boiler temperature down.</p>
+                  <form action="/update" method="GET">
+                    <div class="field-row-3">
+                      <div class="field"><label for="input_brew_akp">Kp</label><input type="number" step="any" name="brew_akp" id="input_brew_akp" value=""></div>
+                      <div class="field"><label for="input_brew_aki">Ki</label><input type="number" step="any" name="brew_aki" id="input_brew_aki" value=""></div>
+                      <div class="field"><label for="input_brew_akd">Kd</label><input type="number" step="any" name="brew_akd" id="input_brew_akd" value=""></div>
+                    </div>
+                    <button type="submit" class="submit">Save</button>
+                  </form>
+                </div>
+                <div class="adv-body">
+                  <div class="sub-title">Steam &middot; gains and safety ceiling</div>
+                  <form action="/update" method="GET">
+                    <div class="field-row-3">
+                      <div class="field"><label for="input_steam_kp">Kp</label><input type="number" step="any" name="steam_kp" id="input_steam_kp" value=""></div>
+                      <div class="field"><label for="input_steam_ki">Ki</label><input type="number" step="any" name="steam_ki" id="input_steam_ki" value=""></div>
+                      <div class="field"><label for="input_steam_kd">Kd</label><input type="number" step="any" name="steam_kd" id="input_steam_kd" value=""></div>
+                    </div>
+                    <div class="field"><label for="input_steam_max_safety">Max safety ceiling (&deg;C)</label><input type="number" step="1" min="100" max="150" name="steam_max_safety" id="input_steam_max_safety" value=""></div>
+                    <button type="submit" class="submit">Save</button>
+                  </form>
+                </div>
+                <div class="adv-body">
+                  <div class="sub-title">Auto-tune</div>
+                  <p class="hint">Cycles the heater around the current Brew or Steam target for several minutes. Stay by the machine.</p>
+                  <button type="button" onclick="startAutotune()" id="btn_autotune" class="btn-autotune">Start auto-tune</button>
+                  <span id="autotune_status" class="autotune-status"></span>
+                </div>
+              </details>
+
+              <details class="adv" id="adv_pressure">
+                <summary><span>Pump pressure control<small>Pressure PID for the 0&ndash;16 bar sensor</small></span></summary>
+                <div class="adv-body">
+                  <p class="hint">With a 0&ndash;16 bar sensor fitted, corrects the pump model from the real reading during pressure phases.</p>
+                  <form action="/update" method="GET">
+                    <div class="field-row-3">
+                      <div class="field"><label for="input_press_kp">Kp</label><input type="number" step="any" name="press_kp" id="input_press_kp" value=""></div>
+                      <div class="field"><label for="input_press_ki">Ki</label><input type="number" step="0.01" name="press_ki" id="input_press_ki" value=""></div>
+                      <div class="field"><label for="input_press_kd">Kd</label><input type="number" step="any" name="press_kd" id="input_press_kd" value=""></div>
+                    </div>
+                    <button type="submit" class="submit">Save</button>
+                  </form>
+                </div>
+              </details>
+
+              <details class="adv" id="adv_pump">
+                <summary><span>Pump calibration<small>How much water the pump moves</small></span></summary>
+                <div class="adv-body" id="pump_cal_card">
+                  <p class="hint">Remove the portafilter, put a cup on a scale under the group and tare it, and turn the Brew switch on. Each run pumps at full power for 10 s. Three runs are averaged; a run more than 10% off the others has to be redone.</p>
+                  <div class="metric-row"><span>Current value</span><b><span id="pump_cal_current">--</span></b></div>
+                  <div id="pump_cal_runs"></div>
+                  <p id="pump_cal_status" class="hint" aria-live="polite"></p>
+                  <p id="pump_cal_error" class="hint" style="color:var(--danger)" aria-live="assertive"></p>
+                  <div id="pump_cal_grams_row" hidden>
+                    <div class="field"><label for="input_pump_cal_grams">Grams in the cup</label><input type="number" step="0.1" min="1" max="500" id="input_pump_cal_grams"></div>
+                    <button type="button" onclick="submitCalGrams()" class="submit">Record</button>
+                  </div>
+                  <button type="button" onclick="calAction('run')" id="btn_pump_cal_run" class="submit">Start run</button>
+                  <button type="button" onclick="calAction('stop')" id="btn_pump_cal_stop" class="btn-secondary" hidden>Stop</button>
+                  <button type="button" onclick="calAction('save')" id="btn_pump_cal_save" class="submit" hidden>Save calibration</button>
+                  <button type="button" onclick="calAction('cancel')" class="btn-secondary">Clear runs</button>
+                </div>
+              </details>
+
+              <details class="adv" id="adv_water">
+                <summary><span>Water tank sensor<small>Installed, polarity, live reading</small></span></summary>
+                <div class="adv-body">
+                  <label class="check-row"><input type="checkbox" id="input_water_enabled" onchange="setWater('water_enabled', this.checked ? 1 : 0)"> Sensor installed</label>
+                  <label class="check-row"><input type="checkbox" id="input_water_interlock" onchange="setWater('water_interlock', this.checked ? 1 : 0)"> Pause new shots on low water</label>
+                  <div class="field">
+                    <label for="input_water_active_low">Water reads as</label>
+                    <select id="input_water_active_low" onchange="setWater('water_active_low', this.value)"><option value="1">LOW (default)</option><option value="0">HIGH</option></select>
+                  </div>
+                  <div class="water-live"><span>Live reading &middot; GPIO7</span><b id="water_live">--</b></div>
+                  <p class="hint">Flat against the outside of the tank at the "low" height (red 3V3, black GND, yellow GPIO7). A removed tank reads as no water. A running shot always finishes; the heater is never affected.</p>
+                </div>
+              </details>
+
+              <details class="adv" id="adv_wifi">
+                <summary><span>Wi-Fi &amp; firmware<small>Reset network, OTA update</small></span></summary>
+                <div class="adv-body">
+                  <button type="button" onclick="wifiReset()" class="btn-danger">Reset Wi-Fi settings</button>
+                  <p class="hint">Reboots into the <b>GaggiaBrewMasterESP_Setup</b> network so you can join a different Wi-Fi without reflashing.</p>
+                  <a href="/firmware" class="hint-link">Firmware update (OTA)</a>
+                </div>
+              </details>
+
+              <details class="adv" id="adv_mqtt">
+                <summary><span>MQTT / Home Assistant<small>Broker and auto-discovery</small></span></summary>
+                <div class="adv-body">
+                  <form action="/update" method="GET" id="mqtt_form">
+                    <div class="field-row">
+                      <div class="field"><label for="input_mqtt_server">Server</label><input type="text" name="mqtt_server" id="input_mqtt_server" placeholder="192.168.1.100"></div>
+                      <div class="field"><label for="input_mqtt_port">Port</label><input type="number" name="mqtt_port" id="input_mqtt_port" value="1883"></div>
+                    </div>
+                    <div class="field-row">
+                      <div class="field"><label for="input_mqtt_user">User</label><input type="text" name="mqtt_user" id="input_mqtt_user"></div>
+                      <div class="field"><label for="input_mqtt_pass">Password</label><input type="password" name="mqtt_pass" id="input_mqtt_pass" placeholder="Unchanged if blank" autocomplete="off"></div>
+                    </div>
+                    <p class="hint" id="mqtt_pass_hint" hidden>A password is already stored. Leave blank to keep it.</p>
+                    <button type="submit" class="submit">Save and restart</button>
+                  </form>
+                  <p class="hint">Saving reboots the controller. Home Assistant auto-discovers mode, targets, sensors and shot/fault/descale binaries.</p>
+                </div>
+              </details>
+
+              <details class="adv" id="adv_backup">
+                <summary><span>Backup &amp; restore<small>Settings file</small></span></summary>
+                <div class="adv-body">
+                  <a href="/settings_export" class="btn-secondary">Download backup</a>
+                  <label class="btn-secondary">Restore from file<input type="file" accept=".txt" onchange="restoreSettings(this)" style="display:none"></label>
+                  <p class="hint">Brew/Steam/schedule/MQTT settings, the active profile and pump calibration. Your own shot profiles live in a separate file and are not included.</p>
+                </div>
+              </details>
+            </div>
+          </section>
         </div>
-        <button type="button" onclick="calAction('run')" id="btn_pump_cal_run" class="submit">Start run</button>
-        <button type="button" onclick="calAction('stop')" id="btn_pump_cal_stop" class="btn-secondary" hidden>Stop</button>
-        <button type="button" onclick="calAction('save')" id="btn_pump_cal_save" class="submit" hidden>Save calibration</button>
-        <button type="button" onclick="calAction('cancel')" class="btn-secondary">Clear runs</button>
-      </div>
-
-      <div class="group-title">Power</div>
-      <div class="card">
-        <div class="tab-section-title">Eco / auto-off</div>
-        <form action="/update" method="GET">
-          <div class="field">
-            <label for="input_eco_min">Brew auto-sleep after (minutes, 0 = disabled)</label>
-            <input type="number" step="1" min="0" name="eco_timeout_min" id="input_eco_min" value="">
-          </div>
-          <div class="field">
-            <label for="input_steam_off_min">Steam auto-off after (minutes, 0 = disabled)</label>
-            <input type="number" step="1" min="0" name="steam_auto_off_min" id="input_steam_off_min" value="">
-          </div>
-          <button type="submit" class="submit">Save</button>
-        </form>
-        <p class="hint" style="margin-top:var(--sp-3)">Heater force-OFF after this long with no Web UI activity (mode/tuning changes). Steam uses a shorter default because it runs hotter. Status polling does not count as activity.</p>
-      </div>
-
-      <div class="card">
-        <div class="tab-section-title">Water tank sensor</div>
-        <label class="check-row"><input type="checkbox" id="input_water_enabled" onchange="setWater('water_enabled', this.checked ? 1 : 0)"> Sensor installed</label>
-        <div class="field" style="margin-top:var(--sp-3)">
-          <label for="input_water_active_low">Water reads as</label>
-          <select id="input_water_active_low" onchange="setWater('water_active_low', this.value)">
-            <option value="1">LOW (default)</option>
-            <option value="0">HIGH</option>
-          </select>
-        </div>
-        <label class="check-row"><input type="checkbox" id="input_water_interlock" onchange="setWater('water_interlock', this.checked ? 1 : 0)"> Pause shots on low water</label>
-        <div class="water-live"><span>Live reading &middot; GPIO7</span><b id="water_live">--</b></div>
-        <p class="hint" style="margin-top:var(--sp-3)">Mount the sensor flat against the outside of the tank at the "low" height (red 3V3, black GND, yellow GPIO7). Check it with the tank full, empty and removed - a removed tank reads as no water. A running shot always finishes; the heater is never affected.</p>
-      </div>
-
-      <div class="card">
-        <div class="tab-section-title">Scheduled warm-up</div>
-        <div id="ntp_banner" class="banner banner-warn" style="margin-bottom:var(--sp-3)">Clock not synced yet &mdash; scheduled warm-up will not fire until NTP succeeds.</div>
-        <form action="/update" method="GET">
-          <div class="sched-slot">
-            <label class="check-row"><input type="checkbox" id="input_sched0_en_cb" onchange="setSchedEnabled(0,this.checked)"> Slot 1 enabled</label>
-            <div class="field-row">
-              <div class="field"><label for="input_sched0_time">Local time</label><input type="time" name="sched0_time" id="input_sched0_time" value="07:00"></div>
-              <div class="field">
-                <label for="input_sched0_steam">Mode</label>
-                <select name="sched0_steam" id="input_sched0_steam"><option value="0">Brew</option><option value="1">Steam</option></select>
-              </div>
-            </div>
-          </div>
-          <div class="sched-slot">
-            <label class="check-row"><input type="checkbox" id="input_sched1_en_cb" onchange="setSchedEnabled(1,this.checked)"> Slot 2 enabled</label>
-            <div class="field-row">
-              <div class="field"><label for="input_sched1_time">Local time</label><input type="time" name="sched1_time" id="input_sched1_time" value="07:00"></div>
-              <div class="field">
-                <label for="input_sched1_steam">Mode</label>
-                <select name="sched1_steam" id="input_sched1_steam"><option value="0">Brew</option><option value="1">Steam</option></select>
-              </div>
-            </div>
-          </div>
-          <div class="sched-slot">
-            <label class="check-row"><input type="checkbox" id="input_sched2_en_cb" onchange="setSchedEnabled(2,this.checked)"> Slot 3 enabled</label>
-            <div class="field-row">
-              <div class="field"><label for="input_sched2_time">Local time</label><input type="time" name="sched2_time" id="input_sched2_time" value="07:00"></div>
-              <div class="field">
-                <label for="input_sched2_steam">Mode</label>
-                <select name="sched2_steam" id="input_sched2_steam"><option value="0">Brew</option><option value="1">Steam</option></select>
-              </div>
-            </div>
-          </div>
-          <input type="hidden" name="sched_tz_min" id="input_sched_tz_min" value="0">
-          <button type="submit" class="submit">Save schedule times</button>
-        </form>
-        <p class="hint" style="margin-top:var(--sp-3)">Up to 3 times. Browser timezone (<span id="sched_tz_display">--</span>) is kept in sync automatically. Each slot fires once per calendar day.</p>
-      </div>
-
-      <div class="group-title">Network</div>
-      <div class="card">
-        <div class="tab-section-title">Wi-Fi</div>
-        <button type="button" onclick="wifiReset()" class="btn-danger">Reset WiFi settings</button>
-        <p class="hint" style="margin-top:var(--sp-3)">Reboots into the <b>GaggiaBrewMasterESP_Setup</b> network so you can join a different Wi-Fi without reflashing.</p>
-        <a href="/firmware" class="hint-link">Firmware update (OTA)</a>
-      </div>
-
-      <div class="card">
-        <div class="tab-section-title">MQTT / Home Assistant</div>
-        <form action="/update" method="GET" id="mqtt_form">
-          <div class="field-row">
-            <div class="field"><label for="input_mqtt_server">Server</label><input type="text" name="mqtt_server" id="input_mqtt_server" placeholder="192.168.1.100"></div>
-            <div class="field"><label for="input_mqtt_port">Port</label><input type="number" name="mqtt_port" id="input_mqtt_port" value="1883"></div>
-          </div>
-          <div class="field-row">
-            <div class="field"><label for="input_mqtt_user">User</label><input type="text" name="mqtt_user" id="input_mqtt_user"></div>
-            <div class="field"><label for="input_mqtt_pass">Password</label><input type="password" name="mqtt_pass" id="input_mqtt_pass" placeholder="Unchanged if blank" autocomplete="off"></div>
-          </div>
-          <p class="hint" id="mqtt_pass_hint" hidden>A password is already stored. Leave blank to keep it.</p>
-          <button type="submit" class="submit">Save and restart</button>
-        </form>
-        <p class="hint" style="margin-top:var(--sp-3)">Saving MQTT settings reboots the controller. Home Assistant auto-discovers mode, targets, sensors, and shot/fault/descale binaries.</p>
-      </div>
-
-      <div class="group-title">Backup</div>
-      <div class="card">
-        <div class="tab-section-title">Settings file</div>
-        <a href="/settings_export" class="btn-secondary" style="display:block;text-align:center;text-decoration:none;margin-top:0">Download backup</a>
-        <label class="btn-secondary" style="display:block;text-align:center;cursor:pointer">
-          Restore from file
-          <input type="file" accept=".txt" onchange="restoreSettings(this)" style="display:none">
-        </label>
-        <p class="hint" style="margin-top:var(--sp-3)">Brew/Steam/schedule/MQTT settings, the active profile and pump calibration. Your own shot profiles live in a separate file and are not included.</p>
       </div>
     </div>
     </main>
 
     <footer class="footer">
-      <a href="/firmware">Firmware update (OTA)</a> &middot; <span id="host">gaggia.local</span> &middot; build <span id="fw_build">--</span>
+      <a href="/firmware">Firmware update</a> &middot; <span id="host">gaggia.local</span> &middot; build <span id="fw_build">--</span>
     </footer>
   </div>
 
-  <nav class="tabbar" role="tablist" aria-label="Sections">
-    <button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="view-now" id="tab-now" data-tab="now"><span class="tab-icon" aria-hidden="true">&#9749;</span><span>Now</span></button>
-    <button type="button" class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="view-tune" id="tab-tune" data-tab="tune"><span class="tab-icon" aria-hidden="true">&#9881;</span><span>Tune</span></button>
-    <button type="button" class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="view-history" id="tab-history" data-tab="history"><span class="tab-icon" aria-hidden="true">&#8987;</span><span>History</span></button>
-    <button type="button" class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="view-settings" id="tab-settings" data-tab="settings"><span class="tab-icon" aria-hidden="true">&#9776;</span><span>Settings</span></button>
-  </nav>
-
 <script>
+// Old WebViews (the kitchen tablet) lack flexbox `gap`; detect it and let the
+// .no-flexgap margin fallbacks in the stylesheet take over.
+(function () {
+  var d = document.createElement("div");
+  d.style.display = "flex";
+  d.style.flexDirection = "column";
+  d.style.rowGap = "1px";
+  d.appendChild(document.createElement("div"));
+  d.appendChild(document.createElement("div"));
+  document.body.appendChild(d);
+  var ok = d.scrollHeight === 1;
+  document.body.removeChild(d);
+  if (!ok) document.documentElement.className += " no-flexgap";
+})();
 function setVal(id, v) {
   var el = document.getElementById(id);
   if (!el) return;
@@ -1073,7 +1120,10 @@ function showSaveConfirm(btn, text, isError) {
 // Tabs - hash-addressable (#now/#tune/#history/#settings) so a reload keeps
 // whichever view was open; all four share the single /status poll below.
 function showTab(name) {
-  var valid = ["now", "tune", "history", "settings"];
+  // Old deep links (#tune, #history) from the four-tab layout still land
+  // somewhere sensible: Tune -> Settings > Brewing, History -> Brew.
+  if (name === "tune") { name = "settings"; showSection("brewing"); }
+  var valid = ["now", "settings"];
   if (valid.indexOf(name) === -1) name = "now";
   var views = document.querySelectorAll(".view");
   for (var i = 0; i < views.length; i++) views[i].hidden = views[i].dataset.view !== name;
@@ -1109,6 +1159,30 @@ function showTab(name) {
     });
   }
 })();
+// Settings sections (Brewing / Power & schedule / Maintenance / Advanced):
+// a pill row on phones, a master list beside the panel on wide screens.
+function showSection(sec) {
+  var panels = document.querySelectorAll(".set-panel");
+  for (var i = 0; i < panels.length; i++) panels[i].hidden = panels[i].dataset.sec !== sec;
+  var btns = document.querySelectorAll(".sec-btn");
+  for (var j = 0; j < btns.length; j++) {
+    var on = btns[j].dataset.sec === sec;
+    btns[j].classList.toggle("active", on);
+    btns[j].setAttribute("aria-current", on ? "true" : "false");
+  }
+}
+// Jump straight to a setting from a banner/link (optionally opening one
+// collapsed Advanced group).
+function openSettings(sec, detailsId) {
+  showTab("settings");
+  showSection(sec);
+  if (detailsId) {
+    var d = document.getElementById(detailsId);
+    if (d) { d.open = true; d.scrollIntoView({ behavior: "smooth", block: "start" }); }
+  } else {
+    window.scrollTo(0, 0);
+  }
+}
 showTab(location.hash.slice(1));
 
 // Phase-transition markers on the temp sparkline (2026-08-23) - adapted from
@@ -1131,96 +1205,157 @@ function trackPhaseMarkers(shotPhase, shotInProgress) {
   lastSeenShotPhase = shotInProgress ? shotPhase : null;
 }
 
-// Draws a dashed horizontal reference line at the given target value,
-// using the same min/max scale as the data line - shared by both charts.
-function drawTargetLine(ctx, w, h, min, max, target) {
-  if (target === null || target === undefined) return;
-  var y = h - ((target - min) / (max - min)) * (h - 6) - 3;
-  ctx.save();
-  ctx.strokeStyle = "rgba(179,162,148,.55)"; // --text-dim, translucent
-  ctx.lineWidth = 1.5;
-  ctx.setLineDash([4, 3]);
-  ctx.beginPath();
-  ctx.moveTo(0, y);
-  ctx.lineTo(w, y);
-  ctx.stroke();
-  ctx.restore();
+// Canvases are sized in CSS (fluid width); match the backing store to the
+// displayed size x devicePixelRatio on every draw so lines stay crisp on
+// the tablet and phone alike. Drawing then happens in CSS pixels.
+function fitCanvas(canvas) {
+  var dpr = window.devicePixelRatio || 1;
+  var cw = canvas.clientWidth || 300, ch = canvas.clientHeight || 140;
+  if (canvas.width !== Math.round(cw * dpr) || canvas.height !== Math.round(ch * dpr)) {
+    canvas.width = Math.round(cw * dpr);
+    canvas.height = Math.round(ch * dpr);
+  }
+  var ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cw, ch);
+  return { ctx: ctx, w: cw, h: ch };
 }
 
-function drawSparkline(data, target) {
-  var canvas = document.getElementById("temp_chart");
-  if (!canvas || !data || data.length < 2) return;
-  var ctx = canvas.getContext("2d");
-  var w = canvas.width, h = canvas.height;
-  ctx.clearRect(0, 0, w, h);
-  var scaleValues = (target === null || target === undefined) ? data : data.concat([target]);
-  var min = Math.min.apply(null, scaleValues), max = Math.max.apply(null, scaleValues);
-  if (max - min < 1) { max += 0.5; min -= 0.5; }
+// One combined live chart (2026-10-15 redesign): boiler temp (copper, own
+// auto-scaled axis incl. the target) and pressure (cyan, 0-10 bar) on the
+// same 2-min window, each target dashed, phase changes as cyan ticks.
+function drawLiveChart(temps, tempTarget, est, sensor, pTarget, closedLoop) {
+  var canvas = document.getElementById("live_chart");
+  if (!canvas) return;
+  var fit = fitCanvas(canvas);
+  var ctx = fit.ctx, w = fit.w, h = fit.h;
+  // Axis numbers (2026-10-16): pressure in the left gutter (cyan, bar),
+  // boiler temp in the right gutter (copper, whole degrees) - both on the
+  // same 3 gridline intervals - plus the latest value of each line tagged
+  // at its end.
+  var x0 = 24, x1 = w - 30;
+  var top = 8, bottom = h - 8, span = bottom - top;
+  function X(i, n) { return x0 + (i / (n - 1)) * (x1 - x0); }
+  var AXIS_FONT = "500 10px 'Geist Mono', ui-monospace, Menlo, monospace";
 
-  phaseMarkers = phaseMarkers.filter(function (m) { return m.age < data.length; });
-  if (phaseMarkers.length) {
-    ctx.save();
-    ctx.strokeStyle = "rgba(224,161,58,.55)"; // --amber, translucent
-    ctx.lineWidth = 1;
-    ctx.setLineDash([3, 2]);
-    phaseMarkers.forEach(function (m) {
-      var idx = data.length - 1 - m.age;
-      var x = (idx / (data.length - 1)) * w;
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, h);
-      ctx.stroke();
-    });
-    ctx.restore();
+  ctx.strokeStyle = "rgba(255,255,255,.05)";
+  ctx.lineWidth = 1;
+  for (var g = 0; g <= 3; g++) {
+    var gy = Math.round(top + (span * g) / 3) + 0.5;
+    ctx.beginPath(); ctx.moveTo(x0, gy); ctx.lineTo(x1, gy); ctx.stroke();
   }
 
-  drawTargetLine(ctx, w, h, min, max, target);
-
-  ctx.beginPath();
-  data.forEach(function (v, i) {
-    var x = (i / (data.length - 1)) * w;
-    var y = h - ((v - min) / (max - min)) * (h - 6) - 3;
-    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-  });
-  ctx.strokeStyle = "#d98c3f";
-  ctx.lineWidth = 2.5;
-  ctx.lineJoin = "round";
-  ctx.stroke();
-}
-
-// Pressure chart: the model estimate (or the real reading once the closed
-// loop exists) as the main line, the raw sensor reading as a thin line
-// while it can't read brew pressure, and the profile's pressure target
-// dashed (target < 0 = no pressure target at that sample -> gap).
-function drawPressureChart(est, sensor, target, closedLoop) {
-  var canvas = document.getElementById("pressure_chart");
-  if (!canvas) return;
-  var main = closedLoop ? sensor : est;
-  if (!main || main.length < 2) return;
-  var ctx = canvas.getContext("2d");
-  var w = canvas.width, h = canvas.height;
-  ctx.clearRect(0, 0, w, h);
-  var max = 10;
-  function y(v) { return h - (Math.min(max, Math.max(0, v)) / max) * (h - 6) - 3; }
-  function line(data, color, width, dashed, gapsBelowZero) {
-    if (!data || data.length < 2) return;
+  function path(data, yOf, gapsBelowZero) {
     ctx.beginPath();
     var pen = false;
-    data.forEach(function (v, i) {
-      var x = (i / (data.length - 1)) * w;
-      if (gapsBelowZero && v < 0) { pen = false; return; }
-      if (!pen) { ctx.moveTo(x, y(v)); pen = true; } else ctx.lineTo(x, y(v));
+    for (var i = 0; i < data.length; i++) {
+      var v = data[i];
+      if (gapsBelowZero && v < 0) { pen = false; continue; }
+      var x = X(i, data.length), yy = yOf(v);
+      if (!pen) { ctx.moveTo(x, yy); pen = true; } else ctx.lineTo(x, yy);
+    }
+  }
+  function axisLabel(text, x, y, color, align) {
+    ctx.font = AXIS_FONT;
+    ctx.textAlign = align;
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = color;
+    ctx.fillText(text, x, Math.max(top + 4, Math.min(bottom - 4, y)));
+  }
+  // Small pill with the latest value, right-aligned just inside the plot,
+  // above (or below, near the top) the line's end point.
+  var tagBoxes = [];
+  function valueTag(text, y, color, border) {
+    ctx.font = "600 11px 'Geist', system-ui, sans-serif";
+    var tw = ctx.measureText(text).width + 14, th = 17;
+    var tx = x1 - tw - 4;
+    var ty2 = y - th - 5 < top ? y + 5 : y - th - 5;
+    tagBoxes.forEach(function (b) {
+      if (ty2 < b.y + b.h + 2 && ty2 + th > b.y - 2) ty2 = (ty2 < b.y) ? b.y - th - 3 : b.y + b.h + 3;
     });
-    ctx.setLineDash(dashed ? [5, 4] : []);
-    ctx.strokeStyle = color;
-    ctx.lineWidth = width;
-    ctx.lineJoin = "round";
-    ctx.stroke();
+    ty2 = Math.max(top, Math.min(bottom - th, ty2));
+    tagBoxes.push({ y: ty2, h: th });
+    ctx.fillStyle = "rgba(14,15,17,.88)";
+    ctx.strokeStyle = border;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    var r = th / 2;
+    ctx.moveTo(tx + r, ty2); ctx.lineTo(tx + tw - r, ty2);
+    ctx.arc(tx + tw - r, ty2 + r, r, -Math.PI / 2, Math.PI / 2);
+    ctx.lineTo(tx + r, ty2 + th);
+    ctx.arc(tx + r, ty2 + r, r, Math.PI / 2, Math.PI * 1.5);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = color;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, tx + tw / 2, ty2 + th / 2 + 0.5);
+  }
+
+  var main = closedLoop ? sensor : est;
+  // 0-12 bar (same scale as the dial's pressure ring) so the 3 gridline
+  // intervals land on whole numbers: 0 / 4 / 8 / 12.
+  var PMAX = 12;
+  function py(v) { return bottom - (Math.min(PMAX, Math.max(0, v)) / PMAX) * span; }
+  for (var pg = 0; pg <= 3; pg++) axisLabel(String(pg * 4), x0 - 6, py(pg * 4), "rgba(70,227,240,.75)", "right");
+  if (main && main.length > 1) {
+    path(main, py, false);
+    ctx.lineTo(x1, bottom); ctx.lineTo(x0, bottom); ctx.closePath();
+    var grad = ctx.createLinearGradient(0, top, 0, bottom);
+    grad.addColorStop(0, "rgba(70,227,240,.18)");
+    grad.addColorStop(1, "rgba(70,227,240,0)");
+    ctx.fillStyle = grad;
+    ctx.fill();
+  }
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  if (pTarget && pTarget.length > 1) {
+    ctx.setLineDash([4, 5]);
+    path(pTarget, py, true);
+    ctx.strokeStyle = "rgba(255,255,255,.45)"; ctx.lineWidth = 1.2; ctx.stroke();
     ctx.setLineDash([]);
   }
-  line(target, "#d98c3f", 1.5, true, true);
-  if (!closedLoop) line(sensor, "#6b5d52", 1, false, false);
-  line(main, "#3f8cd9", 2.5, false, false);
+  if (!closedLoop && sensor && sensor.length > 1) {
+    path(sensor, py, false);
+    ctx.strokeStyle = "rgba(255,255,255,.16)"; ctx.lineWidth = 1; ctx.stroke();
+  }
+  if (main && main.length > 1) {
+    path(main, py, false);
+    ctx.strokeStyle = "#46e3f0"; ctx.lineWidth = 2; ctx.stroke();
+  }
+
+  if (temps && temps.length > 1) {
+    var scale = (tempTarget === null || tempTarget === undefined) ? temps : temps.concat([tempTarget]);
+    var dmin = Math.min.apply(null, scale), dmax = Math.max.apply(null, scale);
+    var pad = Math.max(0.5, (dmax - dmin) * 0.12);
+    // Whole-degree axis whose 3 intervals are whole numbers too.
+    var tmin = Math.floor(dmin - pad);
+    var step = Math.max(1, Math.ceil((dmax + pad - tmin) / 3));
+    var tmax = tmin + step * 3;
+    var ty = function (v) { return bottom - ((v - tmin) / (tmax - tmin)) * span; };
+    for (var tg = 0; tg <= 3; tg++) axisLabel((tmin + tg * step) + "°", x1 + 6, ty(tmin + tg * step), "rgba(227,154,98,.8)", "left");
+    if (tempTarget !== null && tempTarget !== undefined) {
+      ctx.setLineDash([4, 5]);
+      ctx.beginPath(); ctx.moveTo(x0, ty(tempTarget)); ctx.lineTo(x1, ty(tempTarget));
+      ctx.strokeStyle = "rgba(227,154,98,.45)"; ctx.lineWidth = 1.2; ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    phaseMarkers = phaseMarkers.filter(function (m) { return m.age < temps.length; });
+    ctx.strokeStyle = "rgba(70,227,240,.45)";
+    ctx.lineWidth = 1;
+    phaseMarkers.forEach(function (m) {
+      var mx = X(temps.length - 1 - m.age, temps.length);
+      ctx.beginPath(); ctx.moveTo(mx, top); ctx.lineTo(mx, bottom); ctx.stroke();
+    });
+    path(temps, ty, false);
+    ctx.strokeStyle = "#e39a62"; ctx.lineWidth = 2; ctx.stroke();
+    var tLast = temps[temps.length - 1];
+    valueTag(tLast.toFixed(1) + "°", ty(tLast), "#e39a62", "rgba(227,154,98,.5)");
+    setText("temp_range_label", tmin + "–" + tmax + " °C");
+  }
+  if (main && main.length > 1) {
+    var pLast = main[main.length - 1];
+    if (closedLoop || pLast > 0.05) valueTag(pLast.toFixed(1) + " bar", py(pLast), "#46e3f0", "rgba(70,227,240,.5)");
+  }
 }
 
 function formatElapsed(ms) {
@@ -1275,63 +1410,76 @@ setInterval(function () {
 
 // Cached oldest-first, exactly as /shots returns it - shotLogUpdateNotes()
 // on the device indexes by this same oldest-first order, NOT the table's
-// reversed (newest-first) display order, so editShotNotes()/submitShotNotes()
+// reversed (newest-first) display order, so fillShotNotes()/submitShotNotes()
 // need the original index preserved alongside each displayed row.
 var shotsCache = [];
 
-function shotNotesSummary(s) {
-  if (!s.bean && !s.rating && !s.notes) return "+ Add";
-  var stars = s.rating > 0 ? "★".repeat(s.rating) : "";
-  return (stars ? stars + " " : "") + (s.bean || "Notes");
+// The old History tab is gone (2026-10-15 redesign): only the latest shot
+// matters day to day, so it gets a card on the Brew view with a one-tap
+// taste rating. Notes still go through the same shot_note_* API.
+var TASTE_TIPS = {
+  Sour: "Under-extracted. Try a finer grind or +1 \u00b0C.",
+  Balanced: "Nice. Keep this grind and dose for this bean.",
+  Bitter: "Over-extracted. Try a coarser grind or \u22121 \u00b0C."
+};
+var TASTE_RATING = { Sour: 2, Balanced: 5, Bitter: 2 };
+
+function shotAgo(ts) {
+  if (!ts || ts < 1600000000) return "";
+  var mins = Math.round((Date.now() / 1000 - ts) / 60);
+  if (mins < 1) return "just now";
+  if (mins < 60) return mins + " min ago";
+  var hrs = Math.round(mins / 60);
+  if (hrs < 24) return hrs + " h ago";
+  return new Date(ts * 1000).toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function renderLastShot() {
+  var card = document.getElementById("last_shot_card");
+  if (!card) return;
+  if (!shotsCache.length) { card.hidden = true; return; }
+  card.hidden = false;
+  var idx = shotsCache.length - 1;
+  var s = shotsCache[idx];
+  var ago = shotAgo(s.ts);
+  setText("last_shot_title", "Last shot" + (ago ? " \u00b7 " + ago : ""));
+  var sum = document.getElementById("last_shot_sum");
+  sum.textContent = "";
+  function part(big, small) {
+    var span = document.createElement("span");
+    var b = document.createElement("b");
+    b.textContent = big;
+    span.appendChild(b);
+    span.appendChild(document.createTextNode(" " + small));
+    sum.appendChild(span);
+  }
+  part((s.duration_ms / 1000).toFixed(1), "s");
+  part(s.peak_temp.toFixed(1), "\u00b0 peak");
+  if (s.weight > 0) part(s.weight.toFixed(1), "g");
+  if (s.bean) part(s.bean, "");
+  var taste = null;
+  for (var k in TASTE_TIPS) { if (s.notes === k) taste = k; }
+  var btns = document.querySelectorAll(".taste-btn");
+  for (var i = 0; i < btns.length; i++) {
+    var on = btns[i].dataset.taste === taste;
+    btns[i].classList.toggle("active", on);
+    btns[i].setAttribute("aria-pressed", on ? "true" : "false");
+  }
+  setText("taste_tip", taste ? TASTE_TIPS[taste] : "How did it taste?");
+  var form = document.getElementById("shot_notes_card");
+  if (form && form.hidden) fillShotNotes(idx);
 }
 
 function fetchShotHistory() {
   xhr("/shots", function (status, text) {
     if (status !== 200) return;
     try { shotsCache = JSON.parse(text); } catch (err) { return; }
-    var body = document.getElementById("shot_history_body");
-    var table = document.getElementById("shot_history_table");
-    var empty = document.getElementById("shot_history_empty");
-    var weightTh = document.getElementById("shot_weight_th");
-    if (!shotsCache.length) {
-      table.style.display = "none";
-      empty.style.display = "block";
-      return;
-    }
-    empty.style.display = "none";
-    table.style.display = "table";
-    var showWeight = shotsCache.some(function (s) { return s.weight > 0; });
-    if (weightTh) weightTh.hidden = !showWeight;
-    body.textContent = "";
-    shotsCache.map(function (s, i) { return { s: s, idx: i }; })
-      .reverse().slice(0, 15).forEach(function (entry) {
-      var s = entry.s;
-      var tr = document.createElement("tr");
-      function td(text, cls) {
-        var cell = document.createElement("td");
-        if (cls) cell.className = cls;
-        cell.textContent = text;
-        return cell;
-      }
-      var when = new Date(s.ts * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-      tr.appendChild(td(when));
-      tr.appendChild(td(formatElapsed(s.duration_ms), "num"));
-      tr.appendChild(td(s.peak_temp.toFixed(1), "num"));
-      tr.appendChild(td(s.end_temp > 0 ? s.end_temp.toFixed(1) : "—", "num"));
-      if (showWeight) tr.appendChild(td(s.weight > 0 ? s.weight.toFixed(1) + "g" : "—", "num"));
-      var notesTd = document.createElement("td");
-      notesTd.style.cursor = "pointer";
-      notesTd.textContent = shotNotesSummary(s);
-      notesTd.addEventListener("click", function () { editShotNotes(entry.idx); });
-      tr.appendChild(notesTd);
-      body.appendChild(tr);
-    });
-    drawShotTrendChart(shotsCache.slice(-20));
+    renderLastShot();
   });
 }
 fetchShotHistory();
 
-function editShotNotes(idx) {
+function fillShotNotes(idx) {
   var s = shotsCache[idx];
   if (!s) return;
   document.getElementById("input_shot_note_index").value = idx;
@@ -1340,22 +1488,41 @@ function editShotNotes(idx) {
   document.getElementById("input_shot_note_grind").value = s.grind || "";
   document.getElementById("input_shot_note_rating").value = s.rating || 0;
   document.getElementById("input_shot_note_text").value = s.notes || "";
-  var when = new Date(s.ts * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-  document.getElementById("shot_notes_title").textContent = "Shot Notes — " + when;
-  var card = document.getElementById("shot_notes_card");
-  card.hidden = false;
-  card.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
-function submitShotNotes(ev) {
-  ev.preventDefault();
+function toggleShotDetails() {
+  var card = document.getElementById("shot_notes_card");
+  if (card.hidden) fillShotNotes(shotsCache.length - 1);
+  card.hidden = !card.hidden;
+}
+
+function shotNotesQuery() {
   var q = "shot_note_index=" + document.getElementById("input_shot_note_index").value;
   q += "&shot_note_bean=" + encodeURIComponent(document.getElementById("input_shot_note_bean").value);
   q += "&shot_note_dose=" + document.getElementById("input_shot_note_dose").value;
   q += "&shot_note_grind=" + encodeURIComponent(document.getElementById("input_shot_note_grind").value);
   q += "&shot_note_rating=" + document.getElementById("input_shot_note_rating").value;
   q += "&shot_note_text=" + encodeURIComponent(document.getElementById("input_shot_note_text").value);
-  xhr("/update?" + q, function () {
+  return q;
+}
+
+// One tap: stores the taste word as the shot's note (and a rating), keeping
+// any bean/dose/grind already saved for that shot.
+function quickTaste(taste) {
+  var idx = shotsCache.length - 1;
+  if (idx < 0) return;
+  fillShotNotes(idx);
+  document.getElementById("input_shot_note_text").value = taste;
+  document.getElementById("input_shot_note_rating").value = TASTE_RATING[taste];
+  shotsCache[idx].notes = taste;
+  shotsCache[idx].rating = TASTE_RATING[taste];
+  renderLastShot();
+  xhr("/update?" + shotNotesQuery(), function () { fetchShotHistory(); });
+}
+
+function submitShotNotes(ev) {
+  ev.preventDefault();
+  xhr("/update?" + shotNotesQuery(), function () {
     document.getElementById("shot_notes_card").hidden = true;
     fetchShotHistory();
   });
@@ -1390,82 +1557,6 @@ function syncSchedTz(serverValue) {
   }
 }
 
-// Shot-quality trend (History tab) - peak temp per shot as a line, against a
-// dashed reference line at the current Brew target, so a regression (like
-// the overshoot this chart is meant to catch) is visible at a glance instead
-// of needing a manual trace every time. End temp draws as a second, thinner
-// line - a big peak/end gap shows a shot that spiked mid-pull then cooled
-// back down, vs. one that simply ended hot. Duration is encoded as the peak
-// marker's size (bigger dot = longer shot) rather than a third axis, to keep
-// this a single simple canvas rather than a multi-series chart library.
-// end_temp reads 0 ("unknown") for shots logged before that field existed -
-// filtered out of both the series and the min/max range rather than drawn
-// as a false dip to zero.
-function drawShotTrendChart(shots) {
-  var canvas = document.getElementById("shot_trend_chart");
-  if (!canvas) return;
-  var ctx = canvas.getContext("2d");
-  var w = canvas.width, h = canvas.height;
-  ctx.clearRect(0, 0, w, h);
-  if (!shots || shots.length < 2) return;
-
-  var temps = shots.map(function (s) { return s.peak_temp; });
-  var ends = shots.map(function (s) { return s.end_temp > 0 ? s.end_temp : null; });
-  var durs = shots.map(function (s) { return s.duration_ms; });
-  var knownEnds = ends.filter(function (v) { return v !== null; });
-  var range = temps.concat(knownEnds).concat(lastBrewTarget != null ? [lastBrewTarget] : []);
-  var min = Math.min.apply(null, range), max = Math.max.apply(null, range);
-  if (max - min < 2) { max += 1; min -= 1; }
-  var minDur = Math.min.apply(null, durs), maxDur = Math.max.apply(null, durs);
-
-  function yFor(v) { return h - ((v - min) / (max - min)) * (h - 8) - 4; }
-  function xFor(i) { return (i / (shots.length - 1)) * (w - 8) + 4; }
-
-  if (lastBrewTarget != null) {
-    var ty = yFor(lastBrewTarget);
-    ctx.beginPath();
-    ctx.setLineDash([4, 3]);
-    ctx.moveTo(0, ty); ctx.lineTo(w, ty);
-    ctx.strokeStyle = "rgba(217,140,63,.5)";
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.setLineDash([]);
-  }
-
-  // End temp - drawn first (under the peak line), breaking the line across
-  // any unknown (null) gaps instead of interpolating through them.
-  ctx.beginPath();
-  var penDown = false;
-  ends.forEach(function (v, i) {
-    if (v === null) { penDown = false; return; }
-    var x = xFor(i), y = yFor(v);
-    if (!penDown) { ctx.moveTo(x, y); penDown = true; } else { ctx.lineTo(x, y); }
-  });
-  ctx.strokeStyle = "#6b93b0";
-  ctx.lineWidth = 1.5;
-  ctx.lineJoin = "round";
-  ctx.stroke();
-
-  ctx.beginPath();
-  temps.forEach(function (v, i) {
-    var x = xFor(i), y = yFor(v);
-    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-  });
-  ctx.strokeStyle = "#d98c3f";
-  ctx.lineWidth = 2;
-  ctx.lineJoin = "round";
-  ctx.stroke();
-
-  temps.forEach(function (v, i) {
-    var x = xFor(i), y = yFor(v);
-    var durFrac = maxDur > minDur ? (durs[i] - minDur) / (maxDur - minDur) : 0.5;
-    var r = 2 + durFrac * 3.5; // 2-5.5px, longer shots draw a bigger dot
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, 2 * Math.PI);
-    ctx.fillStyle = (lastBrewTarget != null && v > lastBrewTarget + 1.5) ? "#e5544b" : "#d98c3f";
-    ctx.fill();
-  });
-}
 setInterval(function () {
   var el = document.getElementById("last_updated");
   if (!el) return;
@@ -1501,9 +1592,108 @@ function applyModeButtons(mode) {
 function applyShotButton(running) {
   var btnShot = document.getElementById("btn_shot");
   var blocked = !running && waterLow && waterInterlockOn;
-  btnShot.textContent = running ? "Stop Shot" : blocked ? "Refill to brew" : "Start Shot";
+  btnShot.textContent = running ? "Stop shot" : blocked ? "Refill to brew" : "Start shot";
   btnShot.classList.toggle("running", running);
   btnShot.classList.toggle("blocked", blocked);
+}
+
+// Phase strip for the running shot, from the active profile's phase names;
+// rebuilt only when the profile changes, then just re-classed per poll.
+var phaseStepsFor = "";
+function renderPhaseSteps(json) {
+  var box = document.getElementById("phase_steps");
+  if (!box) return;
+  var prof = null;
+  for (var i = 0; i < profilesCache.length; i++) if (profilesCache[i].name === json.active_profile_name) prof = profilesCache[i];
+  var phases = prof ? prof.phases : [];
+  var key = (prof ? prof.name : "") + "|" + phases.length;
+  if (key !== phaseStepsFor) {
+    phaseStepsFor = key;
+    box.textContent = "";
+    phases.forEach(function (ph, k) {
+      if (k > 0) { var sep = document.createElement("span"); sep.className = "phase-sep"; box.appendChild(sep); }
+      var el = document.createElement("span");
+      el.className = "phase-step";
+      el.textContent = ph.name || ("Phase " + (k + 1));
+      box.appendChild(el);
+    });
+  }
+  var steps = box.querySelectorAll(".phase-step");
+  for (var j = 0; j < steps.length; j++) {
+    steps[j].classList.toggle("done", json.shot_in_progress && j < json.phase_index);
+    steps[j].classList.toggle("current", json.shot_in_progress && j === json.phase_index);
+  }
+}
+
+// -/+ stepper: change the field, then save after a short pause so a few
+// quick taps send one request.
+var stepTimers = {};
+function stepField(inputId, param, delta, min, max) {
+  var el = document.getElementById(inputId);
+  var v = parseFloat(el.value);
+  if (isNaN(v)) return;
+  v = Math.round(Math.max(min, Math.min(max, v + delta)) * 10) / 10;
+  el.value = v;
+  el.dataset.synced = "1";
+  clearTimeout(stepTimers[param]);
+  stepTimers[param] = setTimeout(function () {
+    xhr("/update?" + param + "=" + v, function (status) {
+      var note = document.getElementById(param + "_saved");
+      if (!note) return;
+      note.textContent = status === 200 ? "Saved " + v + "\u00b0" : "Save failed";
+      note.classList.toggle("error", status !== 200);
+      note.classList.add("show");
+      clearTimeout(note._t);
+      note._t = setTimeout(function () { note.classList.remove("show"); }, 2200);
+    });
+  }, 700);
+}
+
+var DIAL_TICKS = 33, shotPeakBar = 0;
+(function buildDialTicks() {
+  var g = document.getElementById("dial_ticks");
+  if (!g) return;
+  for (var i = 0; i < DIAL_TICKS; i++) {
+    var a = (135 + (i / (DIAL_TICKS - 1)) * 270) * Math.PI / 180;
+    var major = i % 4 === 0;
+    var r1 = major ? 146 : 149, r2 = 156;
+    var ln = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    ln.setAttribute("x1", (160 + r1 * Math.cos(a)).toFixed(1));
+    ln.setAttribute("y1", (160 + r1 * Math.sin(a)).toFixed(1));
+    ln.setAttribute("x2", (160 + r2 * Math.cos(a)).toFixed(1));
+    ln.setAttribute("y2", (160 + r2 * Math.sin(a)).toFixed(1));
+    ln.setAttribute("class", major ? "tick major" : "tick");
+    g.appendChild(ln);
+  }
+})();
+
+function updateDial(temp, target, scaleHi, state, mode) {
+  var LO = 20;
+  function frac(v) { return Math.max(0, Math.min(1, (v - LO) / (scaleHi - LO))); }
+  var f = temp > 0 ? frac(temp) : 0;
+  var dash = (f * 640.9).toFixed(1) + " 854.5";
+  var ring = document.getElementById("temp_ring_fill");
+  var glow = document.getElementById("temp_ring_glow");
+  ring.setAttribute("stroke-dasharray", dash);
+  glow.setAttribute("stroke-dasharray", dash);
+  ring.classList.toggle("over", state === "over");
+  ring.classList.toggle("zero", f <= 0.005);
+  glow.classList.toggle("zero", f <= 0.005);
+  glow.classList.toggle("over", state === "over");
+  var ticks = document.querySelectorAll("#dial_ticks line");
+  for (var i = 0; i < ticks.length; i++) ticks[i].classList.toggle("lit", f > 0 && i / (ticks.length - 1) <= f + 0.001);
+  var dot = document.getElementById("dial_dot");
+  dot.style.display = f > 0.005 ? "" : "none";
+  dot.setAttribute("transform", "rotate(" + (135 + f * 270).toFixed(1) + " 160 160)");
+  var tg = document.getElementById("dial_target");
+  tg.style.display = target !== null ? "" : "none";
+  if (target !== null) tg.setAttribute("transform", "rotate(" + (135 + frac(target) * 270).toFixed(1) + " 160 160)");
+  var atTemp = state === "ready" && target !== null && mode !== "off";
+  var halo = document.getElementById("temp_ready_halo");
+  if (halo) halo.setAttribute("stroke-dasharray", (atTemp ? frac(target) * 640.9 : 0).toFixed(1) + " 854.5");
+  var dialEl = document.getElementById("dial");
+  dialEl.classList.toggle("off", mode === "off");
+  dialEl.classList.toggle("at-temp", atTemp);
 }
 
 function applyStatus(json) {
@@ -1529,15 +1719,10 @@ function applyStatus(json) {
   setText("target", hasTarget ? target.toFixed(1) : "--");
   document.getElementById("target_on").style.display = mode === "off" ? "none" : "";
   document.getElementById("target_off").style.display = mode === "off" ? "" : "none";
-  setText("output", outputPct.toFixed(0));
-  setText("pump_power", pumpPct.toFixed(0));
-  var pumpBar = document.getElementById("pump_bar");
-  if (pumpBar) pumpBar.style.width = clamp(pumpPct) + "%";
 
   trackPhaseMarkers(json.phase_index, json.shot_in_progress);
-  drawSparkline(json.history, hasTarget ? target : null);
   var closedLoop = json.press_available === true && !json.pressure_fault;
-  drawPressureChart(json.est_history, json.pressure_history, json.target_history, closedLoop);
+  drawLiveChart(json.history, hasTarget ? target : null, json.est_history, json.pressure_history, json.target_history, closedLoop);
   var pLabel = document.getElementById("pressure_label");
   if (pLabel) {
     pLabel.textContent = json.pressure_fault ? "sensor fault"
@@ -1546,29 +1731,25 @@ function applyStatus(json) {
   }
   applyWaterStatus(json, mode);
 
-  var tempPct = (temp > 0 && hasTarget) ? clamp((temp / target) * 100) : 0;
-  var ring = document.getElementById("temp_ring_fill");
-  var RING_CIRCUMFERENCE = 603;
-  ring.style.strokeDashoffset = RING_CIRCUMFERENCE * (1 - tempPct / 100);
-  ring.classList.remove("heating", "ready", "over");
-  if (!json.fault && temp > 0 && hasTarget) {
-    var READY_MARGIN_C = 1.0;
-    if (temp < target - READY_MARGIN_C) ring.classList.add("heating");
-    else if (temp > target + READY_MARGIN_C) ring.classList.add("over");
-    else ring.classList.add("ready");
-  }
+  // Dial (2026-10-15): outer copper arc = boiler temp on a 20-100 C scale
+  // (20-160 in Steam), lit ticks up to the current temp, white triangle at
+  // the target; inner cyan arc = pressure 0-12 bar with a peak-hold dot.
+  var readyMargin = 1.0;
+  var tempState = (!json.fault && temp > 0 && hasTarget)
+    ? (temp < target - readyMargin ? "heating" : temp > target + readyMargin ? "over" : "ready") : "";
+  var scaleHi = mode === "steam" ? 160 : 100;
+  updateDial(json.fault ? 0 : temp, hasTarget ? target : null, scaleHi, tempState, mode);
 
-  // Pressure gauge: the model estimate during a shot (no usable sensor),
-  // the real reading once the closed loop exists. Goal = the current
-  // pressure-phase target.
   var PRESSURE_GAUGE_MAX_BAR = 12;
   var showPressure = closedLoop || json.shot_in_progress;
   var pressureVal = closedLoop ? json.pressure : (json.shot_in_progress ? json.pressure_est : 0);
   var pressureGoal = (json.shot_in_progress && json.phase_type === "pressure") ? json.phase_target : null;
   var pRing = document.getElementById("pressure_ring_fill");
   if (pRing) {
-    pRing.style.strokeDashoffset = RING_CIRCUMFERENCE * (1 - clamp((pressureVal / PRESSURE_GAUGE_MAX_BAR) * 100) / 100);
+    var pFrac = Math.max(0, Math.min(1, pressureVal / PRESSURE_GAUGE_MAX_BAR));
+    pRing.setAttribute("stroke-dasharray", (pFrac * 556.1).toFixed(1) + " 741.4");
     pRing.classList.remove("heating", "ready", "over");
+    pRing.classList.toggle("zero", pFrac <= 0.005);
     if (pressureGoal !== null) {
       var PRESSURE_READY_MARGIN_BAR = 1.0;
       if (pressureVal < pressureGoal - PRESSURE_READY_MARGIN_BAR) pRing.classList.add("heating");
@@ -1576,19 +1757,38 @@ function applyStatus(json) {
       else pRing.classList.add("ready");
     }
   }
-  setText("pressure_gauge_val", showPressure ? pressureVal.toFixed(1) : "--");
+  setText("live_press", pressureVal.toFixed(1));
+  setText("live_temp", json.fault ? "--" : temp.toFixed(1));
+  setText("live_pump", pumpPct.toFixed(0));
+  renderPhaseSteps(json);
+  if (json.shot_in_progress) {
+    if (!prevShotRunning) shotPeakBar = 0;
+    shotPeakBar = Math.max(shotPeakBar, pressureVal);
+  }
+  var peakG = document.getElementById("press_peak");
+  if (peakG) {
+    peakG.style.display = shotPeakBar > 0.5 ? "" : "none";
+    peakG.setAttribute("transform", "rotate(" + (135 + Math.min(1, shotPeakBar / PRESSURE_GAUGE_MAX_BAR) * 270).toFixed(1) + " 160 160)");
+  }
+  setText("pressure_gauge_val", showPressure ? pressureVal.toFixed(1) : "0.0");
   var pCap = document.getElementById("pressure_target_caption");
   if (pCap) {
-    pCap.textContent = (closedLoop ? "" : "est. · ") +
-      (pressureGoal !== null ? "target " + pressureGoal.toFixed(1) + " bar" : "pressure");
+    pCap.textContent = pressureGoal !== null ? (closedLoop ? "" : "est. \u00b7 ") + "target " + pressureGoal.toFixed(1)
+      : shotPeakBar > 0.5 ? "Last peak " + shotPeakBar.toFixed(1)
+      : "pump idle";
   }
 
-  document.getElementById("output_bar").style.width = clamp(outputPct) + "%";
-
+  // Header status: one plain-language state instead of the raw mode.
   var pill = document.getElementById("status_pill");
-  var label = json.fault ? "Fault" : mode === "brew" ? "Brewing" : mode === "steam" ? "Steaming" : "Off";
+  var label, cls;
+  if (json.fault) { label = "Sensor fault"; cls = "fault"; }
+  else if (json.shot_in_progress) { label = json.phase_name ? "Extracting \u00b7 " + json.phase_name : "Extracting"; cls = "shot"; }
+  else if (json.auto_sleeping) { label = "Asleep"; cls = "off"; }
+  else if (mode === "off") { label = "Off"; cls = "off"; }
+  else if (mode === "steam") { label = tempState === "ready" ? "Steam ready" : "Heating for steam"; cls = tempState === "ready" ? "steam ready" : "steam"; }
+  else { label = tempState === "ready" ? "Ready to brew" : tempState === "over" ? "Cooling down" : "Heating"; cls = tempState === "ready" ? "brew ready" : "brew"; }
   setText("mode_status", label);
-  pill.className = "pill " + mode + (json.fault ? " fault" : "");
+  pill.className = "pill status-line " + cls;
   applyModeButtons(mode);
 
   lastBrewTarget = json.brew_target;
@@ -1710,6 +1910,7 @@ function applyStatus(json) {
   lastAutotuneState = json.autotune_state;
 
   shotRunning = json.shot_in_progress;
+  if (app) app.classList.toggle("shooting", !!shotRunning);
   shotElapsedBaseMs = json.shot_elapsed_ms;
   shotElapsedCapturedAt = Date.now();
   applyShotButton(shotRunning);
@@ -1777,11 +1978,9 @@ function applyWaterStatus(json, mode) {
   waterInterlockOn = json.water_interlock !== false;
 
   var pill = document.getElementById("tank_pill");
-  pill.className = "pill tank" + (en ? (waterLow ? " low" : " ok") : "");
+  pill.className = "tank-pill" + (en ? (waterLow ? " low" : " ok") : "");
+  pill.hidden = !en;
   setText("tank_pill_text", waterLow ? "Low water" : "Tank OK");
-  var tile = document.getElementById("tank_tile");
-  tile.className = "stat-tile tank" + (en ? (waterLow ? " low" : " ok") : "");
-  setText("tank_value", waterLow ? "Low" : "OK");
   showBanner("water_banner", waterLow, waterLow && !waterInterlockOn
     ? "Water tank is low. Refill it soon."
     : "Refill the water tank. New shots are paused until it's back.");
@@ -1879,7 +2078,7 @@ function easeJs(curve, x) {
 // Mini phase chart: each phase's target over time, normalised per unit
 // (bar/10, ml/s/10, %/100) so mixed phases share one axis; colour = type.
 var SVG_NS = "http://www.w3.org/2000/svg";
-var PHASE_COLORS = { pressure: "#d98c3f", flow: "#3f8cd9", power: "#9a8b7e", soak: "#4a3f37" };
+var PHASE_COLORS = { pressure: "#46e3f0", flow: "#e39a62", power: "#a1a4a8", soak: "#5f6268" };
 function phaseNorm(ph, v, scale) {
   if (ph.type === "pressure") return (v * scale) / 10;
   if (ph.type === "flow") return v / 10;
@@ -1915,6 +2114,8 @@ function buildProfileMiniChart(p) {
     line.setAttribute("fill", "none");
     line.setAttribute("stroke", PHASE_COLORS[ph.type] || "#888");
     line.setAttribute("stroke-width", "2");
+    line.setAttribute("stroke-linecap", "round");
+    line.setAttribute("stroke-linejoin", "round");
     svg.appendChild(line);
     t += ph.duration_s;
     prevEnd = end;
@@ -1950,7 +2151,10 @@ function renderProfileChips() {
     btn.type = "button";
     btn.className = "btn-preset";
     btn.dataset.name = p.name;
-    btn.textContent = p.name;
+    btn.appendChild(buildProfileMiniChart(p));
+    var lbl = document.createElement("span");
+    lbl.textContent = p.name;
+    btn.appendChild(lbl);
     btn.addEventListener("click", function () { selectProfileByName(p.name); });
     row.appendChild(btn);
   });

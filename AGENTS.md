@@ -203,8 +203,8 @@ The temp module also needs **3.3V** and **GND** from the DevKit (module is
   types: `pressure` (bar), `flow` (ml/s), `power` (% duty), `soak` (pump off);
   each has a curve/ramp, optional limit, a hard `duration_s`, and optional
   `press_gte`/`press_lte` stops (only honored when the pressure sensor is usable).
-- **6 built-ins** (flash, undeletable): Classic 9 bar, Londinium, Lever, IUIUIU
-  Classic, Blooming, Flush (Flush is a utility: no temp, not logged; utility
+- **5 built-ins** (flash, undeletable; set revised 2026-10-15): Classic 9 bar,
+  Lever (Londinium-style declining), Blooming, Turbo, Flush (Flush is a utility: no temp, not logged; utility
   profiles may have up to 10 phases). No Backflush: this machine has no 3-way valve. Per profile: **Tweak** (temp 80-100 C, `max_sec`,
   `pressure_scale` 0.7-1.1, `trim_pct` +-20; stored as overrides for built-ins),
   **Copy**, **Rename**, **Delete** (user profiles only, max 8), **Reset**
@@ -921,6 +921,23 @@ everything again.
 
 ## 10. Change Log
 
+### 2026-10-16 — Claude Code (Opus 5.5) — Dial shows "at working temperature"; live chart shows numbers (redesign UI)
+- **Dial:** when the boiler is within ±1 °C of the target (existing margin),
+  `.dial.at-temp` adds a green halo along the arc up to the target marker,
+  a pulse at the temp dot, a green target marker, and the caption reads
+  "✓ At temp · 94.0°" instead of "Target 94.0°" (aria-live). Not shown Off.
+- **Live chart:** pressure axis 0/4/8/12 bar in the left gutter (scale moved
+  10 → 12 bar to match the dial and land on the gridlines), whole-degree temp
+  axis in the right gutter on the same gridlines, and pill tags with the
+  latest temp / pressure at the line ends (pressure tag hidden at 0 without
+  a closed-loop sensor).
+- Built on `feature/ui-redesign` (what the machine runs). Frontend only.
+- **Flashed via OTA 2026-10-16 ~13:30 local** (CI `19afc01`, fw_build "Oct 16
+  2026 10:25:31" UTC) through the browser: binary from the `ota-bin` branch,
+  POSTed to `/update_fw`. Pre-checks: Off, no shot, pump 0%, autotune and
+  pump-cal idle. Upload hit 100% at ~61 s, then the connection dropped as the
+  board rebooted (normal); `/status` confirmed the new build, Off, no fault.
+
 ### 2026-10-15 — Claude Code (Opus 5.5) — Water sensor working on the machine (sensing face)
 
 - Wired (3V3 / GND / GPIO7) and tested live: against a full tank it first
@@ -964,6 +981,43 @@ everything again.
   [`docs/install-guide-2026-10-15-hlk-pressure-water.md`](docs/install-guide-2026-10-15-hlk-pressure-water.md).
   A Hebrew user-facing copy lives in the user's Claude Doc of the same
   subject. Hardware not installed yet.
+
+### 2026-10-15 — Claude Code (Opus 5.5) — Built-in profiles revised to four distinct styles + Flush
+- Researched (Decent profile guide, Cameron/Hendon "Systematically Improving
+  Espresso" Matter 2020 turbo shot, home-barista pressure-profiling threads).
+- `src/profile_codec.cpp` BUILTIN_PROFILES_JSON now: **Classic 9 bar** (unchanged,
+  daily/medium), **Lever** (Londinium-style: fill to 3 bar, 8 s soak, 9 bar 5 s,
+  decline to 4 bar over 18 s, 92 C; medium-dark), **Blooming** (fill, 25 s bloom,
+  rise to 8 bar, decline to 6 bar, 94 C; light roasts), **Turbo** (6 bar, ~20 s,
+  92 C, coarser grind, 1:2.5-3; light-medium), **Flush**.
+- Removed: Londinium (merged into Lever), old Lever (88 C - use Tweak on Lever for
+  dark roasts), IUIUIU Classic (its flow phases need a real flow measurement).
+  An active profile that no longer exists falls back to Classic 9 bar (main.cpp);
+  stored overrides for removed names are ignored.
+
+### 2026-10-15 — Claude Code (Opus 5.5) — Web UI redesign: two sections, combined dial, tablet layout
+- Frontend-only (`src/web.cpp` index_html); same /status, /update, /shots, /profiles API.
+- Tabs Now/Tune/History/Settings → **Brew** + **Settings**. Phone: bottom tab bar;
+  ≥900 px wide (the user's landscape tablet): left rail, two-column Brew view,
+  master/detail Settings.
+- Brew: one dial (outer copper arc = boiler temp 20-100 °C, 20-160 in Steam,
+  lit ticks, target triangle; inner cyan arc = pressure 0-12 bar with peak dot),
+  profile chips with mini profile charts, shot card, 2-min charts (canvases now
+  sized from CSS × devicePixelRatio), **Last shot** card with one-tap
+  Sour/Balanced/Bitter (saved via shot_note_*; bean/dose/grind form behind a link).
+  While a shot runs (`.app.shooting`) nav, mode switch, chips and last shot hide.
+- Removed from the UI: History table + shot-trend chart, Heater %/Pump % tiles,
+  the duplicate Tank tile. Settings sections: Brewing (temps, profiles, tweak with
+  scale/trim folded), Power & schedule (slot 1 shown, 2-3 under "More times"),
+  Maintenance (descale), Advanced (collapsed: PID/auto-tune/steam ceiling,
+  pressure PID, pump calibration, water sensor, Wi-Fi/OTA, MQTT, backup).
+- Follow-up same night: one combined live chart (`drawLiveChart`: temp + pressure +
+  both targets dashed, phase ticks), live-shot block under the dial (phase strip
+  from the active profile's phase names, big Pressure/Boiler/Pump readouts),
+  −/+ steppers for brew/steam targets that auto-save after 700 ms, tighter
+  tablet spacing so Brew fits 1280×800, phone shot order = timer/Stop first.
+- Old `#tune`/`#history` links map to Settings > Brewing / Brew. No external fonts
+  (system stack), ES5 JS kept.
 
 ### 2026-10-15 — Claude Code (Opus 5.5) — Firmware switched to the 0-16 bar pressure sensor on 5V (HLK-PM01) + divider
 
