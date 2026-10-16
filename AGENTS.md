@@ -932,6 +932,11 @@ everything again.
   latest temp / pressure at the line ends (pressure tag hidden at 0 without
   a closed-loop sensor).
 - Built on `feature/ui-redesign` (what the machine runs). Frontend only.
+- **Flashed via OTA 2026-10-16 ~13:30 local** (CI `19afc01`, fw_build "Oct 16
+  2026 10:25:31" UTC) through the browser: binary from the `ota-bin` branch,
+  POSTed to `/update_fw`. Pre-checks: Off, no shot, pump 0%, autotune and
+  pump-cal idle. Upload hit 100% at ~61 s, then the connection dropped as the
+  board rebooted (normal); `/status` confirmed the new build, Off, no fault.
 
 ### 2026-10-15 — Claude Code (Opus 5.5) — Water sensor working on the machine (sensing face)
 
