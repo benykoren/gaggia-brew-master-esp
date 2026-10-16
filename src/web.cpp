@@ -280,6 +280,20 @@ const char *index_html = R"rawliteral(
     .tick.lit { stroke: var(--copper); stroke-opacity: .55; }
     .tick.major.lit { stroke-opacity: .95; }
     .dial-marker { transition: transform .8s ease; }
+    /* At working temperature (2026-10-16): a soft green halo along the arc up
+       to the target marker, a pulse at the temp dot, the marker turns green
+       and the caption reads "At temp" - so "ready" is visible from across
+       the kitchen, not only as a number. .at-temp is set by updateDial(). */
+    .dial-ready-halo { fill: none; stroke: var(--ok); stroke-width: 10; stroke-linecap: round; opacity: 0; filter: url(#dialBlur); transition: opacity .6s ease; }
+    .dial.at-temp .dial-ready-halo { opacity: .5; }
+    .dial-pulse { fill: none; stroke: var(--ok); stroke-width: 1.5; opacity: 0; }
+    .dial.at-temp .dial-pulse { opacity: 1; animation: dialPulse 1.8s ease-out infinite; }
+    @keyframes dialPulse { 0% { r: 6px; stroke-opacity: .9; } 100% { r: 20px; stroke-opacity: 0; } }
+    .dial.at-temp #dial_target polygon { fill: var(--ok); }
+    .gauge-target .ready-mark { display: none; color: var(--ok); font-weight: 600; }
+    .dial.at-temp .gauge-target .ready-mark { display: inline; }
+    .dial.at-temp .gauge-target .target-word { display: none; }
+    .dial.at-temp .gauge-target b { color: var(--ok); }
     .dial-center {
       position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
       text-align: center; pointer-events: none;
@@ -640,10 +654,11 @@ const char *index_html = R"rawliteral(
               </defs>
               <g id="dial_ticks"></g>
               <circle class="dial-track" cx="160" cy="160" r="136" stroke-dasharray="640.9 854.5" transform="rotate(135 160 160)"/>
+              <circle id="temp_ready_halo" class="dial-ready-halo" cx="160" cy="160" r="136" stroke-dasharray="0 854.5" transform="rotate(135 160 160)"/>
               <circle id="temp_ring_glow" class="dial-temp-glow" cx="160" cy="160" r="136" stroke-dasharray="0 854.5" transform="rotate(135 160 160)"/>
               <circle id="temp_ring_fill" class="dial-temp" cx="160" cy="160" r="136" stroke-dasharray="0 854.5" transform="rotate(135 160 160)"/>
               <g id="dial_target" class="dial-marker" transform="rotate(135 160 160)" style="display:none"><polygon points="300,160 310,155 310,165" fill="#f5f5f3" transform="rotate(180 305 160)"/></g>
-              <g id="dial_dot" class="dial-marker" transform="rotate(135 160 160)" style="display:none"><circle cx="296" cy="160" r="9" fill="#e39a62" fill-opacity=".35" filter="url(#dialBlur)"/><circle cx="296" cy="160" r="5" fill="#fff4ea"/></g>
+              <g id="dial_dot" class="dial-marker" transform="rotate(135 160 160)" style="display:none"><circle class="dial-pulse" cx="296" cy="160" r="6"/><circle cx="296" cy="160" r="9" fill="#e39a62" fill-opacity=".35" filter="url(#dialBlur)"/><circle cx="296" cy="160" r="5" fill="#fff4ea"/></g>
               <circle class="dial-press-track" cx="160" cy="160" r="118" stroke-dasharray="556.1 741.4" transform="rotate(135 160 160)"/>
               <circle id="pressure_ring_fill" class="dial-press" cx="160" cy="160" r="118" stroke-dasharray="0 741.4" transform="rotate(135 160 160)"/>
               <g id="press_peak" class="dial-marker" transform="rotate(135 160 160)" style="display:none"><circle cx="278" cy="160" r="3" fill="#46e3f0"/></g>
@@ -651,7 +666,7 @@ const char *index_html = R"rawliteral(
             <div class="dial-center">
               <span class="label">Boiler</span>
               <div class="dial-temp-value"><span id="temp" class="skeleton">--</span><span class="deg">&deg;</span></div>
-              <div class="gauge-target"><span id="target_on">Target <b><span id="target" class="skeleton">--</span>&deg;</b></span><span id="target_off" style="display:none">Heater off</span></div>
+              <div class="gauge-target" aria-live="polite"><span id="target_on"><span class="ready-mark">&#10003; At temp &middot; </span><span class="target-word">Target </span><b><span id="target" class="skeleton">--</span>&deg;</b></span><span id="target_off" style="display:none">Heater off</span></div>
               <div class="dial-press-line">
                 <span class="dot" aria-hidden="true"></span><span><b id="pressure_gauge_val">--</b> bar</span>
                 <span class="sep" aria-hidden="true"></span>
@@ -1214,13 +1229,20 @@ function drawLiveChart(temps, tempTarget, est, sensor, pTarget, closedLoop) {
   if (!canvas) return;
   var fit = fitCanvas(canvas);
   var ctx = fit.ctx, w = fit.w, h = fit.h;
-  var top = 6, bottom = h - 4, span = bottom - top;
+  // Axis numbers (2026-10-16): pressure in the left gutter (cyan, bar),
+  // boiler temp in the right gutter (copper, whole degrees) - both on the
+  // same 3 gridline intervals - plus the latest value of each line tagged
+  // at its end.
+  var x0 = 24, x1 = w - 30;
+  var top = 8, bottom = h - 8, span = bottom - top;
+  function X(i, n) { return x0 + (i / (n - 1)) * (x1 - x0); }
+  var AXIS_FONT = "500 10px 'Geist Mono', ui-monospace, Menlo, monospace";
 
   ctx.strokeStyle = "rgba(255,255,255,.05)";
   ctx.lineWidth = 1;
   for (var g = 0; g <= 3; g++) {
     var gy = Math.round(top + (span * g) / 3) + 0.5;
-    ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(w, gy); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x0, gy); ctx.lineTo(x1, gy); ctx.stroke();
   }
 
   function path(data, yOf, gapsBelowZero) {
@@ -1229,17 +1251,55 @@ function drawLiveChart(temps, tempTarget, est, sensor, pTarget, closedLoop) {
     for (var i = 0; i < data.length; i++) {
       var v = data[i];
       if (gapsBelowZero && v < 0) { pen = false; continue; }
-      var x = (i / (data.length - 1)) * w, yy = yOf(v);
+      var x = X(i, data.length), yy = yOf(v);
       if (!pen) { ctx.moveTo(x, yy); pen = true; } else ctx.lineTo(x, yy);
     }
   }
+  function axisLabel(text, x, y, color, align) {
+    ctx.font = AXIS_FONT;
+    ctx.textAlign = align;
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = color;
+    ctx.fillText(text, x, Math.max(top + 4, Math.min(bottom - 4, y)));
+  }
+  // Small pill with the latest value, right-aligned just inside the plot,
+  // above (or below, near the top) the line's end point.
+  var tagBoxes = [];
+  function valueTag(text, y, color, border) {
+    ctx.font = "600 11px 'Geist', system-ui, sans-serif";
+    var tw = ctx.measureText(text).width + 14, th = 17;
+    var tx = x1 - tw - 4;
+    var ty2 = y - th - 5 < top ? y + 5 : y - th - 5;
+    tagBoxes.forEach(function (b) {
+      if (ty2 < b.y + b.h + 2 && ty2 + th > b.y - 2) ty2 = (ty2 < b.y) ? b.y - th - 3 : b.y + b.h + 3;
+    });
+    ty2 = Math.max(top, Math.min(bottom - th, ty2));
+    tagBoxes.push({ y: ty2, h: th });
+    ctx.fillStyle = "rgba(14,15,17,.88)";
+    ctx.strokeStyle = border;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    var r = th / 2;
+    ctx.moveTo(tx + r, ty2); ctx.lineTo(tx + tw - r, ty2);
+    ctx.arc(tx + tw - r, ty2 + r, r, -Math.PI / 2, Math.PI / 2);
+    ctx.lineTo(tx + r, ty2 + th);
+    ctx.arc(tx + r, ty2 + r, r, Math.PI / 2, Math.PI * 1.5);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = color;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, tx + tw / 2, ty2 + th / 2 + 0.5);
+  }
 
   var main = closedLoop ? sensor : est;
-  var PMAX = 10;
+  // 0-12 bar (same scale as the dial's pressure ring) so the 3 gridline
+  // intervals land on whole numbers: 0 / 4 / 8 / 12.
+  var PMAX = 12;
   function py(v) { return bottom - (Math.min(PMAX, Math.max(0, v)) / PMAX) * span; }
+  for (var pg = 0; pg <= 3; pg++) axisLabel(String(pg * 4), x0 - 6, py(pg * 4), "rgba(70,227,240,.75)", "right");
   if (main && main.length > 1) {
     path(main, py, false);
-    ctx.lineTo(w, bottom); ctx.lineTo(0, bottom); ctx.closePath();
+    ctx.lineTo(x1, bottom); ctx.lineTo(x0, bottom); ctx.closePath();
     var grad = ctx.createLinearGradient(0, top, 0, bottom);
     grad.addColorStop(0, "rgba(70,227,240,.18)");
     grad.addColorStop(1, "rgba(70,227,240,0)");
@@ -1265,14 +1325,17 @@ function drawLiveChart(temps, tempTarget, est, sensor, pTarget, closedLoop) {
 
   if (temps && temps.length > 1) {
     var scale = (tempTarget === null || tempTarget === undefined) ? temps : temps.concat([tempTarget]);
-    var tmin = Math.min.apply(null, scale), tmax = Math.max.apply(null, scale);
-    if (tmax - tmin < 4) { var mid = (tmax + tmin) / 2; tmin = mid - 2; tmax = mid + 2; }
-    var pad = (tmax - tmin) * 0.12;
-    tmin -= pad; tmax += pad;
+    var dmin = Math.min.apply(null, scale), dmax = Math.max.apply(null, scale);
+    var pad = Math.max(0.5, (dmax - dmin) * 0.12);
+    // Whole-degree axis whose 3 intervals are whole numbers too.
+    var tmin = Math.floor(dmin - pad);
+    var step = Math.max(1, Math.ceil((dmax + pad - tmin) / 3));
+    var tmax = tmin + step * 3;
     var ty = function (v) { return bottom - ((v - tmin) / (tmax - tmin)) * span; };
+    for (var tg = 0; tg <= 3; tg++) axisLabel((tmin + tg * step) + "°", x1 + 6, ty(tmin + tg * step), "rgba(227,154,98,.8)", "left");
     if (tempTarget !== null && tempTarget !== undefined) {
       ctx.setLineDash([4, 5]);
-      ctx.beginPath(); ctx.moveTo(0, ty(tempTarget)); ctx.lineTo(w, ty(tempTarget));
+      ctx.beginPath(); ctx.moveTo(x0, ty(tempTarget)); ctx.lineTo(x1, ty(tempTarget));
       ctx.strokeStyle = "rgba(227,154,98,.45)"; ctx.lineWidth = 1.2; ctx.stroke();
       ctx.setLineDash([]);
     }
@@ -1280,12 +1343,18 @@ function drawLiveChart(temps, tempTarget, est, sensor, pTarget, closedLoop) {
     ctx.strokeStyle = "rgba(70,227,240,.45)";
     ctx.lineWidth = 1;
     phaseMarkers.forEach(function (m) {
-      var mx = ((temps.length - 1 - m.age) / (temps.length - 1)) * w;
+      var mx = X(temps.length - 1 - m.age, temps.length);
       ctx.beginPath(); ctx.moveTo(mx, top); ctx.lineTo(mx, bottom); ctx.stroke();
     });
     path(temps, ty, false);
     ctx.strokeStyle = "#e39a62"; ctx.lineWidth = 2; ctx.stroke();
-    setText("temp_range_label", tmin.toFixed(0) + "\u2013" + tmax.toFixed(0) + " \u00b0C");
+    var tLast = temps[temps.length - 1];
+    valueTag(tLast.toFixed(1) + "°", ty(tLast), "#e39a62", "rgba(227,154,98,.5)");
+    setText("temp_range_label", tmin + "–" + tmax + " °C");
+  }
+  if (main && main.length > 1) {
+    var pLast = main[main.length - 1];
+    if (closedLoop || pLast > 0.05) valueTag(pLast.toFixed(1) + " bar", py(pLast), "#46e3f0", "rgba(70,227,240,.5)");
   }
 }
 
@@ -1619,7 +1688,12 @@ function updateDial(temp, target, scaleHi, state, mode) {
   var tg = document.getElementById("dial_target");
   tg.style.display = target !== null ? "" : "none";
   if (target !== null) tg.setAttribute("transform", "rotate(" + (135 + frac(target) * 270).toFixed(1) + " 160 160)");
-  document.getElementById("dial").classList.toggle("off", mode === "off");
+  var atTemp = state === "ready" && target !== null && mode !== "off";
+  var halo = document.getElementById("temp_ready_halo");
+  if (halo) halo.setAttribute("stroke-dasharray", (atTemp ? frac(target) * 640.9 : 0).toFixed(1) + " 854.5");
+  var dialEl = document.getElementById("dial");
+  dialEl.classList.toggle("off", mode === "off");
+  dialEl.classList.toggle("at-temp", atTemp);
 }
 
 function applyStatus(json) {
