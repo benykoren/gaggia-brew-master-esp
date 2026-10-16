@@ -110,14 +110,47 @@
 #define PIN_DIMMER_ZC 6
 #define PIN_PRESSURE_ADC 1
 
+// ============================================================================
+// Water tank level sensor (HARDWARE_ROADMAP.md item 6, 2026-10-15) - a
+// non-contact capacitive switch on the outside of the tank wall. Push-pull
+// output, powered from 3V3: LOW = water at the sensor's height, HIGH = no
+// water (also what a removed tank reads). GPIO7 is free, not a strapping/
+// flash/PSRAM/USB pin, and sits next to GPIO6 on the DevKitC-1 J1 header.
+// Design: docs/superpowers/specs/2026-10-15-water-level-sensor-design.md
+// ============================================================================
+#define PIN_WATER_LEVEL 7
+#define WATER_SAMPLE_INTERVAL_MS 100
+// The state only flips after this many consistent raw reads in a row
+// (20 x 100 ms = 2 s), so sloshing at pump start or reseating the tank
+// can't flicker the state or block a shot at random. (A 4 x 50 ms = 0.2 s
+// version was tried on 2026-10-15 and reverted at the user's request.)
+#define WATER_DEBOUNCE_SAMPLES 20
+#define WATER_SENSOR_ENABLED_DEFAULT false // off until the sensor is installed
+#define WATER_ACTIVE_LOW_DEFAULT true      // datasheet: LOW = water present
+#define WATER_INTERLOCK_DEFAULT true       // refuse shot / calibration start on low water
+// How long /status keeps reporting a refused shot start, so the Web UI can
+// explain why its Start tap didn't start a shot.
+#define SHOT_BLOCKED_REPORT_MS 5000
+
 // Mains half-cycle at 50Hz is ~10ms (Israel/Europe mains) - change to 8333
-// if this machine is ever run on a 60Hz supply. DIMMER_MIN_FIRING_DELAY_US
-// is how close to the zero-cross the TRIAC is allowed to fire (0 risks
-// firing into switching noise right at the crossing); DIMMER_GATE_PULSE_US
-// is the minimum gate-trigger pulse width most TRIAC modules need.
+// if this machine is ever run on a 60Hz supply (now auto-detected at runtime;
+// this only seeds the initial debounce window).
 #define DIMMER_AC_HALF_CYCLE_US 10000
-#define DIMMER_MIN_FIRING_DELAY_US 300
-#define DIMMER_GATE_PULSE_US 100
+// Gate drive (2026-10-02 hardening, design spec §5): the gate goes HIGH in
+// the zero-cross ISR itself and is held DIMMER_GATE_HOLD_US, dropped by a
+// gptimer alarm. Long enough to span the true crossing whatever the
+// module's ZC offset, and for the pump's inductive current to rise past the
+// TRIAC's latching current (a 100 us pulse could end first = lost stroke).
+#define DIMMER_GATE_HOLD_US 1500
+// Duty rises at most this fast (pump hammer on shot start/phase steps);
+// decreases - including any cut to 0 - are always instant.
+#define DIMMER_SLEW_PCT_PER_S 250
+// Mains health: no accepted crossing for this long = ABSENT (Brew switch
+// off); a measured frequency outside MIN..MAX = UNSTABLE.
+#define DIMMER_MAINS_ABSENT_MS 100
+#define DIMMER_MAINS_HZ_MIN 45.0f
+#define DIMMER_MAINS_HZ_MAX 65.0f
+#define DIMMER_MAINS_HZ_DEFAULT 50.0f
 
 // Pump power is pulse-skip modulation (PSM), not phase-angle (2026-10-01):
 // the TRIAC is fired near the zero-cross on a chosen fraction of whole
@@ -129,78 +162,76 @@
 // mid-half-cycle was both nonlinear (a linear-delay "80%" was really ~95%
 // RMS) and harder on an unsnubbered TRIAC.
 //
-// Pump power used by plain-duty shot stages (no closed-loop pressure
-// control) - both live-editable from the Web UI and persisted in NVS.
-// NOTE: power sets FLOW, not pressure. With a vibration pump the brew
-// pressure is wherever pump flow and puck flow balance, so the same % gives
-// different bar with a different grind/dose/tamp.
-//
-// How the defaults were chosen (2026-10-01): ULKA EP5 datasheet curve is
-// ~650 ml/min @0 bar, ~300 @8, ~210 @10, 0 @15 - close to linear,
-// Q ~= 10.8 - 0.72*P ml/s at 100%; with PSM, N% scales that by N.
-// A properly dialed puck (~36 g in ~25 s) passes ~1.5-2 ml/s near 9 bar.
-// Balancing the two (linear and saturating puck models agree):
-//   100% ~11.5-12.5 bar, 80% ~11-12, 45% ~9-9.5, 35% ~8.
-// So 45% targets ~9 bar with a STANDARD (multi-hole) basket; with a
-// pressurized basket the single exit hole sets pressure instead.
-// Pre-infusion 40% ~= 4 ml/s at low pressure, matching Gaggiuino's default
-// 3-4 ml/s fill (reference/gaggiuino-fw default_profiles.h).
+// LEGACY (pre-2026-10-02) global pump powers - no longer settings. Read
+// from NVS once, only as fallbacks for migrating old pulse profiles into
+// phase profiles (profiles.cpp / profile_codec.cpp).
 #define PUMP_BREW_POWER_PCT_DEFAULT 45
 #define PUMP_PREINFUSION_POWER_PCT_DEFAULT 40
 
-// Pre-infusion has two modes, picked by PRESSURE_CLOSED_LOOP_AVAILABLE
-// (i.e. "is the fitted sensor good enough to trust"):
-//  - false (current 0-5 bar sensor): the profile's own pulses - "on" at
-//    PUMP_PREINFUSION_POWER_PCT for on_ms, pump off for off_ms, repeated.
-//    Tested 2026-10-01 with an EMPTY basket: the pump-outlet reading hit
-//    the sensor's ~1.6V ceiling within 0.3 s (pump stroke spikes exceed
-//    5 bar even with no puck), so a pressure exit fired at its 4 s minimum
-//    every time and could never detect puck saturation.
-//  - true (a 0-16 bar sensor): a pressure-terminated fill - pump at
-//    pre-infusion power until the reading reaches the fill bar, then an
-//    optional soak, like Gaggiuino's "fill until 4 bar" / GaggiMate's
-//    "fill until 3 bar" defaults.
-//  - FILL_MIN_MS: never exit before this, so the restriction pressure of
-//    water first pushing through the shower screen can't end it early.
-//  - Max fill: hard time limit - also the only exit if the sensor faults.
-#define PREINFUSION_FILL_BAR_DEFAULT 3.0
-#define PREINFUSION_FILL_BAR_MIN 1.0
-#define PREINFUSION_FILL_BAR_MAX 4.5
-#define PREINFUSION_FILL_MIN_MS 4000
-#define PREINFUSION_FILL_MAX_S_DEFAULT 15
-#define PREINFUSION_FILL_MAX_S_MIN 5
-#define PREINFUSION_FILL_MAX_S_MAX 30
-#define PREINFUSION_SOAK_S_DEFAULT 0
-#define PREINFUSION_SOAK_S_MAX 15
-#define PUMP_POWER_PCT_MIN 10
-#define PUMP_POWER_PCT_MAX 100
+
+// Which pressure sensor is fitted - flip to 1 when the 0-16 bar part is
+// installed (HARDWARE_ROADMAP.md item 7, docs/install-guide-2026-10-15-*).
+//   0 = 0-0.5 MPa "G41 0.5Mpa IN5V" on 3V3, straight into GPIO1 (installed now)
+//   1 = 0-1.6 MPa "G41 1.6Mpa IN5V" on 5V (HLK-PM01), 4.3k/10k divider into GPIO1
+// Kept as one switch so the water-sensor work could ship while the new
+// pressure sensor is still in the post - flashing the 16-bar settings with
+// the old part fitted reads below zero and faults.
+#define PRESSURE_SENSOR_IS_16BAR 0
 
 // Pressure transducer calibration - linear mapping from ADC millivolts to
 // bar: bar = (mv - PRESSURE_SENSOR_ZERO_MV) / PRESSURE_SENSOR_MV_PER_BAR.
-//
-// The installed transducer is a **0-0.5 MPa (0-5 bar)**, 5V-supply part
-// (body marking "G41 0.5Mpa IN5V", confirmed by the user 2026-10-01), run
-// from 3V3 because this board's 5V pin doesn't output on USB power. Its
-// range is BELOW espresso brew pressure, so it is only meaningful for
-// pre-infusion / low-pressure monitoring until a 0-1.6 MPa part replaces
-// it (see HARDWARE_ROADMAP.md item 7).
-//   ZERO_MV: measured 2026-10-01, pump off: 155-160 mV.
-//   MV_PER_BAR: ESTIMATE, not verified against a reference. On 3V3 the
-//   output was observed to clip at ~1620-1640 mV both in free flow and
-//   with a choked puck (pressure well above 5 bar); this assumes that
-//   ceiling is roughly the sensor's 5-bar full scale:
-//   (1630 - 158) / 5 ~= 290 mV/bar.
+#if PRESSURE_SENSOR_IS_16BAR
+// 0-16 bar on 5V, 0.5-4.5 V out, divider ratio 10 / 14.3 = 0.699:
+//   0 bar ~350 mV, 16 bar ~3147 mV, ~175 mV/bar. NOMINAL (datasheet +
+//   resistor values) until calibrated: ZERO_MV from pressure_mv with the
+//   pump off, MV_PER_BAR from a reference (safety-valve plateau or a gauge).
+#define PRESSURE_SENSOR_ZERO_MV 350.0f
+#define PRESSURE_SENSOR_MV_PER_BAR 175.0f
+#define PRESSURE_SENSOR_MAX_BAR 16.0f
+// Closed loop: in pressure phases the pressure PID adds a +/-
+// PUMP_PRESSURE_PID_TRIM_PCT trim on the pump-model duty; falls back to the
+// pure model whenever the sensor is faulted.
+#define PRESSURE_CLOSED_LOOP_AVAILABLE true
+#else
+// 0-5 bar on 3V3 (2026-10-01): zero measured 155-160 mV; the output clips at
+// ~1620-1640 mV (supply headroom), MV_PER_BAR is an estimate assuming that
+// ceiling is ~full scale. Below brew pressure, so no closed loop.
 #define PRESSURE_SENSOR_ZERO_MV 158.0f
 #define PRESSURE_SENSOR_MV_PER_BAR 290.0f
-// Rated full scale - readings are clamped here (the UI shows "5+" rather
-// than an invented number) and the plausibility window is derived from it.
 #define PRESSURE_SENSOR_MAX_BAR 5.0f
-// Closed-loop pressure control (profile ramp/decline stages) needs a sensor
-// that can actually read the target. False while the 5-bar part is fitted:
-// profile pressure stages are ignored and shots run at plain pump power
-// (PUMP_BREW_POWER_PCT) instead. Set true again once a 0-1.6 MPa sensor is
-// installed and calibrated.
 #define PRESSURE_CLOSED_LOOP_AVAILABLE false
+#endif
+
+// ============================================================================
+// Open-loop pump model (design spec 2026-10-02 §4.1)
+// ----------------------------------------------------------------------------
+// Pump side: one stroke per mains cycle, ml per stroke falls with pressure
+// along Gaggiuino's EP5 curve SHAPE (pump_model.cpp), scaled to OUR pump by
+// the 3-run scale calibration (pump_calibration.cpp). 0.213 ml/stroke is
+// Gaggiuino's effective free-flow value (their pumpFlowAtZero 0.2225 minus
+// the 0.045 curve offset, x1.2 multiplier at 50 Hz) - used until calibrated.
+// Puck side: a "reference puck" passing PUMP_MODEL_REF_PUCK_FLOW_ML_S at
+// PUMP_MODEL_REF_PUCK_BAR (a dialed 18 g -> 36 g shot), linear in pressure.
+// Headspace: the estimate holds 0 bar until this much water has gone in
+// (basket headspace + dry-puck absorption) - otherwise a fill phase would
+// "reach" its bar limit in ~1 s and starve the fill.
+// ============================================================================
+#define PUMP_ML_PER_CLICK_DEFAULT 0.213f
+#define PUMP_ML_PER_CLICK_MIN 0.08f
+#define PUMP_ML_PER_CLICK_MAX 0.40f
+#define PUMP_MODEL_COMPLIANCE_ML_PER_BAR 1.4f
+#define PUMP_MODEL_TAU_S 0.5f
+#define PUMP_MODEL_REF_PUCK_FLOW_ML_S 2.0f
+#define PUMP_MODEL_REF_PUCK_BAR 9.0f
+#define PUMP_MODEL_HEADSPACE_ML 30.0f
+#define PUMP_MODEL_SHAPE_FLOOR 0.02f
+#define PUMP_MODEL_MAX_BAR 16.0f
+
+// Pump calibration (design spec 2026-10-02 §6): 3 free-flow runs at 100%,
+// averaged; a run more than PUMP_CAL_MAX_SPREAD from the 3-run mean must be
+// redone.
+#define PUMP_CAL_RUN_MS 10000UL
+#define PUMP_CAL_MAX_SPREAD 0.10f
 
 // Same rolling error-rate fault model as the temp sensor (see
 // SENSOR_FAULT_WINDOW above) - a separate window since pressure and temp
@@ -215,10 +246,8 @@
 
 // Hard safety ceiling - comfortably under the machine's 16-bar safety valve
 // rating (docs/oem-manuals/hydraulic-schematic-SAI0103.pdf), above the
-// ~9 bar working target. NOTE (2026-10-01): with the current 0-5 bar sensor
-// this ceiling is above the sensor's range, so it cannot trip on a real
-// over-pressure - the machine's mechanical 16-bar safety valve is the
-// effective limit, exactly as on the stock machine. Forces the dimmer to 0% immediately if exceeded or
+// ~9 bar working target. With the 0-16 bar sensor (2026-10-15) this ceiling
+// is live again: a real reading above it cuts the pump. Forces the dimmer to 0% immediately if exceeded or
 // if the pressure sensor is faulted, independent of PID/profile output -
 // same "cutoff wins over everything" rule as activeMaxSafety for
 // temperature. Fixed, not Web-UI-configurable (mirrors BREW_MAX_SAFETY,
@@ -233,20 +262,10 @@
 #define PUMP_PRESSURE_KI_DEFAULT 0.5
 #define PUMP_PRESSURE_KD_DEFAULT 0.0
 
-// Per-profile pressure stages (HARDWARE_ROADMAP.md item 8) - an optional
-// "ramp/hold" stage at a target bar for a fixed duration, then an optional
-// "decline" stage at a lower target for its own fixed duration,
-// approximating a declining-pressure curve near the end of a shot. After
-// these, the shot falls into the normal open-ended EXTRACTION stage,
-// holding the last pressure target (or 100% duty if pressure control isn't
-// enabled for this profile - unchanged, backward-compatible behavior).
-#define PRESSURE_RAMP_BAR_DEFAULT 9.0
-#define PRESSURE_RAMP_MS_DEFAULT 20000
-#define PRESSURE_DECLINE_BAR_DEFAULT 6.0
-#define PRESSURE_DECLINE_MS_DEFAULT 8000
-// Fixed count of profile-defined pressure stages (ramp + decline) - used
-// only to size main.cpp's activeShotStages array.
-#define PRESSURE_PROFILE_STAGE_COUNT 2
+// Closed loop is a +/- correction on top of the pump-model duty (design
+// spec §4.1), not the whole duty - bounded so a bad reading can't swing
+// the pump from 0 to 100.
+#define PUMP_PRESSURE_PID_TRIM_PCT 30
 
 // ============================================================================
 // Temperature sensor module (UART, NOT SPI)
@@ -449,23 +468,6 @@ enum class AutotuneState { IDLE, RUNNING, DONE_OK, DONE_FAIL };
 #define SHOT_LOG_PATH "/shots.csv"
 #define SHOT_LOG_MAX_ENTRIES 200 // oldest trimmed once exceeded
 
-// Auto-stop: once a shot has been running this many seconds, main.cpp's
-// loop() calls stopShot() on its own - no manual "Stop Shot" tap required.
-// 0 = disabled (manual stop only), configurable live from the Web UI,
-// persisted in NVS. Default sits in the middle of the 25-30s SCA-referenced
-// extraction window already shown in the Web UI.
-//
-// This ends the firmware's own shot bookkeeping (timer, history log entry,
-// reverting the Brew gain profile from active back to gentle - see the
-// brew-active gains above) AND physically stops the pump: stopShot() (in
-// main.cpp) drives the dimmer to 0% via dimmerSetPowerPercent(0.0f)
-// (HARDWARE_ROADMAP.md item 8). The old NC pump relay (item 4) that this
-// comment used to warn about has since been removed - see AGENTS.md change
-// log, 2026-09-04.
-#define SHOT_AUTO_STOP_SEC_DEFAULT 27
-#define SHOT_AUTO_STOP_SEC_MIN 5
-#define SHOT_AUTO_STOP_SEC_MAX 90
-
 // ============================================================================
 // Descale / maintenance reminder
 // ----------------------------------------------------------------------------
@@ -498,21 +500,31 @@ enum class AutotuneState { IDLE, RUNNING, DONE_OK, DONE_FAIL };
 #define PROFILE_NAME_MAX_LEN 20
 #define PROFILE_LOG_PATH "/profiles.csv"
 
-// Pre-infusion (2026-08-16, originally built ahead of hardware against the
-// old NC pump relay - item 4 - see AGENTS.md/HARDWARE_ROADMAP.md; that relay
-// was removed 2026-09-04 after an unresolved brownout bug). Pulses the pump
-// on/off a few times before switching to continuous power for the rest of
-// the shot, approximating the puck-saturation benefit of true low-pressure
-// pre-infusion. Now physically driven by the dimmer (item 8) via
-// dimmerSetPowerPercent(), same as the rest of pump control. Per-profile,
-// not global - each saved profile carries its own pre-infusion pattern (or
-// none).
-#define PREINFUSION_PULSES_DEFAULT 4
-#define PREINFUSION_PULSES_MAX 10
-#define PREINFUSION_ON_MS_DEFAULT 1000
-#define PREINFUSION_OFF_MS_DEFAULT 1000
-#define PREINFUSION_PULSE_MS_MIN 200
-#define PREINFUSION_PULSE_MS_MAX 5000
+// Phase-based profiles (design spec 2026-10-02 §3). PROFILE_MAX_COUNT above
+// is now the USER-profile limit; built-ins live in firmware
+// (profile_codec.cpp) and don't count against it. PROFILE_LOG_PATH is the
+// LEGACY file, read once for migration, then left alone (with a byte-for-
+// byte backup at PROFILE_LEGACY_BACKUP_PATH).
+#define PROFILE_PHASES_MAX 8
+#define PROFILE_UTILITY_PHASES_MAX 10
+#define PHASE_NAME_MAX_LEN 15
+#define PROFILE_BUILTIN_MAX 8
+#define PROFILE_STORE_PATH "/profiles.json"
+#define PROFILE_LEGACY_BACKUP_PATH "/profiles.csv.bak"
+#define PROFILE_DEFAULT_NAME "Classic 9 bar"
+#define PROFILE_TEMP_MIN 80.0f
+#define PROFILE_TEMP_MAX 100.0f
+#define PROFILE_MAX_SEC_MIN 5
+#define PROFILE_MAX_SEC_MAX 90
+#define PROFILE_UTILITY_MAX_SEC_MAX 120
+#define PROFILE_PRESSURE_SCALE_MIN 0.7f
+#define PROFILE_PRESSURE_SCALE_MAX 1.1f
+#define PROFILE_TRIM_MIN -20
+#define PROFILE_TRIM_MAX 20
+#define PHASE_DURATION_MIN_S 0.2f
+#define PHASE_DURATION_MAX_S 120.0f
+#define PHASE_PRESSURE_MAX_BAR 11.0f
+#define PHASE_FLOW_MAX_ML_S 10.0f
 
 enum class ShotPhase { NONE, PREINFUSION_ON, PREINFUSION_OFF, PRESSURE, EXTRACTION };
 

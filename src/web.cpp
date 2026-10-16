@@ -13,7 +13,12 @@
 #include "dimmer.h"
 #include "pressure_sensor.h"
 #include "profiles.h"
+#include "profile_codec.h"
+#include "pump_calibration.h"
+#include "shot_planner.h"
 #include "shot_log.h"
+#include "water_level.h"
+#include "mqtt.h"
 
 extern float currentTemperature;
 extern bool sensorFault;
@@ -26,12 +31,6 @@ extern int tempHistoryCount;
 
 extern float currentPressure;
 extern bool pressureFault;
-extern bool activePressureEnabled;
-extern double activePressureRampBar;
-extern unsigned long activePressureRampMs;
-extern bool activePressureDeclineEnabled;
-extern double activePressureDeclineBar;
-extern unsigned long activePressureDeclineMs;
 extern double pressureKp, pressureKi, pressureKd;
 extern float pressureHistory[];
 extern int pressureHistoryHead;
@@ -59,14 +58,12 @@ extern void stopAutotune();
 
 extern bool shotInProgress;
 extern unsigned long shotStartMillis;
-extern unsigned long shotAutoStopSec;
-extern int pumpBrewPowerPct;
-extern int pumpPreinfusionPowerPct;
-extern double preinfusionFillBar;
-extern int preinfusionFillMaxSec;
-extern int preinfusionSoakSec;
 extern void startShot();
 extern void stopShot();
+extern bool waterSensorEnabled, waterActiveLow, waterInterlock;
+extern void applyWaterSettings();
+extern const char *shotBlockedReason;
+extern unsigned long shotBlockedAtMillis;
 extern ShotPhase currentShotPhase;
 
 extern unsigned long shotCount;
@@ -75,10 +72,14 @@ extern unsigned long descaleShotThreshold;
 extern unsigned long descaleDayThreshold;
 extern void markDescaled();
 
-extern int activeProfileIndex;
-extern bool activePreinfusionEnabled;
-extern int activePreinfusionPulses, activePreinfusionOnMs, activePreinfusionOffMs;
-extern void applyProfile(int idx);
+extern String activeProfileName;
+extern bool selectProfile(const char *name);
+extern PlannerOutput plannerOut;
+extern float estPressureHistory[];
+extern float targetPressureHistory[];
+extern int estHistoryHead;
+extern int estHistoryCount;
+
 
 extern bool schedEnabled[SCHED_MAX_COUNT];
 extern int schedHour[SCHED_MAX_COUNT], schedMin[SCHED_MAX_COUNT];
@@ -236,6 +237,13 @@ const char *index_html = R"rawliteral(
     .pill.fault .dot { background: var(--red); box-shadow: 0 0 0 4px rgba(229,84,75,.2); animation: pulse-dot 1.1s var(--ease) infinite; }
     @keyframes pulse-dot { 0%,100% { opacity: 1 } 50% { opacity: .45 } }
     .last-updated { font-size: var(--fs-1); color: var(--text-dim); margin-top: 5px; }
+    /* Water tank chip (water_level.cpp) - sits left of the mode pill. Amber,
+       not red, when low: red stays reserved for safety faults. */
+    .status-row { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-2); }
+    .pill.tank { display: none; font-weight: 700; }
+    .pill.tank.ok { display: inline-flex; color: #bfe6d3; border-color: rgba(72,181,131,.45); }
+    .pill.tank.low { display: inline-flex; color: #f3dcc2; border-color: rgba(224,161,58,.6); background: rgba(224,161,58,.12); }
+    .tank-icon { width: 9px; height: 12px; border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%; background: currentColor; opacity: .85; }
 
     .alerts { display: flex; flex-direction: column; gap: var(--sp-2); margin-bottom: var(--sp-4); }
     .banner {
@@ -344,6 +352,17 @@ const char *index_html = R"rawliteral(
     }
     .btn-shot:active { transform: translateY(1px); }
     .btn-shot.running { background: var(--red); border-color: var(--red); color: #1a0d0c; }
+    .btn-shot.blocked { background: rgba(224,161,58,.14); border-color: rgba(224,161,58,.55); color: #f3dcc2; }
+    .shot-block-msg { display: none; font-size: var(--fs-4); color: var(--amber); text-align: right; margin-top: var(--sp-2); }
+    .shot-block-msg.show { display: block; }
+    .stat-tile.tank { display: none; }
+    .stat-tile.tank.ok, .stat-tile.tank.low { display: block; }
+    .stat-tile.tank.ok .stat-value { color: var(--green); }
+    .stat-tile.tank.low { border-color: rgba(224,161,58,.55); }
+    .stat-tile.tank.low .stat-value { color: var(--amber); }
+    .water-live { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-3); margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--border-soft); font-size: var(--fs-5); }
+    .water-live b.ok { color: var(--green); }
+    .water-live b.low { color: var(--amber); }
     .shot-progress { height: 7px; border-radius: var(--radius-full); background: #100d0b; border: 1px solid var(--border-soft); overflow: hidden; margin-top: var(--sp-4); }
     .shot-progress > span { display: block; height: 100%; width: 0%; border-radius: var(--radius-full); background: var(--text-faint); transition: width .4s linear, background .3s ease; }
     .shot-progress > span.in-window { background: var(--green); }
@@ -436,6 +455,9 @@ const char *index_html = R"rawliteral(
     .profile-row-main b { font-size: var(--fs-8); }
     .profile-row-main span { font-size: var(--fs-4); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .profile-row-actions { display: flex; gap: var(--sp-2); flex: none; }
+    .profile-row-main { cursor: pointer; flex: 1; }
+    .profile-mini { width: 120px; height: 32px; flex: none; margin: 0 var(--sp-2); }
+    @media (max-width: 420px) { .profile-mini { display: none; } }
     .btn-chip-sm {
       border: 1px solid var(--border); background: var(--surface); color: var(--text-dim);
       padding: 6px 11px; border-radius: var(--radius-sm); font-size: var(--fs-3); font-weight: 700; cursor: pointer;
@@ -553,7 +575,10 @@ const char *index_html = R"rawliteral(
         </div>
       </div>
       <div class="brand-status">
-        <div id="status_pill" class="pill off" aria-live="polite"><span class="dot" aria-hidden="true"></span><span id="mode_status">--</span></div>
+        <div class="status-row">
+          <div id="tank_pill" class="pill tank" aria-live="polite"><span class="tank-icon" aria-hidden="true"></span><span id="tank_pill_text">Tank OK</span></div>
+          <div id="status_pill" class="pill off" aria-live="polite"><span class="dot" aria-hidden="true"></span><span id="mode_status">--</span></div>
+        </div>
         <div id="last_updated" class="last-updated">--</div>
       </div>
     </header>
@@ -563,7 +588,9 @@ const char *index_html = R"rawliteral(
       <div id="fault_banner" class="banner banner-error">Sensor fault &mdash; heater held off. Check the PT100 wiring.</div>
       <div id="pressure_banner" class="banner banner-error"></div>
       <div id="pump_banner" class="banner banner-warn"></div>
-      <div id="sleep_banner" class="banner banner-info">
+      <div id="water_banner" class="banner banner-warn">Refill the water tank. New shots are paused until it's back.</div>
+      <div id="cal_banner" class="banner banner-info">Pump not calibrated &mdash; shots use a default pump model.&nbsp;<a href="#settings" onclick="showTab('settings')">Calibrate</a></div>
+         <div id="sleep_banner" class="banner banner-info">
         <span id="sleep_banner_text">Asleep (eco timeout) &mdash; heater off</span>
         <button type="button" onclick="wake()" class="btn-chip">Wake Up</button>
         <button type="button" onclick="dismissSleepBanner()" class="btn-chip-sm" aria-label="Dismiss sleep notice">&times;</button>
@@ -586,7 +613,7 @@ const char *index_html = R"rawliteral(
                 <div class="gauge-value"><span id="temp" class="skeleton">--</span><span class="gauge-unit">&deg;C</span></div>
               </div>
             </div>
-            <div class="gauge-target">Target <b><span id="target" class="skeleton">--</span>&deg;C</b></div>
+            <div class="gauge-target"><span id="target_on">Target <b><span id="target" class="skeleton">--</span>&deg;C</b></span><span id="target_off" style="display:none">Heater off</span></div>
           </div>
 
           <div class="gauge-col">
@@ -619,6 +646,7 @@ const char *index_html = R"rawliteral(
           </div>
           <button type="button" onclick="toggleShot()" id="btn_shot" class="btn-shot">Start Shot</button>
         </div>
+        <div id="shot_block_msg" class="shot-block-msg" role="alert">Tank is low. Refill, then tap again.</div>
         <div class="shot-progress"><span id="shot_progress_bar"></span></div>
         <div class="preset-row" id="profile_chip_row"></div>
       </div>
@@ -635,7 +663,11 @@ const char *index_html = R"rawliteral(
             <span class="stat-value"><span id="pump_power" class="skeleton">--</span><small>%</small></span>
             <div class="bar pump"><span id="pump_bar"></span></div>
           </div>
-        </div>
+          <div id="tank_tile" class="stat-tile tank">
+            <span class="stat-label">Tank</span>
+            <span class="stat-value"><span id="tank_value">OK</span></span>
+          </div>
+           </div>
 
         <div class="chart-card">
           <div class="chart-label"><span>Temp &middot; last 2 min</span><span>&deg;C</span></div>
@@ -643,7 +675,7 @@ const char *index_html = R"rawliteral(
         </div>
 
         <div class="chart-card">
-          <div class="chart-label"><span>Pressure &middot; last 2 min</span><span id="pressure_label">-- bar</span></div>
+          <div class="chart-label"><span>Pressure (est.) &middot; last 2 min</span><span id="pressure_label">-- bar</span></div>
           <canvas id="pressure_chart" width="300" height="60" aria-hidden="true"></canvas>
         </div>
       </div>
@@ -716,7 +748,7 @@ const char *index_html = R"rawliteral(
 
       <div class="card">
         <div class="tab-section-title">Pump pressure PID</div>
-        <p class="hint">Used only during a profile's pressure ramp/decline stages. Pre-infusion pulses stay on/off.</p>
+        <p class="hint">With a 0&ndash;16 bar sensor fitted, adds a correction from it on top of the pump model during pressure phases (falls back to the model alone if the sensor faults).</p>
         <details class="disclosure">
           <summary>Kp / Ki / Kd</summary>
           <form action="/update" method="GET">
@@ -732,47 +764,24 @@ const char *index_html = R"rawliteral(
 
       <div class="card">
         <div class="tab-section-title">Shot profiles</div>
-        <p class="hint">Chips on Now load a saved temperature, auto-stop, pre-infusion, and pressure pattern into the live Brew settings.</p>
+        <p class="hint">Tap a profile to use it. With a 0&ndash;16 bar sensor, pressure phases are held by the sensor; otherwise pressure and flow are estimates from the calibrated pump model. Pump trim: + pushes more water (faster shot), &minus; less (slower shot). Adjust grind first.</p>
         <div id="profile_list_body"></div>
-        <button type="button" onclick="newProfileForm()" class="btn-secondary">New profile</button>
       </div>
 
-      <div class="card" id="profile_editor_card" hidden>
-        <div class="tab-section-title" id="profile_form_title">New Profile</div>
-        <form onsubmit="submitProfileForm(event)">
-          <input type="hidden" id="input_profile_index" value="-1">
-          <div class="field">
-            <label for="input_profile_name">Name</label>
-            <input type="text" id="input_profile_name" maxlength="20" placeholder="e.g. Light Roast">
+      <div class="card" id="profile_tweak_card" hidden>
+        <div class="tab-section-title" id="profile_tweak_title">Tweak</div>
+        <form onsubmit="submitProfileTweak(event)">
+          <input type="hidden" id="input_tweak_name" value="">
+          <div class="field-row">
+            <div class="field" id="tweak_temp_field"><label for="input_tweak_temp">Temperature (&deg;C)</label><input type="number" step="0.5" min="80" max="100" id="input_tweak_temp"></div>
+            <div class="field"><label for="input_tweak_max_sec">Max shot time (s)</label><input type="number" step="1" min="5" max="120" id="input_tweak_max_sec"></div>
           </div>
           <div class="field-row">
-            <div class="field"><label for="input_profile_temp">Temperature (&deg;C)</label><input type="number" step="0.1" id="input_profile_temp" value="93"></div>
-            <div class="field"><label for="input_profile_autostop">Auto-stop (sec)</label><input type="number" step="1" min="5" max="90" id="input_profile_autostop" value="27" oninput="drawProfilePreview()"></div>
+            <div class="field"><label for="input_tweak_scale">Pressure scale</label><input type="number" step="0.05" min="0.7" max="1.1" id="input_tweak_scale"></div>
+            <div class="field"><label for="input_tweak_trim">Pump trim (%)</label><input type="number" step="1" min="-20" max="20" id="input_tweak_trim"></div>
           </div>
-          <label class="check-row"><input type="checkbox" id="input_profile_pi_enabled" onchange="drawProfilePreview()"> Pulsed pre-infusion</label>
-          <p class="hint" style="margin-top:var(--sp-2)">Pulses the pump before extraction to wet the puck: each pulse runs at the pre-infusion pump power (Settings &rarr; Pump power) for "On", then stops for "Off". Remember to load the profile after saving it.</p>
-          <div class="field-row-3" style="margin-top:var(--sp-3)">
-            <div class="field"><label for="input_profile_pi_pulses">Pulses</label><input type="number" step="1" min="0" max="10" id="input_profile_pi_pulses" value="3" oninput="drawProfilePreview()"></div>
-            <div class="field"><label for="input_profile_pi_on">On (sec)</label><input type="number" step="0.1" min="0.2" max="5" id="input_profile_pi_on" value="1" oninput="drawProfilePreview()"></div>
-            <div class="field"><label for="input_profile_pi_off">Off (sec)</label><input type="number" step="0.1" min="0.2" max="5" id="input_profile_pi_off" value="2" oninput="drawProfilePreview()"></div>
-          </div>
-          <label class="check-row"><input type="checkbox" id="input_profile_press_enabled"> Pressure profile</label>
-          <p class="hint" style="margin-top:var(--sp-2)">Closed-loop ramp, hold, then optional decline. Needs a pressure sensor that reads above the target (0-16 bar); ignored while the current 0-5 bar sensor is fitted - shots run at the brew pump power instead.</p>
-          <div class="field-row-3" style="margin-top:var(--sp-3)">
-            <div class="field"><label for="input_profile_press_ramp_bar">Ramp target (bar)</label><input type="number" step="0.1" min="0" max="11.9" id="input_profile_press_ramp_bar" value="9"></div>
-            <div class="field"><label for="input_profile_press_ramp_sec">Ramp/hold (sec)</label><input type="number" step="1" min="1" id="input_profile_press_ramp_sec" value="20"></div>
-          </div>
-          <label class="check-row"><input type="checkbox" id="input_profile_press_decline_enabled"> Declining finish</label>
-          <div class="field-row-3" style="margin-top:var(--sp-3)">
-            <div class="field"><label for="input_profile_press_decline_bar">Decline target (bar)</label><input type="number" step="0.1" min="0" max="11.9" id="input_profile_press_decline_bar" value="6"></div>
-            <div class="field"><label for="input_profile_press_decline_sec">Decline (sec)</label><input type="number" step="1" min="1" id="input_profile_press_decline_sec" value="8"></div>
-          </div>
-          <div class="chart-card">
-            <div class="chart-label"><span>Pump pattern preview</span><span id="profile_preview_label">&nbsp;</span></div>
-            <canvas id="profile_preview_chart" width="300" height="40" aria-hidden="true"></canvas>
-          </div>
-          <button type="submit" id="profile_form_submit" class="submit">Add Profile</button>
-          <button type="button" onclick="cancelProfileForm()" class="btn-secondary">Cancel</button>
+          <button type="submit" id="profile_tweak_submit" class="submit">Save</button>
+          <button type="button" onclick="closeProfileTweak()" class="btn-secondary">Cancel</button>
         </form>
       </div>
     </div>
@@ -841,45 +850,24 @@ const char *index_html = R"rawliteral(
 
     <div class="view" data-view="settings" id="view-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
       <div class="group-title">Brewing</div>
-      <div class="card">
-        <div class="tab-section-title">Shot auto-stop</div>
-        <form action="/update" method="GET">
+      <div class="card" id="pump_cal_card">
+        <div class="tab-section-title">Pump calibration</div>
+        <p class="hint">Teaches the pump model how much water your pump moves. Remove the portafilter, put a cup on a scale under the group and tare it, and turn the Brew switch on. Each run pumps at full power for 10 s. Three runs are averaged; a run more than 10% off the others has to be redone.</p>
+        <div class="metric-row"><span>Current value</span><b><span id="pump_cal_current">--</span></b></div>
+        <div id="pump_cal_runs"></div>
+        <p id="pump_cal_status" class="hint" aria-live="polite"></p>
+        <p id="pump_cal_error" class="hint" style="color:var(--danger)" aria-live="assertive"></p>
+        <div id="pump_cal_grams_row" hidden>
           <div class="field">
-            <label for="input_shot_auto_stop">Stop pump after (seconds, 0 = manual only)</label>
-            <input type="number" step="1" min="0" name="shot_auto_stop_sec" id="input_shot_auto_stop" value="">
+            <label for="input_pump_cal_grams">Grams in the cup</label>
+            <input type="number" step="0.1" min="1" max="500" id="input_pump_cal_grams">
           </div>
-          <button type="submit" class="submit">Save</button>
-        </form>
-        <p class="hint" style="margin-top:var(--sp-3)">Cuts the pump via the dimmer when the timer hits this duration. Loading a profile overwrites this with that profile's own auto-stop. The physical Brew switch must still be on for the dimmer to have power.</p>
-      </div>
-      <div class="card">
-        <div class="tab-section-title">Pump power</div>
-        <form action="/update" method="GET">
-          <div class="field">
-            <label for="input_pump_brew_pct">Brew pump power (%)</label>
-            <input type="number" step="1" min="10" max="100" name="pump_brew_pct" id="input_pump_brew_pct" value="">
-          </div>
-          <div class="field">
-            <label for="input_pump_pi_pct">Pre-infusion pump power (%)</label>
-            <input type="number" step="1" min="10" max="100" name="pump_pi_pct" id="input_pump_pi_pct" value="">
-          </div>
-          <div id="pi_fill_fields" hidden>
-          <div class="field">
-            <label for="input_pi_fill_bar">Pre-infusion: fill until (bar)</label>
-            <input type="number" step="0.1" min="1" max="4.5" name="pi_fill_bar" id="input_pi_fill_bar" value="">
-          </div>
-          <div class="field">
-            <label for="input_pi_fill_max_s">Pre-infusion: max fill time (s)</label>
-            <input type="number" step="1" min="5" max="30" name="pi_fill_max_s" id="input_pi_fill_max_s" value="">
-          </div>
-          <div class="field">
-            <label for="input_pi_soak_s">Pre-infusion: soak, pump off (s, 0 = none)</label>
-            <input type="number" step="1" min="0" max="15" name="pi_soak_s" id="input_pi_soak_s" value="">
-          </div>
-          </div>
-          <button type="submit" class="submit">Save</button>
-        </form>
-        <p class="hint" style="margin-top:var(--sp-3)">Percent of pump strokes allowed. This sets flow, not pressure: with a standard basket, 45% brew lands near 9 bar for a well-dialed shot (~36 g in 25-30 s). Too fast: grind finer; too slow: grind coarser - adjust grind before power. Pre-infusion pulses (set per profile) run at the pre-infusion power. The current 0-5 bar sensor can't read brew pressure, so its reading shows near its ceiling during a shot.</p>
+          <button type="button" onclick="submitCalGrams()" class="submit">Record</button>
+        </div>
+        <button type="button" onclick="calAction('run')" id="btn_pump_cal_run" class="submit">Start run</button>
+        <button type="button" onclick="calAction('stop')" id="btn_pump_cal_stop" class="btn-secondary" hidden>Stop</button>
+        <button type="button" onclick="calAction('save')" id="btn_pump_cal_save" class="submit" hidden>Save calibration</button>
+        <button type="button" onclick="calAction('cancel')" class="btn-secondary">Clear runs</button>
       </div>
 
       <div class="group-title">Power</div>
@@ -897,6 +885,21 @@ const char *index_html = R"rawliteral(
           <button type="submit" class="submit">Save</button>
         </form>
         <p class="hint" style="margin-top:var(--sp-3)">Heater force-OFF after this long with no Web UI activity (mode/tuning changes). Steam uses a shorter default because it runs hotter. Status polling does not count as activity.</p>
+      </div>
+
+      <div class="card">
+        <div class="tab-section-title">Water tank sensor</div>
+        <label class="check-row"><input type="checkbox" id="input_water_enabled" onchange="setWater('water_enabled', this.checked ? 1 : 0)"> Sensor installed</label>
+        <div class="field" style="margin-top:var(--sp-3)">
+          <label for="input_water_active_low">Water reads as</label>
+          <select id="input_water_active_low" onchange="setWater('water_active_low', this.value)">
+            <option value="1">LOW (default)</option>
+            <option value="0">HIGH</option>
+          </select>
+        </div>
+        <label class="check-row"><input type="checkbox" id="input_water_interlock" onchange="setWater('water_interlock', this.checked ? 1 : 0)"> Pause shots on low water</label>
+        <div class="water-live"><span>Live reading &middot; GPIO7</span><b id="water_live">--</b></div>
+        <p class="hint" style="margin-top:var(--sp-3)">Mount the sensor flat against the outside of the tank at the "low" height (red 3V3, black GND, yellow GPIO7). Check it with the tank full, empty and removed - a removed tank reads as no water. A running shot always finishes; the heater is never affected.</p>
       </div>
 
       <div class="card">
@@ -972,7 +975,7 @@ const char *index_html = R"rawliteral(
           Restore from file
           <input type="file" accept=".txt" onchange="restoreSettings(this)" style="display:none">
         </label>
-        <p class="hint" style="margin-top:var(--sp-3)">Brew/Steam/schedule/MQTT settings. Named shot profiles live in a separate file and are not included here.</p>
+        <p class="hint" style="margin-top:var(--sp-3)">Brew/Steam/schedule/MQTT settings, the active profile and pump calibration. Your own shot profiles live in a separate file and are not included.</p>
       </div>
     </div>
     </main>
@@ -1185,29 +1188,39 @@ function drawSparkline(data, target) {
   ctx.stroke();
 }
 
-function drawPressureSparkline(data, target) {
+// Pressure chart: the model estimate (or the real reading once the closed
+// loop exists) as the main line, the raw sensor reading as a thin line
+// while it can't read brew pressure, and the profile's pressure target
+// dashed (target < 0 = no pressure target at that sample -> gap).
+function drawPressureChart(est, sensor, target, closedLoop) {
   var canvas = document.getElementById("pressure_chart");
-  if (!canvas || !data || data.length < 2) return;
+  if (!canvas) return;
+  var main = closedLoop ? sensor : est;
+  if (!main || main.length < 2) return;
   var ctx = canvas.getContext("2d");
   var w = canvas.width, h = canvas.height;
   ctx.clearRect(0, 0, w, h);
-  var scaleValues = (target === null || target === undefined) ? data : data.concat([target]);
-  var min = Math.min.apply(null, scaleValues), max = Math.max.apply(null, scaleValues);
-  if (max - min < 0.5) { max += 0.25; min -= 0.25; }
-  if (min > 0) min = 0; // pressure chart always includes zero for scale
-
-  drawTargetLine(ctx, w, h, min, max, target);
-
-  ctx.beginPath();
-  data.forEach(function (v, i) {
-    var x = (i / (data.length - 1)) * w;
-    var y = h - ((v - min) / (max - min)) * (h - 6) - 3;
-    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-  });
-  ctx.strokeStyle = "#3f8cd9";
-  ctx.lineWidth = 2.5;
-  ctx.lineJoin = "round";
-  ctx.stroke();
+  var max = 10;
+  function y(v) { return h - (Math.min(max, Math.max(0, v)) / max) * (h - 6) - 3; }
+  function line(data, color, width, dashed, gapsBelowZero) {
+    if (!data || data.length < 2) return;
+    ctx.beginPath();
+    var pen = false;
+    data.forEach(function (v, i) {
+      var x = (i / (data.length - 1)) * w;
+      if (gapsBelowZero && v < 0) { pen = false; return; }
+      if (!pen) { ctx.moveTo(x, y(v)); pen = true; } else ctx.lineTo(x, y(v));
+    });
+    ctx.setLineDash(dashed ? [5, 4] : []);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.lineJoin = "round";
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  line(target, "#d98c3f", 1.5, true, true);
+  if (!closedLoop) line(sensor, "#6b5d52", 1, false, false);
+  line(main, "#3f8cd9", 2.5, false, false);
 }
 
 function formatElapsed(ms) {
@@ -1228,7 +1241,7 @@ var shotRunning = false;
 var shotElapsedBaseMs = 0;
 var shotElapsedCapturedAt = null;
 var prevShotRunning = false; // detects the stop transition, to refresh history once
-// Populated from /status (shot_auto_stop_sec) - the progress bar and
+// Populated from /status (active_max_sec) - the progress bar and
 // in-window/over coloring track THIS configured value, not a hardcoded
 // number, so they stay correct whenever the auto-stop duration changes
 // (directly, or via loading a profile with a different auto-stop time).
@@ -1475,9 +1488,6 @@ setInterval(function () {
 }, 1000);
 
 var statusInflight = false;
-var lastZcCount = null;
-var lastZcAt = null;
-var zcHz = 0;
 
 function applyModeButtons(mode) {
   document.getElementById("btn_off").classList.toggle("active", mode === "off");
@@ -1490,8 +1500,10 @@ function applyModeButtons(mode) {
 
 function applyShotButton(running) {
   var btnShot = document.getElementById("btn_shot");
-  btnShot.textContent = running ? "Stop Shot" : "Start Shot";
+  var blocked = !running && waterLow && waterInterlockOn;
+  btnShot.textContent = running ? "Stop Shot" : blocked ? "Refill to brew" : "Start Shot";
   btnShot.classList.toggle("running", running);
+  btnShot.classList.toggle("blocked", blocked);
 }
 
 function applyStatus(json) {
@@ -1515,17 +1527,24 @@ function applyStatus(json) {
   showBanner("fault_banner", !!json.fault);
   setText("temp", json.fault ? "--" : temp.toFixed(1));
   setText("target", hasTarget ? target.toFixed(1) : "--");
+  document.getElementById("target_on").style.display = mode === "off" ? "none" : "";
+  document.getElementById("target_off").style.display = mode === "off" ? "" : "none";
   setText("output", outputPct.toFixed(0));
   setText("pump_power", pumpPct.toFixed(0));
   var pumpBar = document.getElementById("pump_bar");
   if (pumpBar) pumpBar.style.width = clamp(pumpPct) + "%";
 
-  trackPhaseMarkers(json.shot_phase, json.shot_in_progress);
+  trackPhaseMarkers(json.phase_index, json.shot_in_progress);
   drawSparkline(json.history, hasTarget ? target : null);
-  var pressureTarget = (json.press_available !== false && json.press_enabled && json.shot_phase === "pressure") ? json.press_ramp_bar : null;
-  drawPressureSparkline(json.pressure_history, pressureTarget);
+  var closedLoop = json.press_available === true && !json.pressure_fault;
+  drawPressureChart(json.est_history, json.pressure_history, json.target_history, closedLoop);
   var pLabel = document.getElementById("pressure_label");
-  if (pLabel) pLabel.textContent = (json.pressure_fault ? "fault" : (json.pressure_max_bar && json.pressure >= json.pressure_max_bar ? json.pressure_max_bar.toFixed(0) + "+" : json.pressure.toFixed(2)) + " bar");
+  if (pLabel) {
+    pLabel.textContent = json.pressure_fault ? "sensor fault"
+      : "sensor " + (json.pressure_max_bar && json.pressure >= json.pressure_max_bar
+        ? json.pressure_max_bar.toFixed(0) + "+" : json.pressure.toFixed(1)) + " bar";
+  }
+  applyWaterStatus(json, mode);
 
   var tempPct = (temp > 0 && hasTarget) ? clamp((temp / target) * 100) : 0;
   var ring = document.getElementById("temp_ring_fill");
@@ -1539,31 +1558,29 @@ function applyStatus(json) {
     else ring.classList.add("ready");
   }
 
-  // Scale the gauge to the fitted sensor's real range; with no closed-loop
-  // pressure control there's no goal to color against.
-  var PRESSURE_GAUGE_MAX_BAR = json.pressure_max_bar || 16;
-  var pressureLoop = json.press_available !== false && json.press_enabled;
-  var pressureGoal = (pressureLoop && json.press_ramp_bar > 0) ? json.press_ramp_bar : null;
-  var pressureVal = json.pressure;
-  var pressureAtMax = json.pressure_max_bar && pressureVal >= json.pressure_max_bar;
-  var pressurePct = json.pressure_fault ? 0 : clamp((pressureVal / PRESSURE_GAUGE_MAX_BAR) * 100);
+  // Pressure gauge: the model estimate during a shot (no usable sensor),
+  // the real reading once the closed loop exists. Goal = the current
+  // pressure-phase target.
+  var PRESSURE_GAUGE_MAX_BAR = 12;
+  var showPressure = closedLoop || json.shot_in_progress;
+  var pressureVal = closedLoop ? json.pressure : (json.shot_in_progress ? json.pressure_est : 0);
+  var pressureGoal = (json.shot_in_progress && json.phase_type === "pressure") ? json.phase_target : null;
   var pRing = document.getElementById("pressure_ring_fill");
   if (pRing) {
-    pRing.style.strokeDashoffset = RING_CIRCUMFERENCE * (1 - pressurePct / 100);
+    pRing.style.strokeDashoffset = RING_CIRCUMFERENCE * (1 - clamp((pressureVal / PRESSURE_GAUGE_MAX_BAR) * 100) / 100);
     pRing.classList.remove("heating", "ready", "over");
-    if (!json.pressure_fault && json.shot_in_progress && pressureGoal !== null) {
-      var PRESSURE_READY_MARGIN_BAR = 1.5;
+    if (pressureGoal !== null) {
+      var PRESSURE_READY_MARGIN_BAR = 1.0;
       if (pressureVal < pressureGoal - PRESSURE_READY_MARGIN_BAR) pRing.classList.add("heating");
       else if (pressureVal > pressureGoal + PRESSURE_READY_MARGIN_BAR) pRing.classList.add("over");
       else pRing.classList.add("ready");
     }
   }
-  setText("pressure_gauge_val", json.pressure_fault ? "--" : pressureAtMax ? pressureVal.toFixed(0) + "+" : pressureVal.toFixed(1));
+  setText("pressure_gauge_val", showPressure ? pressureVal.toFixed(1) : "--");
   var pCap = document.getElementById("pressure_target_caption");
   if (pCap) {
-    pCap.textContent = json.shot_in_progress && pressureGoal !== null
-      ? "Target " + pressureGoal.toFixed(1) + " bar"
-      : json.press_available === false ? "Pressure (0-" + PRESSURE_GAUGE_MAX_BAR + " bar sensor)" : "Pressure";
+    pCap.textContent = (closedLoop ? "" : "est. · ") +
+      (pressureGoal !== null ? "target " + pressureGoal.toFixed(1) + " bar" : "pressure");
   }
 
   document.getElementById("output_bar").style.width = clamp(outputPct) + "%";
@@ -1596,29 +1613,11 @@ function applyStatus(json) {
   setVal("input_mqtt_user", json.mqtt_user || "");
   setVal("input_eco_min", json.eco_timeout_min);
   setVal("input_steam_off_min", json.steam_auto_off_min);
-  setVal("input_shot_auto_stop", json.shot_auto_stop_sec);
-  if (typeof json.pump_brew_pct === "number") setVal("input_pump_brew_pct", json.pump_brew_pct);
-  if (typeof json.pump_pi_pct === "number") setVal("input_pump_pi_pct", json.pump_pi_pct);
-  if (typeof json.pi_fill_bar === "number") setVal("input_pi_fill_bar", json.pi_fill_bar);
-  if (typeof json.pi_fill_max_s === "number") setVal("input_pi_fill_max_s", json.pi_fill_max_s);
-  if (typeof json.pi_soak_s === "number") setVal("input_pi_soak_s", json.pi_soak_s);
-  var piFill = document.getElementById("pi_fill_fields");
-  if (piFill) piFill.hidden = json.press_available === false;
   var passHint = document.getElementById("mqtt_pass_hint");
   if (passHint) passHint.hidden = !json.mqtt_pass_set;
 
   var ntpBanner = document.getElementById("ntp_banner");
   if (ntpBanner) ntpBanner.style.display = json.ntp_synced ? "none" : "flex";
-
-  var now = Date.now();
-  if (typeof json.dimmer_zc_count === "number") {
-    if (lastZcCount !== null && lastZcAt !== null) {
-      var dt = (now - lastZcAt) / 1000;
-      if (dt > 0) zcHz = (json.dimmer_zc_count - lastZcCount) / dt;
-    }
-    lastZcCount = json.dimmer_zc_count;
-    lastZcAt = now;
-  }
 
   var pumpMsg = "";
   if (json.pressure_ceiling_tripped) {
@@ -1632,29 +1631,29 @@ function applyStatus(json) {
     showBanner("pressure_banner", false);
   }
 
-  var brewSwitchOff = json.shot_in_progress && zcHz < 20 && lastZcCount !== null;
-  if (brewSwitchOff) {
-    showBanner("pump_banner", true, "Flip the machine's Brew switch — the dimmer has no mains power.");
-  } else if (json.shot_in_progress && pumpPct < 1 && zcHz >= 20 && !json.pressure_ceiling_tripped) {
-    showBanner("pump_banner", true, "Pump commanded off while the Brew switch is on.");
+  var pumpWanted = json.shot_in_progress || json.pump_cal_state === "running";
+  if (pumpWanted && json.pump_mains === "absent") {
+    showBanner("pump_banner", true, "No mains to the pump — turn the machine's Brew switch on.");
+  } else if (pumpWanted && json.pump_mains === "unstable") {
+    showBanner("pump_banner", true, "Mains zero-cross signal looks unstable (" + json.mains_hz.toFixed(1) + " Hz).");
   } else {
     showBanner("pump_banner", false);
   }
+  showBanner("cal_banner", json.pump_calibrated === false);
+  applyCalStatus(json);
 
   var shotLabel = document.getElementById("shot_auto_stop_label");
-  if (json.shot_in_progress && json.shot_phase === "preinfusion") {
-    shotLabel.textContent = "Pre-infusing…";
-  } else if (json.shot_in_progress && json.shot_phase === "pressure") {
-    shotLabel.textContent = "Pressure " + (json.press_ramp_bar ? json.press_ramp_bar.toFixed(1) + " bar" : "hold");
-  } else if (json.shot_in_progress && json.shot_phase === "extraction") {
-    shotLabel.textContent = "Extracting…";
+  if (json.shot_in_progress && json.phase_index >= 0) {
+    var unit = json.phase_type === "pressure" ? " bar" : json.phase_type === "flow" ? " ml/s" : json.phase_type === "power" ? "%" : "";
+    var tgt = json.phase_type === "soak" ? "pump off" : json.phase_target.toFixed(1) + unit;
+    shotLabel.textContent = json.phase_name + " · " + (json.phase_index + 1) + "/" + json.phase_count + " · " + tgt;
   } else {
-    shotLabel.textContent = json.shot_auto_stop_sec > 0 ? "Auto-stops at " + json.shot_auto_stop_sec + "s" : "Auto-stop disabled";
+    shotLabel.textContent = (json.active_profile_name || "--") + " · stops by " + json.active_max_sec + "s";
   }
-
-  shotAutoStopSec = json.shot_auto_stop_sec;
-  if (json.active_profile !== activeProfileIndex) {
-    activeProfileIndex = json.active_profile;
+  shotAutoStopSec = json.active_max_sec;
+  
+  if (typeof json.active_profile_name === "string" && json.active_profile_name !== activeProfileName) {
+    activeProfileName = json.active_profile_name;
     markActiveProfile();
   }
 
@@ -1741,6 +1740,7 @@ setInterval(pollStatus, 2000);
 
 function setMode(mode) {
   applyModeButtons(mode);
+  document.getElementById("sleep_banner").style.display = "none"; // a manual mode change ends any auto-sleep
   xhr("/update?mode=" + mode);
 }
 
@@ -1763,83 +1763,252 @@ function stopAutotune() {
   xhr("/update?autotune=stop");
 }
 
+// ============================================================================
+// Water tank sensor (design spec 2026-10-15). waterLow is only true while
+// the sensor is enabled AND reads low; with the interlock on, Start is
+// replaced by "Refill to brew" (still tappable, explains itself).
+// ============================================================================
+var waterLow = false, waterInterlockOn = true, shotBlockMsgTimer = null;
+
+function applyWaterStatus(json, mode) {
+  if (typeof json.water_state !== "string") return;
+  var en = json.water_state !== "disabled";
+  waterLow = json.water_state === "low";
+  waterInterlockOn = json.water_interlock !== false;
+
+  var pill = document.getElementById("tank_pill");
+  pill.className = "pill tank" + (en ? (waterLow ? " low" : " ok") : "");
+  setText("tank_pill_text", waterLow ? "Low water" : "Tank OK");
+  var tile = document.getElementById("tank_tile");
+  tile.className = "stat-tile tank" + (en ? (waterLow ? " low" : " ok") : "");
+  setText("tank_value", waterLow ? "Low" : "OK");
+  showBanner("water_banner", waterLow, waterLow && !waterInterlockOn
+    ? "Water tank is low. Refill it soon."
+    : "Refill the water tank. New shots are paused until it's back.");
+  if (!waterLow) hideShotBlockMsg();
+  applyShotButton(shotRunning);
+
+  var cbEn = document.getElementById("input_water_enabled");
+  if (cbEn && document.activeElement !== cbEn) cbEn.checked = !!json.water_enabled;
+  var sel = document.getElementById("input_water_active_low");
+  if (sel && document.activeElement !== sel) sel.value = json.water_active_low ? "1" : "0";
+  var cbLock = document.getElementById("input_water_interlock");
+  if (cbLock && document.activeElement !== cbLock) cbLock.checked = !!json.water_interlock;
+  var live = document.getElementById("water_live");
+  if (live) {
+    var raw = json.water_raw_high ? "HIGH" : "LOW";
+    var wet = json.water_active_low ? !json.water_raw_high : json.water_raw_high;
+    live.textContent = raw + " \u00b7 " + (wet ? "water detected" : "no water");
+    live.className = wet ? "ok" : "low";
+  }
+}
+
+function setWater(key, value) {
+  xhr("/update?" + key + "=" + value);
+}
+
+function showShotBlockMsg(text) {
+  var el = document.getElementById("shot_block_msg");
+  if (text) el.textContent = text;
+  el.classList.add("show");
+  clearTimeout(shotBlockMsgTimer);
+  shotBlockMsgTimer = setTimeout(hideShotBlockMsg, 6000);
+}
+function hideShotBlockMsg() {
+  var el = document.getElementById("shot_block_msg");
+  if (el) el.classList.remove("show");
+}
+
 function toggleShot() {
   var next = !shotRunning;
+  if (next && waterLow && waterInterlockOn) {
+    showShotBlockMsg("Tank is low. Refill, then tap again.");
+    return;
+  }
   shotRunning = next;
   if (next) {
     shotElapsedBaseMs = 0;
     shotElapsedCapturedAt = Date.now();
   }
   applyShotButton(next);
-  xhr("/update?shot=" + (next ? "start" : "stop"));
+  xhr("/update?shot=" + (next ? "start" : "stop"), function (status, text) {
+    if (!next || status !== 409) return;
+    // Refused by the controller (e.g. the tank went low since the last
+    // poll) - roll the optimistic timer back and say why.
+    shotRunning = false;
+    shotElapsedBaseMs = 0;
+    shotElapsedCapturedAt = null;
+    applyShotButton(false);
+    showShotBlockMsg(text || "Shot refused");
+  });
 }
 
 // ============================================================================
-// Named shot profiles (Now-tab quick-select chips + Tune-tab management list)
+// Shot profiles - by NAME (design spec 2026-10-02 §7). All profile data goes
+// into the DOM via textContent/createElement(NS) only - names are user input.
 // ============================================================================
 var profilesCache = [];
-var activeProfileIndex = 0;
+var activeProfileName = "";
 var lastProfilesJson = "";
 
-function piSummary(p) {
-  return p.preinfusion ? p.pulses + "× " + (p.on_ms / 1000) + "s/" + (p.off_ms / 1000) + "s" : "None";
+function profileTotalSec(p) {
+  var t = 0;
+  p.phases.forEach(function (ph) { t += ph.duration_s; });
+  return Math.min(t, p.max_sec);
+}
+
+function profileSummary(p) {
+  if (p.utility) return "Utility · " + profileTotalSec(p).toFixed(0) + "s";
+  var peak = 0;
+  p.phases.forEach(function (ph) { if (ph.type === "pressure") peak = Math.max(peak, ph.target * p.pressure_scale); });
+  var s = p.temp.toFixed(1) + "°C · " + p.phases.length + " phases · " + profileTotalSec(p).toFixed(0) + "s";
+  if (peak > 0) s += " · peak " + peak.toFixed(1) + " bar";
+  if (p.trim_pct) s += " · trim " + (p.trim_pct > 0 ? "+" : "") + p.trim_pct + "%";
+  if (p.tweaked) s += " · tweaked";
+  return s;
+}
+
+function easeJs(curve, x) {
+  if (curve === "linear") return x;
+  if (curve === "ease-in") return x * x * x;
+  if (curve === "ease-out") return 1 - Math.pow(1 - x, 3);
+  if (curve === "ease-in-out") return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+  return 1;
+}
+
+// Mini phase chart: each phase's target over time, normalised per unit
+// (bar/10, ml/s/10, %/100) so mixed phases share one axis; colour = type.
+var SVG_NS = "http://www.w3.org/2000/svg";
+var PHASE_COLORS = { pressure: "#d98c3f", flow: "#3f8cd9", power: "#9a8b7e", soak: "#4a3f37" };
+function phaseNorm(ph, v, scale) {
+  if (ph.type === "pressure") return (v * scale) / 10;
+  if (ph.type === "flow") return v / 10;
+  if (ph.type === "power") return v / 100;
+  return 0;
+}
+function buildProfileMiniChart(p) {
+  var W = 120, H = 32;
+  var svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+  svg.setAttribute("class", "profile-mini");
+  svg.setAttribute("aria-hidden", "true");
+  var total = 0;
+  p.phases.forEach(function (ph) { total += ph.duration_s; });
+  if (total <= 0) return svg;
+  var t = 0, prevEnd = 0;
+  p.phases.forEach(function (ph) {
+    var end = phaseNorm(ph, ph.target, p.pressure_scale);
+    var start = ph.start !== undefined ? phaseNorm(ph, ph.start, p.pressure_scale) : prevEnd;
+    if (ph.type === "soak") { start = 0; end = 0; }
+    var ramp = (ph.curve && ph.curve !== "instant") ? Math.min(ph.ramp_s || 0, ph.duration_s) : 0;
+    var pts = [];
+    if (ramp > 0) {
+      for (var i = 0; i <= 8; i++) pts.push([t + (i / 8) * ramp, start + (end - start) * easeJs(ph.curve, i / 8)]);
+    } else {
+      pts.push([t, end]);
+    }
+    pts.push([t + ph.duration_s, end]);
+    var line = document.createElementNS(SVG_NS, "polyline");
+    line.setAttribute("points", pts.map(function (q) {
+      return ((q[0] / total) * W).toFixed(1) + "," + (H - 2 - Math.min(1, q[1]) * (H - 4)).toFixed(1);
+    }).join(" "));
+    line.setAttribute("fill", "none");
+    line.setAttribute("stroke", PHASE_COLORS[ph.type] || "#888");
+    line.setAttribute("stroke-width", "2");
+    svg.appendChild(line);
+    t += ph.duration_s;
+    prevEnd = end;
+  });
+  return svg;
 }
 
 function markActiveProfile() {
   var chips = document.querySelectorAll("#profile_chip_row .btn-preset");
-  for (var i = 0; i < chips.length; i++) chips[i].classList.toggle("active", i === activeProfileIndex);
+  for (var i = 0; i < chips.length; i++) chips[i].classList.toggle("active", chips[i].dataset.name === activeProfileName);
   var rows = document.querySelectorAll("#profile_list_body .profile-row");
-  for (var j = 0; j < rows.length; j++) rows[j].classList.toggle("active", j === activeProfileIndex);
+  for (var j = 0; j < rows.length; j++) rows[j].classList.toggle("active", rows[j].dataset.name === activeProfileName);
+}
+
+function profileActionDone(status, text) {
+  if (status !== 200) alert(text || "Request failed");
+  lastProfilesJson = "";
+  fetchProfiles();
+}
+
+function selectProfileByName(name) {
+  activeProfileName = name;
+  markActiveProfile();
+  xhr("/update?profile_select=" + encodeURIComponent(name), profileActionDone);
 }
 
 function renderProfileChips() {
   var row = document.getElementById("profile_chip_row");
   if (!row) return;
   row.textContent = "";
-  profilesCache.forEach(function (p, i) {
+  profilesCache.forEach(function (p) {
     var btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "btn-preset" + (i === activeProfileIndex ? " active" : "");
+    btn.className = "btn-preset";
+    btn.dataset.name = p.name;
     btn.textContent = p.name;
-    btn.addEventListener("click", function () { applyProfile(i); });
+    btn.addEventListener("click", function () { selectProfileByName(p.name); });
     row.appendChild(btn);
   });
+  markActiveProfile();
+}
+
+function addRowButton(parent, label, cls, onClick) {
+  var b = document.createElement("button");
+  b.type = "button";
+  b.className = "btn-chip-sm" + (cls ? " " + cls : "");
+  b.textContent = label;
+  b.addEventListener("click", function (e) { e.stopPropagation(); onClick(b); });
+  parent.appendChild(b);
+  return b;
 }
 
 function renderProfileList() {
   var body = document.getElementById("profile_list_body");
   if (!body) return;
   body.textContent = "";
-  profilesCache.forEach(function (p, i) {
+  profilesCache.forEach(function (p) {
     var row = document.createElement("div");
-    row.className = "profile-row" + (i === activeProfileIndex ? " active" : "");
+    row.className = "profile-row";
+    row.dataset.name = p.name;
     var main = document.createElement("div");
     main.className = "profile-row-main";
     var nameEl = document.createElement("b");
-    nameEl.textContent = p.name;
+    nameEl.textContent = p.name + (p.builtin ? "" : " ★");
     var meta = document.createElement("span");
-    var extra = p.pressure_enabled ? " · " + p.pressure_ramp_bar + " bar" : "";
-    meta.textContent = p.temp.toFixed(1) + "°C · " + p.auto_stop_sec + "s · pre-infusion: " + piSummary(p) + extra;
+    meta.textContent = profileSummary(p);
     main.appendChild(nameEl);
     main.appendChild(meta);
+    main.addEventListener("click", function () { selectProfileByName(p.name); });
     var actions = document.createElement("div");
     actions.className = "profile-row-actions";
-    var editBtn = document.createElement("button");
-    editBtn.type = "button";
-    editBtn.className = "btn-chip-sm";
-    editBtn.textContent = "Edit";
-    editBtn.addEventListener("click", function () { editProfile(i); });
-    var delBtn = document.createElement("button");
-    delBtn.type = "button";
-    delBtn.className = "btn-chip-sm danger";
-    delBtn.textContent = "Delete";
-    delBtn.addEventListener("click", function () { armDeleteProfile(delBtn, i); });
-    actions.appendChild(editBtn);
-    actions.appendChild(delBtn);
+    addRowButton(actions, "Tweak", "", function () { openProfileTweak(p); });
+    addRowButton(actions, "Copy", "", function () {
+      var n = prompt("Name for the copy (max 20 characters):", (p.name + " copy").slice(0, 20));
+      if (!n) return;
+      xhr("/update?profile_duplicate=" + encodeURIComponent(p.name) + "&new_name=" + encodeURIComponent(n), profileActionDone);
+    });
+    if (p.builtin && p.tweaked) {
+      addRowButton(actions, "Reset", "", function () { xhr("/update?profile_reset=" + encodeURIComponent(p.name), profileActionDone); });
+    }
+    if (!p.builtin) {
+      addRowButton(actions, "Rename", "", function () {
+        var n = prompt("New name (max 20 characters):", p.name);
+        if (!n || n === p.name) return;
+        xhr("/update?profile_rename=" + encodeURIComponent(p.name) + "&new_name=" + encodeURIComponent(n), profileActionDone);
+      });
+      addRowButton(actions, "Delete", "danger", function (btn) { armDeleteProfile(btn, p.name); });
+    }
     row.appendChild(main);
+    row.appendChild(buildProfileMiniChart(p));
     row.appendChild(actions);
     body.appendChild(row);
   });
+  markActiveProfile();
 }
 
 function fetchProfiles() {
@@ -1853,121 +2022,53 @@ function fetchProfiles() {
 }
 fetchProfiles();
 
-function applyProfile(idx) {
-  activeProfileIndex = idx;
-  markActiveProfile();
-  xhr("/update?profile_apply=" + idx, function () { lastProfilesJson = ""; fetchProfiles(); });
+function openProfileTweak(p) {
+  document.getElementById("input_tweak_name").value = p.name;
+  document.getElementById("profile_tweak_title").textContent = "Tweak \"" + p.name + "\"";
+  document.getElementById("tweak_temp_field").hidden = !!p.utility;
+  document.getElementById("input_tweak_temp").value = p.temp;
+  document.getElementById("input_tweak_max_sec").value = p.max_sec;
+  document.getElementById("input_tweak_scale").value = p.pressure_scale;
+  document.getElementById("input_tweak_trim").value = p.trim_pct;
+  var card = document.getElementById("profile_tweak_card");
+  card.hidden = false;
+  card.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
-// Pump pattern preview - a step chart of pulses (from the form fields, live
-// as you type) followed by a solid "extraction" block for the remainder of
-// the shot. This is the same kind of curve-preview Gaggiuino/GaggiMate/
-// Meticulous show for their (pressure/flow) profiles, scaled to what this
-// project can actually show: on/off pump state, not a measured curve, since
-// there's no pressure transducer or flow sensor here.
-function drawProfilePreview() {
-  var canvas = document.getElementById("profile_preview_chart");
-  if (!canvas) return;
-  var ctx = canvas.getContext("2d");
-  var w = canvas.width, h = canvas.height;
-  ctx.clearRect(0, 0, w, h);
+function closeProfileTweak() { document.getElementById("profile_tweak_card").hidden = true; }
 
-  var enabled = document.getElementById("input_profile_pi_enabled").checked;
-  var pulses = parseInt(document.getElementById("input_profile_pi_pulses").value, 10) || 0;
-  var onSec = parseFloat(document.getElementById("input_profile_pi_on").value) || 0;
-  var offSec = parseFloat(document.getElementById("input_profile_pi_off").value) || 0;
-  var autoStop = parseFloat(document.getElementById("input_profile_autostop").value) || 27;
-
-  var piTotal = (enabled && pulses > 0) ? pulses * onSec + Math.max(0, pulses - 1) * offSec : 0;
-  var extractionSec = Math.max(3, autoStop - piTotal); // always show a visible extraction block
-  var totalSec = piTotal + extractionSec;
-
-  var label = document.getElementById("profile_preview_label");
-  if (label) label.textContent = (enabled && pulses > 0) ? piTotal.toFixed(1) + "s pre-infusion" : "No pre-infusion";
-
-  var x = 0;
-  var barY = 6, barH = h - 12;
-  function seg(durSec, on) {
-    var segW = (durSec / totalSec) * w;
-    ctx.fillStyle = on ? "#d98c3f" : "#2a221c";
-    ctx.fillRect(x, barY, Math.max(0, segW - 1), barH);
-    x += segW;
-  }
-  if (enabled && pulses > 0) {
-    for (var i = 0; i < pulses; i++) {
-      seg(onSec, true);
-      if (i < pulses - 1) seg(offSec, false);
-    }
-  }
-  seg(extractionSec, true); // continuous extraction for the rest of the shot
+function submitProfileTweak(ev) {
+  ev.preventDefault();
+  var q = "profile_tweak=" + encodeURIComponent(document.getElementById("input_tweak_name").value) +
+    "&temp=" + encodeURIComponent(document.getElementById("input_tweak_temp").value) +
+    "&max_sec=" + encodeURIComponent(document.getElementById("input_tweak_max_sec").value) +
+    "&pressure_scale=" + encodeURIComponent(document.getElementById("input_tweak_scale").value) +
+    "&trim_pct=" + encodeURIComponent(document.getElementById("input_tweak_trim").value);
+  var btn = document.getElementById("profile_tweak_submit");
+  btn.disabled = true;
+  btn.textContent = "Saving…";
+  xhr("/update?" + q, function (status, text) {
+    profileActionDone(status, text);
+    btn.textContent = status === 200 ? "Saved" : "Save failed";
+    setTimeout(function () {
+      btn.disabled = false;
+      btn.textContent = "Save";
+      if (status === 200) closeProfileTweak();
+    }, 900);
+  });
 }
 
-function editProfile(idx) {
-  var p = profilesCache[idx];
-  if (!p) return;
-  document.getElementById("input_profile_index").value = idx;
-  document.getElementById("input_profile_name").value = p.name;
-  document.getElementById("input_profile_temp").value = p.temp;
-  document.getElementById("input_profile_autostop").value = p.auto_stop_sec;
-  document.getElementById("input_profile_pi_enabled").checked = p.preinfusion;
-  document.getElementById("input_profile_pi_pulses").value = p.pulses;
-  document.getElementById("input_profile_pi_on").value = p.on_ms / 1000;
-  document.getElementById("input_profile_pi_off").value = p.off_ms / 1000;
-  document.getElementById("input_profile_press_enabled").checked = p.pressure_enabled;
-  document.getElementById("input_profile_press_ramp_bar").value = p.pressure_ramp_bar;
-  document.getElementById("input_profile_press_ramp_sec").value = p.pressure_ramp_ms / 1000;
-  document.getElementById("input_profile_press_decline_enabled").checked = p.pressure_decline_enabled;
-  document.getElementById("input_profile_press_decline_bar").value = p.pressure_decline_bar;
-  document.getElementById("input_profile_press_decline_sec").value = p.pressure_decline_ms / 1000;
-  document.getElementById("profile_form_title").textContent = "Edit \"" + p.name + "\"";
-  document.getElementById("profile_form_submit").textContent = "Save Changes";
-  document.getElementById("profile_editor_card").hidden = false;
-  document.getElementById("profile_editor_card").scrollIntoView({ behavior: "smooth", block: "center" });
-  drawProfilePreview();
-}
-
-function newProfileForm() {
-  document.getElementById("input_profile_index").value = -1;
-  document.getElementById("input_profile_name").value = "";
-  document.getElementById("input_profile_temp").value = 93;
-  document.getElementById("input_profile_autostop").value = 27;
-  document.getElementById("input_profile_pi_enabled").checked = false;
-  document.getElementById("input_profile_pi_pulses").value = 3;
-  document.getElementById("input_profile_pi_on").value = 1;
-  document.getElementById("input_profile_pi_off").value = 2;
-  document.getElementById("input_profile_press_enabled").checked = false;
-  document.getElementById("input_profile_press_ramp_bar").value = 9;
-  document.getElementById("input_profile_press_ramp_sec").value = 20;
-  document.getElementById("input_profile_press_decline_enabled").checked = false;
-  document.getElementById("input_profile_press_decline_bar").value = 6;
-  document.getElementById("input_profile_press_decline_sec").value = 8;
-  document.getElementById("profile_form_title").textContent = "New Profile";
-  document.getElementById("profile_form_submit").textContent = "Add Profile";
-  document.getElementById("profile_editor_card").hidden = false;
-  document.getElementById("profile_editor_card").scrollIntoView({ behavior: "smooth", block: "center" });
-  drawProfilePreview();
-}
-
-function cancelProfileForm() {
-  document.getElementById("profile_editor_card").hidden = true;
-}
-
-// Arm-then-confirm instead of a native confirm() popup - first click arms
-// the button (relabels it, 4s window to change your mind), second click
-// within that window actually deletes. Any other Delete button clicked
-// while one is armed disarms it first, so only one can ever be armed.
+// Arm-then-confirm delete (no native confirm()): first click arms for 4 s,
+// second click deletes; arming another disarms the first.
 var armedDeleteBtn = null, armedDeleteTimer = null;
-
 function disarmDeleteProfile() {
   if (armedDeleteTimer) { clearTimeout(armedDeleteTimer); armedDeleteTimer = null; }
   if (armedDeleteBtn) { armedDeleteBtn.textContent = "Delete"; armedDeleteBtn.classList.remove("armed"); armedDeleteBtn = null; }
 }
-
-function armDeleteProfile(btn, idx) {
-  if (profilesCache.length <= 1) { alert("Can't delete the last remaining profile."); return; }
+function armDeleteProfile(btn, name) {
   if (btn === armedDeleteBtn) {
     disarmDeleteProfile();
-    xhr("/update?profile_delete=" + idx, function () { lastProfilesJson = ""; fetchProfiles(); });
+    xhr("/update?profile_delete=" + encodeURIComponent(name), profileActionDone);
     return;
   }
   disarmDeleteProfile();
@@ -1977,45 +2078,69 @@ function armDeleteProfile(btn, idx) {
   armedDeleteTimer = setTimeout(disarmDeleteProfile, 4000);
 }
 
-function submitProfileForm(ev) {
-  ev.preventDefault();
-  var q = "profile_save=1";
-  q += "&profile_index=" + document.getElementById("input_profile_index").value;
-  q += "&profile_name=" + encodeURIComponent(document.getElementById("input_profile_name").value);
-  q += "&profile_temp=" + document.getElementById("input_profile_temp").value;
-  q += "&profile_autostop=" + document.getElementById("input_profile_autostop").value;
-  q += "&profile_pi_enabled=" + (document.getElementById("input_profile_pi_enabled").checked ? "1" : "0");
-  q += "&profile_pi_pulses=" + document.getElementById("input_profile_pi_pulses").value;
-  q += "&profile_pi_on_ms=" + Math.round(document.getElementById("input_profile_pi_on").value * 1000);
-  q += "&profile_pi_off_ms=" + Math.round(document.getElementById("input_profile_pi_off").value * 1000);
-  q += "&profile_press_enabled=" + (document.getElementById("input_profile_press_enabled").checked ? "1" : "0");
-  q += "&profile_press_ramp_bar=" + document.getElementById("input_profile_press_ramp_bar").value;
-  q += "&profile_press_ramp_ms=" + Math.round(document.getElementById("input_profile_press_ramp_sec").value * 1000);
-  q += "&profile_press_decline_enabled=" + (document.getElementById("input_profile_press_decline_enabled").checked ? "1" : "0");
-  q += "&profile_press_decline_bar=" + document.getElementById("input_profile_press_decline_bar").value;
-  q += "&profile_press_decline_ms=" + Math.round(document.getElementById("input_profile_press_decline_sec").value * 1000);
-
-  // Inline save feedback (disable + label swap) instead of nothing happening
-  // until the list silently refreshes - same "no toast library, just button
-  // state" pattern GaggiMate's settings pages use.
-  var btn = document.getElementById("profile_form_submit");
-  var priorLabel = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = "Saving…";
-  xhr("/update?" + q, function (status) {
-    lastProfilesJson = "";
-    fetchProfiles();
-    btn.textContent = status === 200 ? "Saved" : "Save failed";
-    setTimeout(function () {
-      btn.disabled = false;
-      btn.textContent = priorLabel;
-      if (status === 200) document.getElementById("profile_editor_card").hidden = true;
-    }, 900);
-  });
-}
-
 function setSchedEnabled(i, checked) {
   xhr("/update?sched" + i + "_en=" + (checked ? "1" : "0"));
+}
+
+// Pump calibration card (design spec §6). Errors come back as 409 + text.
+function calDone(status, text) { setText("pump_cal_error", status === 200 ? "" : (text || "Request failed")); }
+function calAction(a) { xhr("/update?pump_cal=" + a, calDone); }
+function calRedo(n) { xhr("/update?pump_cal_redo=" + n, calDone); }
+function submitCalGrams() {
+  var input = document.getElementById("input_pump_cal_grams");
+  xhr("/update?pump_cal_grams=" + encodeURIComponent(input.value), function (s, t) {
+    calDone(s, t);
+    if (s === 200) input.value = "";
+  });
+}
+function applyCalStatus(json) {
+  if (typeof json.pump_cal_state !== "string") return;
+  setText("pump_cal_current", json.pump_ml_per_click.toFixed(3) + " ml/stroke" + (json.pump_calibrated ? "" : " (default)"));
+  var vals = json.pump_cal_runs || [];
+  var n = 0, mean = 0;
+  vals.forEach(function (v) { if (v !== null) { n++; mean += v; } });
+  mean = n ? mean / n : 0;
+  var st = json.pump_cal_state;
+  var runsEl = document.getElementById("pump_cal_runs");
+  runsEl.textContent = "";
+  for (var i = 0; i < 3; i++) {
+    var v = vals[i] === undefined ? null : vals[i];
+    var row = document.createElement("div");
+    row.className = "metric-row";
+    var label = document.createElement("span");
+    label.textContent = "Run " + (i + 1);
+    var val = document.createElement("b");
+    var off = v !== null && n === 3 && mean > 0 && Math.abs(v - mean) / mean > 0.10;
+    if (v !== null) val.textContent = v.toFixed(3) + (off ? " ⚠ redo" : "");
+    else if (json.pump_cal_run === i) val.textContent = st === "running" ? "pumping…" : "enter grams";
+    else val.textContent = "—";
+    row.appendChild(label);
+    row.appendChild(val);
+    if (v !== null && (st === "idle" || st === "aborted")) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "btn-chip-sm";
+      b.textContent = "Redo";
+      b.addEventListener("click", (function (k) { return function () { calRedo(k); }; })(i + 1));
+      row.appendChild(b);
+    }
+    runsEl.appendChild(row);
+  }
+  var msg = st === "running" ? "Run " + (json.pump_cal_run + 1) + ": pumping " + Math.floor(json.pump_cal_elapsed_ms / 1000) + " / 10 s"
+    : st === "await_grams" ? "Weigh the cup and enter the grams for run " + (json.pump_cal_run + 1) + "."
+    : st === "aborted" ? "Run aborted: " + json.pump_cal_reason + ". Start it again."
+    : n === 3 ? "All 3 runs done — Save, or Redo one."
+    : json.pump_mains !== "ok" ? "Turn the Brew switch on to start a run."
+    : "";
+  setText("pump_cal_status", msg);
+  document.getElementById("pump_cal_grams_row").hidden = st !== "await_grams";
+  var runBtn = document.getElementById("btn_pump_cal_run");
+  runBtn.hidden = st === "running" || st === "await_grams" || n === 3;
+  runBtn.disabled = json.pump_mains !== "ok";
+  var stopBtn = document.getElementById("btn_pump_cal_stop");
+  stopBtn.hidden = !(st === "running" || st === "await_grams");
+  stopBtn.textContent = st === "await_grams" ? "Discard run" : "Stop";
+  document.getElementById("btn_pump_cal_save").hidden = !(n === 3 && (st === "idle" || st === "aborted"));
 }
 
 function restoreSettings(input) {
@@ -2149,6 +2274,20 @@ document.getElementById("fwform").addEventListener("submit", function (e) {
 </body></html>
 )fwhtml";
 
+// Profile and phase names are user-supplied - escape before splicing into
+// the hand-built /status JSON.
+static String jsonEscape(const String &s) {
+  String o;
+  o.reserve(s.length() + 2);
+  for (size_t i = 0; i < s.length(); i++) {
+    char c = s[i];
+    if (c == '"' || c == '\\') { o += '\\'; o += c; }
+    else if ((unsigned char)c < 0x20) { char b[7]; snprintf(b, sizeof b, "\\u%04x", c); o += b; }
+    else o += c;
+  }
+  return o;
+}
+
 // Snapshots every control-task-owned field under the lock first (see
 // config.h "Shared-state lock"), then builds JSON from the local copies
 // unlocked - keeps the lock held for microseconds instead of for the whole
@@ -2167,10 +2306,6 @@ static void handleStatus(AsyncWebServerRequest *request) {
   unsigned long snapSteamAutoOffMin = steamAutoOffMin;
   bool snapAutoSleeping = autoSleeping;
   OpMode snapModeBeforeSleep = modeBeforeSleep;
-  unsigned long snapShotAutoStopSec = shotAutoStopSec;
-  int snapPumpBrewPct = pumpBrewPowerPct, snapPumpPiPct = pumpPreinfusionPowerPct;
-  double snapPiFillBar = preinfusionFillBar;
-  int snapPiFillMaxS = preinfusionFillMaxSec, snapPiSoakS = preinfusionSoakSec;
   AutotuneState snapAutotuneState = autotuneState;
   String snapAutotuneMessage = autotuneMessage;
   bool snapShotInProgress = shotInProgress;
@@ -2179,9 +2314,6 @@ static void handleStatus(AsyncWebServerRequest *request) {
   time_t snapLastDescaleTime = lastDescaleTime;
   unsigned long snapDescaleShotThreshold = descaleShotThreshold;
   unsigned long snapDescaleDayThreshold = descaleDayThreshold;
-  int snapActiveProfileIndex = activeProfileIndex;
-  bool snapPiEnabled = activePreinfusionEnabled;
-  int snapPiPulses = activePreinfusionPulses, snapPiOnMs = activePreinfusionOnMs, snapPiOffMs = activePreinfusionOffMs;
   ShotPhase snapShotPhase = currentShotPhase;
   bool snapSchedEnabled[SCHED_MAX_COUNT];
   int snapSchedHour[SCHED_MAX_COUNT], snapSchedMin[SCHED_MAX_COUNT];
@@ -2200,12 +2332,6 @@ static void handleStatus(AsyncWebServerRequest *request) {
   }
   bool snapPressureFault = pressureFault;
   float snapPressure = currentPressure;
-  bool snapPressEnabled = activePressureEnabled;
-  double snapPressRampBar = activePressureRampBar;
-  unsigned long snapPressRampMs = activePressureRampMs;
-  bool snapPressDeclineEnabled = activePressureDeclineEnabled;
-  double snapPressDeclineBar = activePressureDeclineBar;
-  unsigned long snapPressDeclineMs = activePressureDeclineMs;
   double snapPressKp = pressureKp, snapPressKi = pressureKi, snapPressKd = pressureKd;
   // Pump telemetry - lets a bench operator (Milestones A-C) distinguish
   // "pump idle" / "pump at 100% duty" / "PID commanding some percent" /
@@ -2213,8 +2339,7 @@ static void handleStatus(AsyncWebServerRequest *request) {
   // now that Fix 1 makes an unwired-sensor fault the likeliest Milestone A
   // confusion point.
   float snapPumpPower = dimmerGetPowerPercent();
-  // Temporary bring-up diagnostic (2026-09-15) - see dimmerGetZcCount()'s
-  // declaration comment. Remove alongside it once bring-up is complete.
+  // Zero-cross count (dimmer health), exposed as zc_count.
   uint32_t snapDimmerZcCount = dimmerGetZcCount();
   uint32_t snapPressureMv = pressureSensorLastMv();
   bool snapPressureCeilingTripped = (pressureFault || currentPressure > PUMP_MAX_SAFETY_BAR);
@@ -2224,6 +2349,35 @@ static void handleStatus(AsyncWebServerRequest *request) {
     int idx = (snapPressHistoryHead - snapPressHistoryCount + i + TEMP_HISTORY_LEN * 2) % TEMP_HISTORY_LEN;
     snapPressHistory[i] = pressureHistory[idx];
   }
+  bool snapPumpCalibrated = pumpCalibrated;
+  float snapPumpMlpc = pumpMlPerClick;
+  String snapCalState = pumpCalStateName();
+  String snapCalReason = pumpCalAbortReason();
+  int snapCalRun = pumpCalActiveRun();
+  unsigned long snapCalElapsed = pumpCalRunElapsedMs(millis());
+  float snapCalRuns[3] = {pumpCalRunValue(0), pumpCalRunValue(1), pumpCalRunValue(2)};
+  String snapMains = mainsStateName(dimmerGetMainsState());
+  float snapMainsHz = dimmerGetMainsHz();
+  uint32_t snapFired = dimmerGetFiredCycles();
+  String snapProfileName = activeProfileName;
+  const Profile *snapProf = profileFind(activeProfileName.c_str());
+  int snapMaxSec = snapProf ? snapProf->maxSec : 0;
+  PlannerOutput snapPlan = plannerOut;
+  String snapPhaseName = snapPlan.phaseName ? snapPlan.phaseName : "";
+  int snapEstCount = estHistoryCount, snapEstHead = estHistoryHead;
+  float snapEst[TEMP_HISTORY_LEN], snapTgt[TEMP_HISTORY_LEN];
+  for (int i = 0; i < snapEstCount; i++) {
+    int idx = (snapEstHead - snapEstCount + i + TEMP_HISTORY_LEN * 2) % TEMP_HISTORY_LEN;
+    snapEst[i] = estPressureHistory[idx];
+    snapTgt[i] = targetPressureHistory[idx];
+  }
+  bool snapWaterEnabled = waterSensorEnabled, snapWaterActiveLow = waterActiveLow;
+  bool snapWaterInterlock = waterInterlock;
+  WaterState snapWaterState = waterLevelState();
+  bool snapWaterRawHigh = waterLevelRawHigh();
+  String snapShotBlocked =
+      (shotBlockedReason[0] && (long)(millis() - shotBlockedAtMillis) < SHOT_BLOCKED_REPORT_MS)
+          ? shotBlockedReason : "";
   unlockState();
 
   String json = "{";
@@ -2284,12 +2438,6 @@ static void handleStatus(AsyncWebServerRequest *request) {
   json += ",\"asleep_from\":\"";
   json += (snapModeBeforeSleep == OpMode::STEAM) ? "steam" : "brew";
   json += "\"";
-  json += ",\"shot_auto_stop_sec\":" + String(snapShotAutoStopSec);
-  json += ",\"pump_brew_pct\":" + String(snapPumpBrewPct);
-  json += ",\"pump_pi_pct\":" + String(snapPumpPiPct);
-  json += ",\"pi_fill_bar\":" + String(snapPiFillBar, 1);
-  json += ",\"pi_fill_max_s\":" + String(snapPiFillMaxS);
-  json += ",\"pi_soak_s\":" + String(snapPiSoakS);
   json += ",\"pressure_max_bar\":" + String(PRESSURE_SENSOR_MAX_BAR, 1);
   json += ",\"press_available\":" + String(PRESSURE_CLOSED_LOOP_AVAILABLE ? "true" : "false");
 
@@ -2320,23 +2468,28 @@ static void handleStatus(AsyncWebServerRequest *request) {
       (daysSinceDescale >= 0 && (unsigned long)daysSinceDescale >= snapDescaleDayThreshold);
   json += ",\"descale_due\":" + String(descaleDue ? "true" : "false");
 
-  json += ",\"active_profile\":" + String(snapActiveProfileIndex);
-  json += ",\"pi_enabled\":" + String(snapPiEnabled ? "true" : "false");
-  json += ",\"pi_pulses\":" + String(snapPiPulses);
-  json += ",\"pi_on_ms\":" + String(snapPiOnMs);
-  json += ",\"pi_off_ms\":" + String(snapPiOffMs);
   json += ",\"pressure\":" + String(snapPressure, 2);
   json += ",\"pressure_fault\":" + String(snapPressureFault ? "true" : "false");
   json += ",\"pump_power\":" + String(snapPumpPower, 1);
-  json += ",\"dimmer_zc_count\":" + String(snapDimmerZcCount);
+  json += ",\"zc_count\":" + String(snapDimmerZcCount);
+  json += ",\"fired_cycles\":" + String(snapFired);
+  json += ",\"pump_mains\":\"" + snapMains + "\"";
+  json += ",\"mains_hz\":" + String(snapMainsHz, 1);
+  json += ",\"pump_calibrated\":" + String(snapPumpCalibrated ? "true" : "false");
+  json += ",\"pump_ml_per_click\":" + String(snapPumpMlpc, 4);
+  json += ",\"pump_cal_state\":\"" + snapCalState + "\"";
+  json += ",\"gate_hold_us\":" + String((long)dimmerGetGateHoldUs());
+  json += ",\"pump_cal_reason\":\"" + snapCalReason + "\"";
+  json += ",\"pump_cal_run\":" + String(snapCalRun);
+  json += ",\"pump_cal_elapsed_ms\":" + String(snapCalElapsed);
+  json += ",\"pump_cal_runs\":[";
+  for (int i = 0; i < 3; i++) {
+    if (i > 0) json += ",";
+    json += snapCalRuns[i] < 0.0f ? String("null") : String(snapCalRuns[i], 4);
+  }
+  json += "]";
   json += ",\"pressure_mv\":" + String(snapPressureMv);
   json += ",\"pressure_ceiling_tripped\":" + String(snapPressureCeilingTripped ? "true" : "false");
-  json += ",\"press_enabled\":" + String(snapPressEnabled ? "true" : "false");
-  json += ",\"press_ramp_bar\":" + String(snapPressRampBar);
-  json += ",\"press_ramp_ms\":" + String(snapPressRampMs);
-  json += ",\"press_decline_enabled\":" + String(snapPressDeclineEnabled ? "true" : "false");
-  json += ",\"press_decline_bar\":" + String(snapPressDeclineBar);
-  json += ",\"press_decline_ms\":" + String(snapPressDeclineMs);
   json += ",\"press_kp\":" + String(snapPressKp, 4);
   json += ",\"press_ki\":" + String(snapPressKi, 4);
   json += ",\"press_kd\":" + String(snapPressKd, 4);
@@ -2349,6 +2502,23 @@ static void handleStatus(AsyncWebServerRequest *request) {
     default: json += "none"; break;
   }
   json += "\"";
+
+  json += ",\"active_profile_name\":\"" + jsonEscape(snapProfileName) + "\"";
+  json += ",\"active_max_sec\":" + String(snapMaxSec);
+  json += ",\"phase_name\":\"" + jsonEscape(snapPhaseName) + "\"";
+  json += ",\"phase_index\":" + String(snapPlan.phaseIndex);
+  json += ",\"phase_count\":" + String(snapPlan.phaseCount);
+  json += ",\"phase_type\":\"" + String(snapPlan.phaseIndex >= 0 ? phaseTypeName(snapPlan.phaseType) : "") + "\"";
+  json += ",\"phase_target\":" + String(snapPlan.phaseTarget, 2);
+  json += ",\"pressure_est\":" + String(snapPlan.pressureEst, 2);
+
+  // Water tank sensor (water_level.cpp, design spec 2026-10-15)
+  json += ",\"water_enabled\":" + String(snapWaterEnabled ? "true" : "false");
+  json += ",\"water_state\":\"" + String(waterStateName(snapWaterState)) + "\"";
+  json += ",\"water_raw_high\":" + String(snapWaterRawHigh ? "true" : "false");
+  json += ",\"water_active_low\":" + String(snapWaterActiveLow ? "true" : "false");
+  json += ",\"water_interlock\":" + String(snapWaterInterlock ? "true" : "false");
+  json += ",\"shot_blocked\":\"" + snapShotBlocked + "\"";
 
   json += ",\"sched\":[";
   for (int i = 0; i < SCHED_MAX_COUNT; i++) {
@@ -2372,6 +2542,11 @@ static void handleStatus(AsyncWebServerRequest *request) {
     json += String(snapPressHistory[i], 2);
   }
   json += "]";
+  json += ",\"est_history\":[";
+  for (int i = 0; i < snapEstCount; i++) { if (i > 0) json += ","; json += String(snapEst[i], 2); }
+  json += "],\"target_history\":[";
+  for (int i = 0; i < snapEstCount; i++) { if (i > 0) json += ","; json += String(snapTgt[i], 2); }
+  json += "]";
 
   json += "}";
   request->send(200, "application/json", json);
@@ -2387,14 +2562,18 @@ static void handleUpdate(AsyncWebServerRequest *request) {
   auto hasArg = [request](const char *name) { return request->hasParam(name); };
   auto arg = [request](const char *name) { return request->getParam(name)->value(); };
 
-  noteActivity(); // any /update call is explicit user action - resets eco-sleep timer
-
   // Holds the whole handler body under stateMutex - see config.h
   // "Shared-state lock". This runs on the AsyncTCP task, a different task
   // than controlTick(), so every field this handler touches (mode,
   // setpoint, gains, shot state) needs the same lock controlTick() holds
   // during its own tick, for exactly the same reason.
   lockState();
+  noteActivity(); // after the lock: any /update call is explicit user action - resets eco-sleep timer
+
+  // Actions that can be refused (calibration, profiles) set this; the
+  // response is then 409 + the reason instead of the usual redirect, so
+  // the Web UI can show WHY (xhr callback gets status + text).
+  const char *actionErr = nullptr;
 
   Preferences preferences;
   preferences.begin("gaggia", false); // false = read/write
@@ -2492,39 +2671,6 @@ static void handleUpdate(AsyncWebServerRequest *request) {
     }
   }
 
-  // Shot auto-stop - 0 (disabled) passes through untouched; any nonzero
-  // value gets clamped so a typo can't set an unreasonably short/long
-  // duration (same pattern as steam_max_safety's clamp above).
-  if (hasArg("shot_auto_stop_sec")) {
-    long v = arg("shot_auto_stop_sec").toInt();
-    shotAutoStopSec = (v <= 0) ? 0 : constrain(v, SHOT_AUTO_STOP_SEC_MIN, SHOT_AUTO_STOP_SEC_MAX);
-    preferences.putULong("shot_auto_stop", shotAutoStopSec);
-  }
-
-  // Plain-duty pump power (pulse-skip %, see config.h). Clamped so a typo
-  // can't stall the pump (too low) or exceed 100%. Takes effect on the next
-  // stage change / shot start - a running shot keeps its current duty.
-  if (hasArg("pump_brew_pct")) {
-    pumpBrewPowerPct = constrain(arg("pump_brew_pct").toInt(), PUMP_POWER_PCT_MIN, PUMP_POWER_PCT_MAX);
-    preferences.putInt("pump_brew_pct", pumpBrewPowerPct);
-  }
-  if (hasArg("pump_pi_pct")) {
-    pumpPreinfusionPowerPct = constrain(arg("pump_pi_pct").toInt(), PUMP_POWER_PCT_MIN, PUMP_POWER_PCT_MAX);
-    preferences.putInt("pump_pi_pct", pumpPreinfusionPowerPct);
-  }
-  if (hasArg("pi_fill_bar")) {
-    preinfusionFillBar = constrain(arg("pi_fill_bar").toDouble(), PREINFUSION_FILL_BAR_MIN, PREINFUSION_FILL_BAR_MAX);
-    preferences.putDouble("pi_fill_bar", preinfusionFillBar);
-  }
-  if (hasArg("pi_fill_max_s")) {
-    preinfusionFillMaxSec = constrain(arg("pi_fill_max_s").toInt(), PREINFUSION_FILL_MAX_S_MIN, PREINFUSION_FILL_MAX_S_MAX);
-    preferences.putInt("pi_fill_max_s", preinfusionFillMaxSec);
-  }
-  if (hasArg("pi_soak_s")) {
-    preinfusionSoakSec = constrain(arg("pi_soak_s").toInt(), 0, PREINFUSION_SOAK_S_MAX);
-    preferences.putInt("pi_soak_s", preinfusionSoakSec);
-  }
-
   // Eco / auto-sleep
   if (hasArg("eco_timeout_min")) {
     ecoTimeoutMin = arg("eco_timeout_min").toInt();
@@ -2536,6 +2682,27 @@ static void handleUpdate(AsyncWebServerRequest *request) {
   }
   if (hasArg("wake") && arg("wake") == "1") {
     wakeFromSleep();
+  }
+
+  // Water tank sensor settings
+  bool waterSettingsChanged = false;
+  if (hasArg("water_enabled")) {
+    waterSensorEnabled = arg("water_enabled") == "1";
+    preferences.putBool("water_en", waterSensorEnabled);
+    waterSettingsChanged = true;
+  }
+  if (hasArg("water_active_low")) {
+    waterActiveLow = arg("water_active_low") == "1";
+    preferences.putBool("water_low_act", waterActiveLow);
+    waterSettingsChanged = true;
+  }
+  if (hasArg("water_interlock")) {
+    waterInterlock = arg("water_interlock") == "1";
+    preferences.putBool("water_lock", waterInterlock);
+  }
+  if (waterSettingsChanged) {
+    applyWaterSettings();
+    mqttWaterDiscoveryDirty = true; // add/remove the HA "Low water" entity
   }
 
   // PID Autotune - runs the currently-active profile (must be Brew or
@@ -2555,10 +2722,30 @@ static void handleUpdate(AsyncWebServerRequest *request) {
     String s = arg("shot");
     if (s == "start") {
       startShot();
+      if (!shotInProgress && strcmp(shotBlockedReason, "low_water") == 0) {
+        actionErr = "Water tank is low - refill it first";
+      }
     } else if (s == "stop") {
       stopShot();
     }
   }
+
+  // Pump calibration (pump_calibration.cpp, design spec §6)
+  if (hasArg("pump_cal")) {
+    String a = arg("pump_cal");
+    if (a == "run") pumpCalStartRun(-1, &actionErr);
+    else if (a == "stop") pumpCalStop();
+    else if (a == "save") pumpCalSave(&actionErr);
+    else if (a == "cancel") pumpCalClear();
+  }
+  if (hasArg("pump_cal_redo")) {
+    int n = arg("pump_cal_redo").toInt();
+    if (n < 1 || n > 3) actionErr = "Bad run number";
+    else pumpCalStartRun(n - 1, &actionErr);
+  }
+  if (hasArg("pump_cal_grams")) pumpCalRecordGrams(arg("pump_cal_grams").toFloat(), &actionErr);
+  if (hasArg("dimmer_gate_hold_us")) dimmerSetGateHoldUs(arg("dimmer_gate_hold_us").toInt());
+  if (hasArg("pump_mlpc") && !pumpCalSetValue(arg("pump_mlpc").toFloat())) actionErr = "pump_mlpc out of range (0.08-0.40)";
 
   // Descale / maintenance reminder
   if (hasArg("mark_descaled") && arg("mark_descaled") == "1") {
@@ -2589,59 +2776,40 @@ static void handleUpdate(AsyncWebServerRequest *request) {
     shotLogUpdateNotes(idx, bean, doseIn, grind, rating, notes);
   }
 
-  // Named shot profiles (profiles.cpp) - three independent actions, same
-  // split as everywhere else in this handler (editing vs. an explicit
-  // apply action):
-  //   profile_apply=<idx>       - load a saved profile into the live
-  //                               settings (temp/auto-stop/pre-infusion)
-  //   profile_save=1 (+ fields) - add (profile_index=-1) or overwrite an
-  //                               existing saved profile
-  //   profile_delete=<idx>      - remove a saved profile
-  if (hasArg("profile_apply")) {
-    applyProfile(arg("profile_apply").toInt());
+  // Shot profiles (profiles.cpp) - addressed by NAME (design spec §7).
+  if (hasArg("profile_select") && !selectProfile(arg("profile_select").c_str())) actionErr = "No such profile";
+  if (hasArg("profile_tweak")) {
+    String name = arg("profile_tweak");
+    const Profile *p = profileFind(name.c_str());
+    if (!p) {
+      actionErr = "No such profile";
+    } else {
+      ProfileTweak t = profileGetTweak(*p);
+      if (hasArg("temp")) t.temp = arg("temp").toFloat();
+      if (hasArg("max_sec")) t.maxSec = (uint16_t)constrain(arg("max_sec").toInt(), 0, 600);
+      if (hasArg("pressure_scale")) t.pressureScale = arg("pressure_scale").toFloat();
+      if (hasArg("trim_pct")) t.trimPct = (int8_t)constrain(arg("trim_pct").toInt(), -100, 100);
+      if (profileTweak(name.c_str(), t, &actionErr) && activeProfileName.equalsIgnoreCase(name)) selectProfile(name.c_str());
+    }
   }
-  if (hasArg("profile_save")) {
-    int idx = hasArg("profile_index") ? arg("profile_index").toInt() : -1;
-    String name = hasArg("profile_name") ? arg("profile_name") : "Profile";
-    double temp = hasArg("profile_temp") ? arg("profile_temp").toDouble() : BREW_SETPOINT_DEFAULT;
-    unsigned long autoStop = hasArg("profile_autostop")
-        ? constrain((long)arg("profile_autostop").toInt(), (long)SHOT_AUTO_STOP_SEC_MIN, (long)SHOT_AUTO_STOP_SEC_MAX)
-        : SHOT_AUTO_STOP_SEC_DEFAULT;
-    bool piEnabled = hasArg("profile_pi_enabled") && arg("profile_pi_enabled") == "1";
-    int pulses = hasArg("profile_pi_pulses")
-        ? constrain(arg("profile_pi_pulses").toInt(), 0, PREINFUSION_PULSES_MAX) : 0;
-    int onMs = hasArg("profile_pi_on_ms")
-        ? constrain(arg("profile_pi_on_ms").toInt(), PREINFUSION_PULSE_MS_MIN, PREINFUSION_PULSE_MS_MAX) : PREINFUSION_ON_MS_DEFAULT;
-    int offMs = hasArg("profile_pi_off_ms")
-        ? constrain(arg("profile_pi_off_ms").toInt(), PREINFUSION_PULSE_MS_MIN, PREINFUSION_PULSE_MS_MAX) : PREINFUSION_OFF_MS_DEFAULT;
-    bool pressureEnabled = hasArg("profile_press_enabled") && arg("profile_press_enabled") == "1";
-    // Clamped the same way the neighboring fields above are (see
-    // steam_max_safety's comment elsewhere in this file) - a typo in this
-    // field shouldn't be able to command the PID to push toward a
-    // dangerously high ceiling.
-    double pressureRampBar = hasArg("profile_press_ramp_bar")
-        ? constrain(arg("profile_press_ramp_bar").toDouble(), 0.0, PUMP_MAX_SAFETY_BAR - 1.0)
-        : PRESSURE_RAMP_BAR_DEFAULT;
-    unsigned long pressureRampMs = hasArg("profile_press_ramp_ms")
-        ? (unsigned long)constrain((long)arg("profile_press_ramp_ms").toInt(), 0L, 120000L)
-        : PRESSURE_RAMP_MS_DEFAULT;
-    bool pressureDeclineEnabled = hasArg("profile_press_decline_enabled") && arg("profile_press_decline_enabled") == "1";
-    double pressureDeclineBar = hasArg("profile_press_decline_bar")
-        ? constrain(arg("profile_press_decline_bar").toDouble(), 0.0, PUMP_MAX_SAFETY_BAR - 1.0)
-        : PRESSURE_DECLINE_BAR_DEFAULT;
-    unsigned long pressureDeclineMs = hasArg("profile_press_decline_ms")
-        ? (unsigned long)constrain((long)arg("profile_press_decline_ms").toInt(), 0L, 120000L)
-        : PRESSURE_DECLINE_MS_DEFAULT;
-    int saved = profileSave(idx, name, temp, autoStop, piEnabled, pulses, onMs, offMs,
-                             pressureEnabled, pressureRampBar, pressureRampMs,
-                             pressureDeclineEnabled, pressureDeclineBar, pressureDeclineMs);
-    // Editing the profile that's currently active also refreshes the live
-    // settings from it, so tweaking "your current setup" takes effect
-    // immediately instead of silently drifting from what's now saved.
-    if (saved >= 0 && saved == activeProfileIndex) applyProfile(saved);
+  if (hasArg("profile_duplicate")) {
+    String newName = hasArg("new_name") ? arg("new_name") : "";
+    profileDuplicate(arg("profile_duplicate").c_str(), newName.c_str(), &actionErr);
+  }
+  if (hasArg("profile_rename")) {
+    String oldName = arg("profile_rename");
+    String newName = hasArg("new_name") ? arg("new_name") : "";
+    if (profileRename(oldName.c_str(), newName.c_str(), &actionErr) && activeProfileName.equalsIgnoreCase(oldName))
+      selectProfile(newName.c_str());
   }
   if (hasArg("profile_delete")) {
-    profileDelete(arg("profile_delete").toInt());
+    String name = arg("profile_delete");
+    if (profileDeleteUser(name.c_str(), &actionErr) && activeProfileName.equalsIgnoreCase(name))
+      selectProfile(PROFILE_DEFAULT_NAME);
+  }
+  if (hasArg("profile_reset")) {
+    String name = arg("profile_reset");
+    if (profileReset(name.c_str(), &actionErr) && activeProfileName.equalsIgnoreCase(name)) selectProfile(name.c_str());
   }
 
   // Scheduled warm-up - SCHED_MAX_COUNT independent slots. Editing a slot's
@@ -2701,7 +2869,11 @@ static void handleUpdate(AsyncWebServerRequest *request) {
 
   unlockState();
 
-  request->redirect("/");
+  if (actionErr) {
+    request->send(409, "text/plain", actionErr);
+  } else {
+    request->redirect("/");
+  }
 
   // Reboot to apply MQTT settings cleanly (simplest way)
   if (restartForMqtt) {
@@ -2800,12 +2972,15 @@ void setupWeb() {
     request->send(200, "application/json", shotLogReadJson());
   });
 
-  // Named shot profiles (temp + auto-stop + pre-infusion pattern) - see
+  // Named shot profiles (temp + phase list + max_sec) - see
   // profiles.cpp. List only; add/edit/delete/apply all go through /update
   // like every other setting, for the same reason /settings_export reuses
   // it for restore - one code path, not two.
   server.on("/profiles", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(200, "application/json", profilesReadJson());
+    lockState();
+    String body = profilesListJson();
+    unlockState();
+    request->send(200, "application/json", body);
   });
 
   // Settings backup/restore (2026-08-16). Export builds a query-string in
@@ -2845,16 +3020,12 @@ void setupWeb() {
     q += "&steam_ki=" + String(steamKi, 4);
     q += "&steam_kd=" + String(steamKd, 4);
     q += "&steam_max_safety=" + String(steamMaxSafety, 1);
-    q += "&shot_auto_stop_sec=" + String(shotAutoStopSec);
-    q += "&pump_brew_pct=" + String(pumpBrewPowerPct);
-    q += "&pump_pi_pct=" + String(pumpPreinfusionPowerPct);
-    q += "&pi_fill_bar=" + String(preinfusionFillBar, 1);
-    q += "&pi_fill_max_s=" + String(preinfusionFillMaxSec);
-    q += "&pi_soak_s=" + String(preinfusionSoakSec);
+    q += "&profile_select=" + enc(activeProfileName);
     q += "&eco_timeout_min=" + String(ecoTimeoutMin);
     q += "&steam_auto_off_min=" + String(steamAutoOffMin);
     q += "&descale_shot_threshold=" + String(descaleShotThreshold);
     q += "&descale_day_threshold=" + String(descaleDayThreshold);
+    if (pumpCalibrated) q += "&pump_mlpc=" + String(pumpMlPerClick, 4);
     // Note: named shot profiles live in their own LittleFS file (profiles.cpp,
     // GET /profiles), not NVS - not included in this key=value backup format.
     for (int i = 0; i < SCHED_MAX_COUNT; i++) {

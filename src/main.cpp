@@ -3,8 +3,12 @@
 #include "mqtt.h"
 #include "pressure_sensor.h"
 #include "profiles.h"
+#include "pump_calibration.h"
+#include "profile_codec.h"
+#include "shot_planner.h"
 #include "shot_log.h"
 #include "temp_sensor.h"
+#include "water_level.h"
 #include "web.h"
 #include <Arduino.h>
 #include <PID_v1.h>
@@ -104,8 +108,22 @@ void refreshActiveProfileIfChanged() {
   if (currentMode != OpMode::OFF) applyActiveProfile();
 }
 
+extern bool autoSleeping;   // defined in the Eco / auto-sleep block below
+void noteActivity();
+
 void setOpMode(OpMode newMode) {
   currentMode = newMode;
+
+  // Any switch INTO Brew/Steam (Web UI button, MQTT, scheduled warm-up,
+  // wake) starts a fresh eco/steam auto-off window. Without this, turning
+  // the machine back on with the Brew/Steam button after an auto-sleep left
+  // autoSleeping stuck at true, so checkEcoSleep() bailed out forever and
+  // the machine never auto-switched off again until a reboot. It also stops
+  // a scheduled warm-up from being put to sleep the instant it fires.
+  if (newMode != OpMode::OFF) {
+    autoSleeping = false;
+    noteActivity();
+  }
 
   if (newMode == OpMode::OFF) {
     myPID.SetMode(MANUAL);
@@ -151,7 +169,9 @@ static void checkEcoSleep(unsigned long now) {
   if (timeoutMin == 0) return; // disabled for this mode
 
   unsigned long timeoutMs = timeoutMin * 60000UL;
-  if (now - lastActivityTime >= timeoutMs) {
+  long idleMs = (long)(now - lastActivityTime); // signed: activity stamped after `now` counts as 0
+  if (idleMs < 0) idleMs = 0;
+  if ((unsigned long)idleMs >= timeoutMs) {
     modeBeforeSleep = modeNow;
     autoSleeping = true;
     setOpMode(OpMode::OFF);
@@ -429,16 +449,14 @@ static void runAutotuneStep(unsigned long now) {
 // Started manually from the Web UI (Start Shot button) - the ESP32 has no
 // visibility into the machine's own Brew switch/pump yet, so it can't detect
 // a shot beginning on its own (see HARDWARE_ROADMAP.md for the sensor that
-// would). Stopping can now happen automatically via shotAutoStopSec (below),
-// timed from that manual start - see the loop() check further down and its
-// important caveat: this stops the firmware's own bookkeeping, not the pump
-// itself (no hardware yet to do that either).
+// would). The shot drives the pump through the profile's phase list, and each
+// profile's max_sec ends it automatically (timed from that manual start) -
+// see controlTick() further down.
 // (shotInProgress itself is declared up with the other PID globals, not
 // here - applyActiveProfile() needs it for Brew gain-scheduling.)
 // ============================================================================
 unsigned long shotStartMillis = 0;
 float shotPeakTemp = 0.0;
-unsigned long shotAutoStopSec = SHOT_AUTO_STOP_SEC_DEFAULT; // 0 = disabled, persisted
 
 // Descale / maintenance reminder - both persisted in NVS.
 unsigned long shotCount = 0;         // shots since the last descale/reset
@@ -447,317 +465,151 @@ unsigned long descaleShotThreshold = DESCALE_SHOT_THRESHOLD_DEFAULT;
 unsigned long descaleDayThreshold = DESCALE_DAY_THRESHOLD_DEFAULT;
 
 // ============================================================================
-// Shot profiles (see config.h/profiles.cpp) - a saved profile is just a
-// named (temp, auto-stop, pre-infusion pattern) bundle you can load into the
-// plain live settings below. Loading one does NOT bind future edits to it -
-// editing "Brew target" directly still works exactly as before; it just
-// means the live value may no longer match whichever profile was last
-// loaded, same as how the live settings always worked before profiles
-// existed. activeProfileIndex is remembered purely so the Web UI can
-// highlight "which one did I last load," not as a strict live binding.
+// Active shot profile (profiles.cpp, design spec 2026-10-02 §3.1) - selected
+// by NAME and persisted as NVS "profile_name", never by list index, so
+// reordering or deleting can't silently retarget it. Selecting a non-utility
+// profile loads its temperature into brewSetpoint (persisted like a manual
+// edit); utility profiles (Flush) leave the brew target alone.
 // ============================================================================
-int activeProfileIndex = 0; // persisted; -1 = none loaded / edited since
-bool activePreinfusionEnabled = false;
-int activePreinfusionPulses = 0;
-int activePreinfusionOnMs = 0;
-int activePreinfusionOffMs = 0;
+String activeProfileName = PROFILE_DEFAULT_NAME;
+bool activeShotIsUtility = false;
 
-// Per-profile pressure-stage settings (see profiles.cpp/Task 5) - plain
-// globals with sensible defaults, declared here (rather than down by the
-// rest of the pressure-control state near buildShotStages()) so
-// applyProfile() below can assign them; profileGet() supplies the real
-// per-profile values once a profile is loaded.
-bool activePressureEnabled = false;
-double activePressureRampBar = PRESSURE_RAMP_BAR_DEFAULT;
-unsigned long activePressureRampMs = PRESSURE_RAMP_MS_DEFAULT;
-bool activePressureDeclineEnabled = false;
-double activePressureDeclineBar = PRESSURE_DECLINE_BAR_DEFAULT;
-unsigned long activePressureDeclineMs = PRESSURE_DECLINE_MS_DEFAULT;
-
-// Loads profile `idx` into the live settings (brewSetpoint/shotAutoStopSec/
-// pre-infusion pattern), persists them exactly like editing those fields by
-// hand would, and remembers idx as the active profile for UI highlighting.
-void applyProfile(int idx) {
-  String name;
-  double temp;
-  unsigned long autoStop;
-  bool preinfEnabled;
-  int pulses, onMs, offMs;
-  bool pressureEnabled, pressureDeclineEnabled;
-  double pressureRampBar, pressureDeclineBar;
-  unsigned long pressureRampMs, pressureDeclineMs;
-  if (!profileGet(idx, name, temp, autoStop, preinfEnabled, pulses, onMs, offMs,
-                   pressureEnabled, pressureRampBar, pressureRampMs,
-                   pressureDeclineEnabled, pressureDeclineBar, pressureDeclineMs)) return;
-
-  activeProfileIndex = idx;
-  brewSetpoint = temp;
-  shotAutoStopSec = autoStop;
-  activePreinfusionEnabled = preinfEnabled;
-  activePreinfusionPulses = pulses;
-  activePreinfusionOnMs = onMs;
-  activePreinfusionOffMs = offMs;
-  activePressureEnabled = pressureEnabled;
-  activePressureRampBar = pressureRampBar;
-  activePressureRampMs = pressureRampMs;
-  activePressureDeclineEnabled = pressureDeclineEnabled;
-  activePressureDeclineBar = pressureDeclineBar;
-  activePressureDeclineMs = pressureDeclineMs;
-
+bool selectProfile(const char *name) {
+  const Profile *p = profileFind(name);
+  if (!p) return false;
+  activeProfileName = p->name;
   Preferences preferences;
   preferences.begin("gaggia", false);
-  preferences.putInt("active_profile", activeProfileIndex);
-  preferences.putDouble("brew_target", brewSetpoint);
-  preferences.putULong("shot_auto_stop", shotAutoStopSec);
-  preferences.putBool("pi_enabled", activePreinfusionEnabled);
-  preferences.putInt("pi_pulses", activePreinfusionPulses);
-  preferences.putInt("pi_on_ms", activePreinfusionOnMs);
-  preferences.putInt("pi_off_ms", activePreinfusionOffMs);
-  preferences.putBool("press_en", activePressureEnabled);
-  preferences.putDouble("press_ramp_bar", activePressureRampBar);
-  preferences.putULong("press_ramp_ms", activePressureRampMs);
-  preferences.putBool("press_dec_en", activePressureDeclineEnabled);
-  preferences.putDouble("press_dec_bar", activePressureDeclineBar);
-  preferences.putULong("press_dec_ms", activePressureDeclineMs);
+  preferences.putString("profile_name", activeProfileName);
+  if (!p->utility) {
+    brewSetpoint = p->temp;
+    preferences.putDouble("brew_target", brewSetpoint);
+  }
   preferences.end();
-
   refreshActiveProfileIfChanged();
+  return true;
 }
 
 // ============================================================================
-// Shot stage state machine (2026-08-23, generalized 2026-09-04 for pressure
-// control) - a shot is a small ordered list of stages, advanced purely by
-// millis() comparisons, same "declarative phase list" principle Gaggiuino/
-// GaggiMate both use for their (much richer) pressure/flow profiles.
-// currentShotPhase (config.h) is kept in sync from the active stage purely
-// for external reporting (/status, MQTT) - nothing outside this file needs
-// to know stages exist.
+// Shot execution (design spec 2026-10-02 §4.2): the active profile's phase
+// list runs in ShotPlanner (pure, shot_planner.cpp), ticked from
+// controlTick(). The planner's duty goes to the dimmer; the pressure safety
+// cutoffs after it in controlTick() still win. With a usable 0-16 bar sensor
+// (PRESSURE_CLOSED_LOOP_AVAILABLE), the pressure PID adds a +/- trim on top
+// of the model duty in pressure phases - same profiles, closed loop.
 //
-// PIN_DIMMER_GATE/PIN_DIMMER_ZC (HARDWARE_ROADMAP.md item 8) replace the old
-// NC pump relay (item 4, removed 2026-09-04 after an unresolved brownout bug
-// - see AGENTS.md change log). Unlike the relay, the dimmer has no passive
-// pass-through state: it only conducts while firmware is actively firing the
-// gate. This means the pump will not run at all if the ESP32 isn't running
-// firmware, even with the Brew switch held - an explicitly accepted
-// fail-off tradeoff (see the pump-pressure bring-up design spec, §3).
+// The dimmer has no passive pass-through state: the pump only runs while
+// firmware fires the gate - an accepted fail-off tradeoff (bring-up spec §3).
+// currentShotPhase is kept for MQTT/legacy reporting only.
 // ============================================================================
 ShotPhase currentShotPhase = ShotPhase::NONE;
 
-struct ShotStage {
-  // FILL = pre-infusion fill: pump at pre-infusion power until the pressure
-  // reaches preinfusionFillBar (after PREINFUSION_FILL_MIN_MS) or
-  // durationMs elapses, whichever is first.
-  enum class Type { PUMP_ON, PUMP_OFF, FILL, PRESSURE_TARGET, EXTRACTION } type;
-  unsigned long durationMs; // unused for EXTRACTION - runs until shot stop; max time for FILL
-  float targetPressureBar;  // only meaningful for PRESSURE_TARGET/EXTRACTION; 0 = no pressure target (plain duty)
-};
+ShotPlanner shotPlanner;
+PlannerOutput plannerOut = {};
+static unsigned long lastPlannerTickMs = 0;
 
-// Longest possible sequence: PREINFUSION_PULSES_MAX on/off pairs, plus
-// PRESSURE_PROFILE_STAGE_COUNT pressure stages (ramp + decline), plus the
-// final EXTRACTION stage. Fixed-size, not std::vector - a shot starts often
-// enough that a heap alloc/free every time is worth avoiding on an embedded
-// target.
-static ShotStage activeShotStages[PREINFUSION_PULSES_MAX * 2 + PRESSURE_PROFILE_STAGE_COUNT + 1];
-static int activeStageCount = 0;
-static int currentStageIndex = 0;
-static unsigned long stageStartMillis = 0;
-
-// Pressure PID (HARDWARE_ROADMAP.md item 8) - Input=measured bar,
-// Output=0-100% dimmer power, Setpoint=whichever stage's targetPressureBar
-// is active. Only driven while pressureClosedLoopActive is true (set by
-// applyShotStagePumpOutput() below); MANUAL the rest of the time so it
-// doesn't fight plain on/off duty. Live-tunable from the Web UI, same
-// pattern as the Brew/Steam temperature PIDs.
 double pressureSetpoint = 0, pressureInput = 0, pressureOutput = 0;
 double pressureKp = PUMP_PRESSURE_KP_DEFAULT, pressureKi = PUMP_PRESSURE_KI_DEFAULT,
        pressureKd = PUMP_PRESSURE_KD_DEFAULT;
 PID pressurePID(&pressureInput, &pressureOutput, &pressureSetpoint, pressureKp, pressureKi,
                 pressureKd, DIRECT);
 static bool pressureClosedLoopActive = false;
-static float plainDutyPercent = 0.0f;
-
-// Plain-duty pump power (see config.h, PUMP_BREW_POWER_PCT_DEFAULT) -
-// persisted, live-editable from the Web UI. Used for pre-infusion "on"
-// pulses and for the open-ended extraction stage whenever closed-loop
-// pressure control isn't in use.
-int pumpBrewPowerPct = PUMP_BREW_POWER_PCT_DEFAULT;
-int pumpPreinfusionPowerPct = PUMP_PREINFUSION_POWER_PCT_DEFAULT;
-// Pre-infusion fill settings (config.h) - global, persisted, Web UI.
-double preinfusionFillBar = PREINFUSION_FILL_BAR_DEFAULT;
-int preinfusionFillMaxSec = PREINFUSION_FILL_MAX_S_DEFAULT;
-int preinfusionSoakSec = PREINFUSION_SOAK_S_DEFAULT;
 
 float currentPressure = 0.0;
 bool pressureFault = false;
 
-// Pressure history (for the Web UI pressure chart), sampled at the same
-// cadence as tempHistory below.
+// Pressure history (Web UI chart), sampled every TEMP_HISTORY_SAMPLE_INTERVAL_MS.
 float pressureHistory[TEMP_HISTORY_LEN] = {0};
 int pressureHistoryHead = 0;
 int pressureHistoryCount = 0;
+// Model estimate + pressure target, sampled together (target < 0 = no
+// pressure target at that sample, drawn as a gap).
+float estPressureHistory[TEMP_HISTORY_LEN] = {0};
+float targetPressureHistory[TEMP_HISTORY_LEN] = {0};
+int estHistoryHead = 0;
+int estHistoryCount = 0;
 
-// Drives the dimmer for whichever stage is now active. PUMP_ON/PUMP_OFF are
-// plain duty: PUMP_ON = pre-infusion pump power (pumpPreinfusionPowerPct -
-// a gentle, low-flow soak), PUMP_OFF = pump stopped. A PRESSURE_TARGET
-// stage, or an EXTRACTION stage carrying a nonzero targetPressureBar (the
-// shot's pressure profile continuing into the open-ended tail), hands
-// control to the pressure PID. A plain EXTRACTION with no pressure target
-// runs at the brew pump power (pumpBrewPowerPct).
-static void applyShotStagePumpOutput(const ShotStage &stage) {
-  bool wantsPressureControl =
-      (stage.type == ShotStage::Type::PRESSURE_TARGET) ||
-      (stage.type == ShotStage::Type::EXTRACTION && stage.targetPressureBar > 0.0f);
-
-  if (wantsPressureControl) {
-    pressureSetpoint = stage.targetPressureBar;
-    if (!pressureClosedLoopActive) {
-      // Bumpless start: seed Output from wherever the dimmer already sits
-      // (e.g. 100% coming out of a PUMP_ON pre-infusion pulse) instead of
-      // snapping to 0 - same bumpless-reset principle used for temperature.
-      // Also seed Input from the current reading rather than leaving it
-      // stale (0.0 on the very first shot after boot) - PID_v1's
-      // Initialize() seeds its internal lastInput from whatever Input
-      // currently holds when SetMode(AUTOMATIC) runs, and a stale Input
-      // would produce a spurious derivative kick the first time Kd is
-      // tuned nonzero.
-      pressureOutput = dimmerGetPowerPercent();
-      pressureInput = currentPressure;
-      pressurePID.SetMode(MANUAL);
-      pressurePID.SetMode(AUTOMATIC);
-    }
-    pressureClosedLoopActive = true;
-  } else {
-    pressureClosedLoopActive = false;
-    pressurePID.SetMode(MANUAL);
-    switch (stage.type) {
-      case ShotStage::Type::PUMP_OFF: plainDutyPercent = 0.0f; break;
-      case ShotStage::Type::PUMP_ON:
-      case ShotStage::Type::FILL: plainDutyPercent = (float)pumpPreinfusionPowerPct; break;
-      default: plainDutyPercent = (float)pumpBrewPowerPct; break;
-    }
-    dimmerSetPowerPercent(plainDutyPercent);
-  }
-}
-
-// Builds the stage sequence for the profile active at shot-start: pre-
-// infusion pulses, then an optional pressure ramp/hold stage, then an
-// optional pressure decline stage, then one open-ended EXTRACTION stage
-// that inherits the last pressure target (0 = plain duty, if pressure
-// control isn't enabled for this profile).
-static void buildShotStages() {
-  activeStageCount = 0;
-  // Pre-infusion mode depends on whether the fitted sensor can be trusted
-  // (see config.h): a pressure-terminated fill with a real-range sensor,
-  // otherwise the profile's own timed pulses. Pulse "on" runs at the
-  // pre-infusion pump power (applyShotStagePumpOutput), "off" stops it.
-  if (activePreinfusionEnabled && PRESSURE_CLOSED_LOOP_AVAILABLE) {
-    activeShotStages[activeStageCount++] = {ShotStage::Type::FILL,
-                                             (unsigned long)preinfusionFillMaxSec * 1000UL, 0.0f};
-    if (preinfusionSoakSec > 0) {
-      activeShotStages[activeStageCount++] = {ShotStage::Type::PUMP_OFF,
-                                               (unsigned long)preinfusionSoakSec * 1000UL, 0.0f};
-    }
-  } else if (activePreinfusionEnabled && activePreinfusionPulses > 0) {
-    for (int i = 0; i < activePreinfusionPulses; i++) {
-      activeShotStages[activeStageCount++] = {ShotStage::Type::PUMP_ON, (unsigned long)activePreinfusionOnMs, 0.0f};
-      if (i < activePreinfusionPulses - 1) {
-        activeShotStages[activeStageCount++] = {ShotStage::Type::PUMP_OFF, (unsigned long)activePreinfusionOffMs, 0.0f};
-      }
-    }
-  }
-
-  // Belt-and-braces clamp: these can also arrive straight from NVS (e.g. a
-  // stray value written outside the Web UI's own clamp in web.cpp's
-  // handleUpdate()), bypassing that clamp entirely - clamp again here so a
-  // bad value can never reach the PID as a setpoint.
-  float lastPressureTarget = 0.0f;
-  // PRESSURE_CLOSED_LOOP_AVAILABLE (config.h) gates this regardless of the
-  // profile's own setting: with a sensor that can't read the target, a
-  // pressure stage would chase a clipped reading forever at full power.
-  if (PRESSURE_CLOSED_LOOP_AVAILABLE && activePressureEnabled) {
-    float rampBar = min((float)activePressureRampBar, (float)(PUMP_MAX_SAFETY_BAR - 1.0));
-    activeShotStages[activeStageCount++] = {ShotStage::Type::PRESSURE_TARGET,
-                                             activePressureRampMs, rampBar};
-    lastPressureTarget = rampBar;
-    if (activePressureDeclineEnabled) {
-      float declineBar = min((float)activePressureDeclineBar, (float)(PUMP_MAX_SAFETY_BAR - 1.0));
-      activeShotStages[activeStageCount++] = {ShotStage::Type::PRESSURE_TARGET,
-                                               activePressureDeclineMs, declineBar};
-      lastPressureTarget = declineBar;
-    }
-  }
-
-  activeShotStages[activeStageCount++] = {ShotStage::Type::EXTRACTION, 0, lastPressureTarget};
-}
-
-static ShotPhase phaseForStageType(ShotStage::Type t) {
+static ShotPhase phaseForType(PhaseType t) {
   switch (t) {
-    case ShotStage::Type::PUMP_ON:
-    case ShotStage::Type::FILL: return ShotPhase::PREINFUSION_ON;
-    case ShotStage::Type::PUMP_OFF: return ShotPhase::PREINFUSION_OFF;
-    case ShotStage::Type::PRESSURE_TARGET: return ShotPhase::PRESSURE;
+    case PhaseType::PRESSURE: return ShotPhase::PRESSURE;
+    case PhaseType::FLOW: return ShotPhase::PREINFUSION_ON;
+    case PhaseType::SOAK: return ShotPhase::PREINFUSION_OFF;
     default: return ShotPhase::EXTRACTION;
   }
 }
 
-// Advances the stage state machine - called unthrottled from controlTick()
-// while a shot is running, since pulse timing can be sub-second
-// (PREINFUSION_PULSE_MS_MIN). No-ops once in the final EXTRACTION stage (the
-// common case for most of a shot's duration) or if no shot is running.
-static void tickShotStages(unsigned long now) {
-  if (!shotInProgress) return;
-  if (currentStageIndex >= activeStageCount) return;
-  ShotStage &stage = activeShotStages[currentStageIndex];
-  if (stage.type == ShotStage::Type::EXTRACTION) return; // open-ended, nothing to advance to
-
-  unsigned long elapsed = now - stageStartMillis;
-  // A fill ends early once the puck is saturated - but only on a healthy
-  // reading and never before the minimum time (see config.h).
-  bool fillReached = stage.type == ShotStage::Type::FILL && !pressureFault &&
-                     elapsed >= PREINFUSION_FILL_MIN_MS &&
-                     currentPressure >= (float)preinfusionFillBar;
-  if (elapsed < stage.durationMs && !fillReached) return;
-
-  currentStageIndex++; // EXTRACTION is always the last stage, so this always stays in-bounds
-  ShotStage &next = activeShotStages[currentStageIndex];
-  applyShotStagePumpOutput(next);
-  currentShotPhase = phaseForStageType(next.type);
-  stageStartMillis = now;
+static void resetPlannerOut() {
+  plannerOut = {};
+  plannerOut.phaseIndex = -1;
+  plannerOut.phaseName = "";
 }
+
+// ============================================================================
+// Water tank sensor (water_level.cpp) - settings persisted in NVS, loaded in
+// setup(), changed from /update. The interlock refuses to START anything
+// that runs the pump (a shot, a calibration run) on a low tank; it never
+// stops a shot that's already running (the sensor sits at a "low" mark,
+// not at empty), and never touches the heater.
+// ============================================================================
+bool waterSensorEnabled = WATER_SENSOR_ENABLED_DEFAULT;
+bool waterActiveLow = WATER_ACTIVE_LOW_DEFAULT;
+bool waterInterlock = WATER_INTERLOCK_DEFAULT;
+// Last refused shot start, reported in /status for SHOT_BLOCKED_REPORT_MS.
+const char *shotBlockedReason = "";
+unsigned long shotBlockedAtMillis = 0;
+
+bool waterBlocksPumpStart() {
+  return waterSensorEnabled && waterInterlock &&
+         waterLevelState() == WaterState::Low;
+}
+
+void applyWaterSettings() { waterLevelConfigure(waterSensorEnabled, waterActiveLow); }
 
 void startShot() {
   if (shotInProgress) return;
+  shotBlockedReason = "";
+  if (waterBlocksPumpStart()) {
+    shotBlockedReason = "low_water";
+    shotBlockedAtMillis = millis();
+    Serial.println("Shot refused: low water");
+    return;
+  }
+  if (pumpCalGetState() == PumpCalState::RUNNING) pumpCalAbort("shot started");
+  const Profile *p = profileFind(activeProfileName.c_str());
+  if (!p) p = profileFind(PROFILE_DEFAULT_NAME);
+  if (!p) return; // no profiles at all - refuse rather than run the pump blind
   shotInProgress = true;
   shotStartMillis = millis();
+  lastPlannerTickMs = shotStartMillis;
   shotPeakTemp = currentTemperature;
+  activeShotIsUtility = p->utility;
   // Switch Brew to the more aggressive active-brewing gains immediately -
-  // see config.h. Deliberately NOT a bumpless MANUAL/AUTOMATIC reset here:
-  // we want the stronger Kp's instant response to apply right away, and the
-  // gentle profile's small accumulated integral is harmless to inherit.
+  // see config.h (no bumpless reset on purpose).
   refreshActiveProfileIfChanged();
-
-  buildShotStages();
-  currentStageIndex = 0;
-  stageStartMillis = shotStartMillis;
-  ShotStage &first = activeShotStages[0];
-  currentShotPhase = phaseForStageType(first.type);
-  applyShotStagePumpOutput(first);
+  PumpModelParams model = {pumpMlPerClick, dimmerGetMainsHz(), (float)p->trimPct};
+  shotPlanner.start(*p, model);
+  resetPlannerOut();
+  currentShotPhase = ShotPhase::NONE;
 }
 
 void stopShot() {
   if (!shotInProgress) return;
   shotInProgress = false;
+  shotPlanner.stop();
+  resetPlannerOut();
   pressureClosedLoopActive = false;
   pressurePID.SetMode(MANUAL);
-  dimmerSetPowerPercent(0.0f); // force the pump off, same intent as the old relay's stopShot()
+  dimmerSetPowerPercent(0.0f); // force the pump off
   currentShotPhase = ShotPhase::NONE;
-  activeStageCount = 0;
-  currentStageIndex = 0;
+  bool wasUtility = activeShotIsUtility;
+  activeShotIsUtility = false;
   unsigned long durationMs = millis() - shotStartMillis;
-  // 0 = unknown, same convention as weight - covers both a genuine fault
-  // (-999) and the plain "no reading yet" default (0) at the moment of stop.
-  float endTemp = (currentTemperature > 0) ? currentTemperature : 0.0f;
-  shotLogAppend(time(nullptr), durationMs, shotPeakTemp, 0.0, endTemp);
+  // Utility runs (Flush) aren't shots - not logged, not counted.
+  if (!wasUtility) {
+    // 0 = unknown, same convention as weight.
+    float endTemp = (currentTemperature > 0) ? currentTemperature : 0.0f;
+    shotLogAppend(time(nullptr), durationMs, shotPeakTemp, 0.0, endTemp);
+  }
 
   // Bumpless reset back to the gentle profile: the aggressive active-brewing
   // Ki can accumulate a real amount of integral over a 25-30s shot, and
@@ -773,6 +625,7 @@ void stopShot() {
     myPID.SetMode(AUTOMATIC);
   }
 
+  if (wasUtility) return;
   shotCount++;
   Preferences preferences;
   preferences.begin("gaggia", false);
@@ -859,7 +712,9 @@ void setup() {
   // switch position - an accepted tradeoff, see the design spec §3.
   dimmerInit();
   pressureSensorInit();
-  pressurePID.SetOutputLimits(0, 100);
+  waterLevelInit();
+  // Closed loop (future 0-16 bar sensor) is a +/- trim on the model duty.
+  pressurePID.SetOutputLimits(-PUMP_PRESSURE_PID_TRIM_PCT, PUMP_PRESSURE_PID_TRIM_PCT);
   pressurePID.SetMode(MANUAL);
 
   // Initialize temperature sensor (UART PT100 module)
@@ -886,34 +741,18 @@ void setup() {
   pressureKd = preferences.getDouble("press_kd", PUMP_PRESSURE_KD_DEFAULT);
   ecoTimeoutMin = preferences.getULong("eco_min", ECO_TIMEOUT_MIN_DEFAULT);
   steamAutoOffMin = preferences.getULong("steam_off_min", STEAM_AUTO_OFF_MIN_DEFAULT);
-  shotAutoStopSec = preferences.getULong("shot_auto_stop", SHOT_AUTO_STOP_SEC_DEFAULT);
   shotCount = preferences.getULong("shot_count", 0);
   lastDescaleTime = (time_t)preferences.getULong("last_descale", 0);
   descaleShotThreshold =
       preferences.getULong("descale_shots", DESCALE_SHOT_THRESHOLD_DEFAULT);
   descaleDayThreshold =
       preferences.getULong("descale_days", DESCALE_DAY_THRESHOLD_DEFAULT);
-  activeProfileIndex = preferences.getInt("active_profile", 0);
-  activePreinfusionEnabled = preferences.getBool("pi_enabled", false);
-  activePreinfusionPulses = preferences.getInt("pi_pulses", PREINFUSION_PULSES_DEFAULT);
-  activePreinfusionOnMs = preferences.getInt("pi_on_ms", PREINFUSION_ON_MS_DEFAULT);
-  activePreinfusionOffMs = preferences.getInt("pi_off_ms", PREINFUSION_OFF_MS_DEFAULT);
-  activePressureEnabled = preferences.getBool("press_en", false);
-  activePressureRampBar = preferences.getDouble("press_ramp_bar", PRESSURE_RAMP_BAR_DEFAULT);
-  activePressureRampMs = preferences.getULong("press_ramp_ms", PRESSURE_RAMP_MS_DEFAULT);
-  activePressureDeclineEnabled = preferences.getBool("press_dec_en", false);
-  activePressureDeclineBar = preferences.getDouble("press_dec_bar", PRESSURE_DECLINE_BAR_DEFAULT);
-  activePressureDeclineMs = preferences.getULong("press_dec_ms", PRESSURE_DECLINE_MS_DEFAULT);
-  pumpBrewPowerPct = constrain(preferences.getInt("pump_brew_pct", PUMP_BREW_POWER_PCT_DEFAULT),
-                               PUMP_POWER_PCT_MIN, PUMP_POWER_PCT_MAX);
-  pumpPreinfusionPowerPct = constrain(preferences.getInt("pump_pi_pct", PUMP_PREINFUSION_POWER_PCT_DEFAULT),
-                                      PUMP_POWER_PCT_MIN, PUMP_POWER_PCT_MAX);
-  preinfusionFillBar = constrain(preferences.getDouble("pi_fill_bar", PREINFUSION_FILL_BAR_DEFAULT),
-                                 PREINFUSION_FILL_BAR_MIN, PREINFUSION_FILL_BAR_MAX);
-  preinfusionFillMaxSec = constrain(preferences.getInt("pi_fill_max_s", PREINFUSION_FILL_MAX_S_DEFAULT),
-                                    PREINFUSION_FILL_MAX_S_MIN, PREINFUSION_FILL_MAX_S_MAX);
-  preinfusionSoakSec = constrain(preferences.getInt("pi_soak_s", PREINFUSION_SOAK_S_DEFAULT),
-                                 0, PREINFUSION_SOAK_S_MAX);
+  // Legacy values, read ONLY to migrate old profiles (profiles.cpp) - no
+  // longer settings of their own (design spec §3.4).
+  int legacyBrewPct = preferences.getInt("pump_brew_pct", PUMP_BREW_POWER_PCT_DEFAULT);
+  int legacyPiPct = preferences.getInt("pump_pi_pct", PUMP_PREINFUSION_POWER_PCT_DEFAULT);
+  int legacyActiveIndex = preferences.getInt("active_profile", -1);
+  String savedProfileName = preferences.getString("profile_name", "");
   for (int i = 0; i < SCHED_MAX_COUNT; i++) {
     String p = "sched" + String(i) + "_";
     schedEnabled[i] = preferences.getBool((p + "en").c_str(), i == 0 ? SCHED_ENABLED_DEFAULT : false);
@@ -922,11 +761,31 @@ void setup() {
     schedModeSteam[i] = preferences.getBool((p + "st").c_str(), SCHED_MODE_STEAM_DEFAULT);
   }
   schedTzOffsetMin = preferences.getInt("sched_tz_min", SCHED_TZ_OFFSET_MIN_DEFAULT);
+  waterSensorEnabled = preferences.getBool("water_en", WATER_SENSOR_ENABLED_DEFAULT);
+  waterActiveLow = preferences.getBool("water_low_act", WATER_ACTIVE_LOW_DEFAULT);
+  waterInterlock = preferences.getBool("water_lock", WATER_INTERLOCK_DEFAULT);
   preferences.end();
+  applyWaterSettings();
 
   // Shot history log + named shot profiles (both LittleFS)
   shotLogInit();
-  profilesInit();
+  profilesInit(legacyBrewPct, legacyPiPct);
+  pumpCalInit();
+  // Active profile by name; first boot after migration maps the old index.
+  String startName = savedProfileName;
+  if (startName.length() == 0 && legacyActiveIndex >= 0) startName = profileLegacyNameAt(legacyActiveIndex);
+  if (!profileFind(startName.c_str())) startName = PROFILE_DEFAULT_NAME;
+  activeProfileName = startName;
+  if (startName != savedProfileName) {
+    // Persist the migrated/fallback choice so later boots don't depend on
+    // the legacy index (legacy names are only known on the migrating boot).
+    Preferences pn;
+    pn.begin("gaggia", false);
+    pn.putString("profile_name", startName);
+    pn.remove("active_profile");
+    pn.end();
+  }
+  resetPlannerOut();
 
   // NTP time sync, for real shot timestamps. Stored/compared in UTC
   // throughout - the Web UI converts to local time for display.
@@ -997,6 +856,21 @@ static bool updateFaultWindow(bool window[], int windowSize, int &index, int &fi
 // half-updated mix of mode/setpoint/gains/shot-phase state.
 static void controlTick(unsigned long now) {
   lockState();
+  now = millis(); // re-sample: the caller's value may predate timestamps written under the lock by /update
+
+  // Dimmer slew + mains health (dimmer.cpp) - every tick, before anything
+  // below sets a new duty, so the slew always has a fresh dt.
+  static unsigned long lastDimmerTickMs = 0;
+  if (lastDimmerTickMs == 0) lastDimmerTickMs = now;
+  {
+    // `now` was sampled before lockState() blocked, so it can be older than
+    // a timestamp another task set meanwhile - never let the subtraction wrap.
+    long dimDelta = (long)(now - lastDimmerTickMs);
+    if (dimDelta > 0) {
+      dimmerTick((uint32_t)dimDelta);
+      lastDimmerTickMs = now;
+    }
+  }
 
   // Read Temperature
   if (now - lastTempReadTime >= TEMP_READ_INTERVAL) {
@@ -1106,44 +980,48 @@ static void controlTick(unsigned long now) {
       pressureHistoryHead = (pressureHistoryHead + 1) % TEMP_HISTORY_LEN;
       if (pressureHistoryCount < TEMP_HISTORY_LEN) pressureHistoryCount++;
     }
+    estPressureHistory[estHistoryHead] = shotInProgress ? plannerOut.pressureEst : 0.0f;
+    targetPressureHistory[estHistoryHead] =
+        (shotInProgress && plannerOut.phaseIndex >= 0 && plannerOut.phaseType == PhaseType::PRESSURE)
+            ? plannerOut.phaseTarget
+            : -1.0f;
+    estHistoryHead = (estHistoryHead + 1) % TEMP_HISTORY_LEN;
+    if (estHistoryCount < TEMP_HISTORY_LEN) estHistoryCount++;
   }
 
-  // Shot auto-stop - see config.h/SHOT_AUTO_STOP_SEC_DEFAULT: this ends the
-  // firmware's OWN shot bookkeeping (timer, history log, Brew gain profile
-  // revert) at the configured duration, timed from the manual Start Shot
-  // tap. This also physically stops the pump via stopShot()'s
-  // dimmerSetPowerPercent(0.0f) call (HARDWARE_ROADMAP.md item 8) - unlike
-  // the old relay-based design, there's no separate "firmware bookkeeping
-  // only" caveat any more.
-  if (shotInProgress && shotAutoStopSec > 0 &&
-      now - shotStartMillis >= shotAutoStopSec * 1000UL) {
-    Serial.printf("Shot auto-stop: %lu s reached\n", shotAutoStopSec);
-    stopShot();
-  }
-
-  // Shot stage state machine - unthrottled (pulse timing can be sub-second),
-  // but a cheap no-op once in EXTRACTION or with no shot running (see
-  // tickShotStages()).
-  tickShotStages(now);
-
-  // Pump restore - only while a shot is actually running (shotInProgress);
-  // stopShot() already forced the dimmer to 0% and nothing should touch it
-  // again until the next startShot(), otherwise the plain-duty branch below
-  // would immediately re-drive the dimmer back to its last recorded duty
-  // (typically 100%) on the very next tick after stop. While a shot IS
-  // running: pressure-targeting stages (pressureClosedLoopActive, set by
-  // applyShotStagePumpOutput() above, including any transition
-  // tickShotStages() just made this tick) get a fresh PID compute every
-  // tick; plain-duty stages get plainDutyPercent (set at their own stage
-  // transition) re-asserted every tick too, so the safety-ceiling check
-  // right below has something correct to restore once a trip clears.
+  // Shot planner (design spec §4.2) - ends the shot itself when its phases
+  // or the profile's max_sec run out. Every tick re-commands the duty, so
+  // after a safety cut clears (or mains returns) the pump resumes, ramped
+  // by the dimmer's slew.
   if (shotInProgress) {
-    if (pressureClosedLoopActive) {
-      pressureInput = currentPressure;
-      pressurePID.Compute();
-      dimmerSetPowerPercent((float)pressureOutput);
+    long plannerDelta = (long)(now - lastPlannerTickMs);
+    float dtS = plannerDelta > 0 ? plannerDelta / 1000.0f : 0.0f;
+    if (plannerDelta > 0) lastPlannerTickMs = now;
+    bool sensorUsable = PRESSURE_CLOSED_LOOP_AVAILABLE && !pressureFault;
+    plannerOut = shotPlanner.tick(dtS, currentPressure, sensorUsable);
+    if (plannerOut.done) {
+      Serial.printf("Shot complete: %s finished after %.1f s\n", activeProfileName.c_str(), plannerOut.elapsedS);
+      stopShot();
     } else {
-      dimmerSetPowerPercent(plainDutyPercent);
+      float duty = plannerOut.dutyPct;
+      if (sensorUsable && plannerOut.phaseType == PhaseType::PRESSURE) {
+        if (!pressureClosedLoopActive) {
+          pressureOutput = 0; // trim starts neutral (bumpless)
+          pressureInput = currentPressure;
+          pressurePID.SetMode(MANUAL);
+          pressurePID.SetMode(AUTOMATIC);
+          pressureClosedLoopActive = true;
+        }
+        pressureSetpoint = plannerOut.phaseTarget;
+        pressureInput = currentPressure;
+        pressurePID.Compute();
+        duty += (float)pressureOutput;
+      } else if (pressureClosedLoopActive) {
+        pressureClosedLoopActive = false;
+        pressurePID.SetMode(MANUAL);
+      }
+      dimmerSetPowerPercent(duty); // clamps to 0..100
+      currentShotPhase = phaseForType(plannerOut.phaseType);
     }
   }
 
@@ -1169,6 +1047,13 @@ static void controlTick(unsigned long now) {
       pressurePID.SetMode(AUTOMATIC);
     }
   }
+
+  // Pump calibration run (pump_calibration.cpp) - after the safety cutoffs
+  // so a cut they just made aborts the run instead of being measured.
+  pumpCalTick(now);
+
+  // Water tank level (debounced; drives the shot-start interlock above).
+  waterLevelTick(now);
 
   // Scheduled warm-up (see config.h) - minute-granularity, so checking once a
   // second is more than enough and avoids a redundant time()/gmtime_r() call

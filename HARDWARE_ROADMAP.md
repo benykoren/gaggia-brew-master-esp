@@ -140,11 +140,11 @@ feedforward described below are already live-tunable in the Web UI and
 confirmed on the real machine to cut brew-time sag from ~11-13°C to ~6°C
 (further gain tuning stopped helping once output pinned at the heater's
 physical wattage ceiling - a conclusive result, not a dead end). A
-configurable auto-stop timer (`shotAutoStopSec`, Settings → Shot Timer, 0 =
-disabled) also now ends the *firmware's* shot bookkeeping automatically.
-**None of this touches the pump yet** - "auto-stop" today means the
-firmware stops tracking the shot and reverts its own tuning, not that the
-pump stops flowing. That gap is exactly what the hardware below closes.
+auto-stop timer also ended the *firmware's* shot bookkeeping automatically.
+*(Superseded 2026-10-02: the global `shotAutoStopSec` setting is gone; each
+phase profile's `max_sec` ends the shot, and the shot now drives the real
+pump through item 8's dimmer. The text below is the original relay plan,
+kept for history.)*
 
 **Split from an original combined "pump dimmer" item (2026-08-16)** into
 this easy on/off half and a harder profiling half (item 8) — they have very
@@ -156,7 +156,7 @@ the pump's existing switched wire, no phase-angle timing at all.
 The machine's own Brew switch still starts the pump exactly as always,
 with **zero ESP32 involvement in starting a shot** — see the wiring
 decision below for why. Firmware can cut it early: auto-stop by a
-configured time (no other hardware needed) or by a configured weight (once
+per-profile `max_sec` time (no other hardware needed) or by a configured weight (once
 item 5's BLE scale exists). **No pressure regulation, no profiling** — full
 power or nothing, same as the pump already runs today. That's item 8, a
 separate, harder project.
@@ -175,7 +175,7 @@ module (opto-isolated, outputs a signal only when AC is present at its
 input — same category of part as half of an AC dimmer module, sold
 standalone) wired at this *same* splice point would let the ESP32 detect
 the Brew switch being flipped automatically, closing the gap noted above —
-the auto-stop timer would then control the real pump, and Start Shot would
+the profile's `max_sec` stop would then control the real pump, and Start Shot would
 no longer need a manual tap either. This is a different technique from the
 current-transformer clamp already rejected as item "7" (senses voltage
 presence on this wire, not current elsewhere on the pump's own wire) — not
@@ -356,40 +356,117 @@ service. No GPIO/wiring at all.
 
 ## Item 6 — Water tank level sensor
 
-**Status:** not started. **Depends on:** nothing. (Originally "item 5.")
+**Status:** sensor bought 2026-10-15, not installed; no firmware yet.
+**Depends on:** nothing. (Originally "item 5.")
 
 **What it's for:** low-water warning now; becomes a real pump interlock
-once item 8 (pump on/off + phase control, folded former item 4) exists.
+(refuse/stop a shot on low water) now that item 8's pump control exists.
 
-**Buy:**
+**Part (bought):**
 
 | Part | Spec | Cost |
 |---|---|---|
-| Magnetic float switch | Normally-open or normally-closed (either works, just flip the logic in firmware) | ~$2-5 |
+| Non-contact capacitive liquid level switch | 3.3-5V supply, 3 wires (VCC / GND / OUT) on a JST plug, screw-mount tabs, digital output | ~₪6 (AliExpress) |
 
-**The tank is removable, not fixed — this affects the wiring.** The Gaggia
-Espresso Color's water tank lifts out to refill, so a float switch mounted
-inside it needs a connection that survives being pulled out and reseated
-repeatedly. A bare wire soldered to the switch would mean disconnecting/
-reconnecting by hand every refill — the same nuisance as item 10's milk
-probe. The standard fix: **spring-loaded contacts (pogo pins) at the bottom
-of the tank bay**, mating with a corresponding contact on the tank's
-underside when it's seated. The wire then stays fixed to the machine
-chassis permanently; only the contact tips touch/separate as the tank goes
-in and out, no manual plugging involved. Choose contacts rated for
-corrosion resistance given the proximity to water.
+**Why this instead of the float switch planned earlier:** it senses water
+*through* the tank's plastic wall, so nothing goes inside the tank. The
+Gaggia Espresso Color's tank lifts out to refill; a float switch would have
+needed pogo-pin contacts at the tank bay. This sensor can stay fixed to the
+chassis with its face pressed against the tank wall, and the wire never
+moves.
 
-**Wire:** one free GPIO (digital input, internal pull-up enabled in
-firmware — `INPUT_PULLUP`), other switch leg → GND, routed through the
-pogo-pin contacts above. No external resistor needed.
+**Datasheet (from the seller's listing, 2026-10-15):**
 
-**Firmware:** debounce the same way the temperature sensor's fault handling
-already does (see `AGENTS.md` §9 change log) — float switches chatter
-mechanically, don't trust a single read.
+| Parameter | Min | Typical | Max |
+|---|---|---|---|
+| Supply voltage Vs | 3.3 V | 5 V | 5.2 V |
+| Supply current (no load) | 0.8 mA | 1.5 mA | 3 mA |
+| Output, **no water** | | **= Vs (HIGH)** | |
+| Output, **water present** | | **0 V (LOW)** | |
+| Output sink / source current | 8 / 3.75 mA | 16 / 7.5 mA | |
+| Operating temperature | -40 °C | | 80 °C |
+
+Push-pull output, **active-LOW for "water present"**. Wire colors per the
+listing: **red = VCC, black = GND, yellow = signal**. Mount with tape or
+screws so the sensing face is in flat, full contact with the tank wall.
+
+**Wire (planned):**
+
+| Sensor wire | ESP32-S3 |
+|---|---|
+| Red (VCC) | **3V3** (same rail as the temp module, pressure sensor and dimmer logic) |
+| Black (GND) | **GND** |
+| Yellow (OUT) | **GPIO7** (`PIN_WATER_LEVEL`, to add in `config.h`) |
+
+- Powered from 3V3, OUT swings 0-3.3V - safe straight into a GPIO, no
+  divider.
+- **Caveat:** 3.3V is the sensor's *minimum* supply, and this board's 3V3
+  rail measured 3.26V (see item 7). Bench-test it on 3V3 first. If it's
+  flaky, power it from the USB wall-wart's 5V directly (the DevKit's own
+  5V pin doesn't output on USB power) and add a divider on OUT so the
+  GPIO never sees more than ~3.3V (e.g. 10k series + 20k to GND -> 3.33V).
+- Firmware default: `INPUT_PULLUP`, LOW = water, HIGH = low water. Keep
+  the polarity a persisted setting anyway, in case a different batch
+  inverts it.
+- Rated to 80°C: keep it on the tank, away from the boiler and steam path.
+
+**Sensing face (found on the machine, 2026-10-15):** only ONE face senses.
+With the other face against the tank it read HIGH (no water) through a full
+tank while still reacting to a finger. Flipped, it read a steady LOW (water)
+- 30/30 samples. A finger near the sensor reads as water too, so test
+hands-off.
+
+**Mounting:** at the "low water" height on the tank's side or back wall,
+flat against the plastic. Capacitive sensing is sensitive to the gap - the
+face must actually touch the tank when it's seated (a small foam pad or
+spring bracket on the chassis side helps). Keep it away from the boiler's
+heat and from metal right behind it. Test with the tank in and out:
+seated-and-full, seated-and-empty, and tank removed (which should read as
+"no water" - correct behavior for an interlock).
+
+**Firmware (to do):** debounce like the temp sensor's fault window (several
+consistent reads before changing state); show it in `/status` and the Web
+UI; then block shot start / stop the pump on low water.
 
 ---
 
 ## Item 7 — Real-time pressure transducer + live pressure graph
+
+Install steps: [`docs/install-guide-2026-10-15-hlk-pressure-water.md`](docs/install-guide-2026-10-15-hlk-pressure-water.md).
+
+**Update (2026-10-15): replacement planned - 0-1.6 MPa "G41 1.6Mpa IN5V"
+(ordered), powered from 5V via an HLK-PM01; firmware already switched to
+it (PR on `feature/water-level-sensor`).** Wiring decided with the user:
+
+```
+Always-on mains, tapped mid-run (away from the boiler) on the two NEW
+heater-circuit wires from the 2026-08 clean bypass:
+  Mains L -> T2 wire  --Wago 221-- [0.5A fuse] -- HLK AC1
+  Heater -> Mains N wire --Wago 221-------------- HLK AC2
+HLK +Vo -> DevKit 5V pin  AND  sensor red
+HLK -Vo -> DevKit GND     AND  sensor black
+sensor yellow -- 4.3k -- GPIO1 -- 10k -- GND     (0.5-4.5 V -> ~0.35-3.15 V)
+```
+- **Always-on, not from the brew switch:** the HLK now powers the ESP32
+  too (replacing the USB wall-wart), and the controller must stay up for
+  heating, auto-off and the scheduled warm-up. Tapping before the heater's
+  SSR keeps the heater safe if the HLK's fuse blows (no ESP -> no SSR
+  drive).
+- **Never USB + HLK at the same time** - unplug the machine before any USB
+  flashing; OTA is unaffected.
+- HLK-PM01: 5V 3W (600 mA) - enough for the ESP32 (WiFi peaks ~400-500 mA)
+  plus sensors; fully insulated (heat-shrink or a small box), away from the
+  boiler (rated ~70 °C), strain-relieved. A 100 µF cap across +Vo/-Vo is
+  recommended for cleaner ADC readings.
+- Pre-checks before GPIO1 is connected: 230 V AC between the two tapped
+  wires with the main switch AND brew switch off (proves always-on);
+  5.0 V on +Vo; ~0.35 V at the divider midpoint with no pressure.
+- Firmware: `PRESSURE_SENSOR_ZERO_MV` 350, `_MV_PER_BAR` 175 (nominal,
+  calibrate on the machine), `_MAX_BAR` 16, `PRESSURE_CLOSED_LOOP_AVAILABLE`
+  true, GPIO1 `INPUT` (no internal pull-down - it would skew the divider).
+  **Don't flash that build while the old 5-bar part is still fitted** - it
+  would read below zero and fault.
+
 
 **Status (2026-10-01): plumbed at the pump outlet - but the fitted part is
 a 0-0.5 MPa (0-5 bar) sensor, below espresso brew pressure.** Body marking
@@ -510,12 +587,20 @@ fail-off tradeoff this accepts.
 
 **Pump power is pulse-skip modulation since 2026-10-01** (whole mains
 cycles fired near zero-cross or skipped, Bresenham-spread; same approach
-as Gaggiuino/GaggiMate's PSM library) instead of phase-angle. Plain-duty
-shots use Web-UI settings (Settings -> Pump power): **brew 45%** (~9 bar
-with a dialed standard-basket puck, from the EP5 pump curve - see
-`config.h`), **pre-infusion 40%** as a fill that ends when the 0-5 bar
-sensor reads ~3 bar (min 4 s, max 15 s), optional soak. % sets flow, not pressure - the bar you
-get depends on the puck.
+as Gaggiuino/GaggiMate's PSM library) instead of phase-angle.
+*(Superseded 2026-10-02: the former global Settings -> Pump power fields
+(brew 45%, pre-infusion 40%, 0-5 bar fill, soak) are removed. Shots now run
+phase profiles through the calibrated open-loop pump model - see the
+"Firmware status (2026-10-02)" block below. Duty still sets flow, not
+pressure; the bar you get depends on the puck.)*
+
+**Firmware status (2026-10-02):**
+- The dimmer now drives a gate pulse held 1500 µs from each zero-cross edge, dropped by a hardware timer (gptimer).
+- The pump only runs during a shot or a calibration run.
+- Shots run name-addressed phase profiles through an open-loop pump model (see `AGENTS.md` Section 4).
+- Calibration procedure: portafilter off, tared cup on the scale, Brew switch on, Settings -> Pump calibration, 3 x 10 s runs at full power, enter the grams each time, Save.
+- The 0-5 bar sensor is display-only until a 0-16 bar part replaces it; then set `PRESSURE_CLOSED_LOOP_AVAILABLE` to `true` and the pressure PID becomes a +-30 % trim with no profile changes.
+- Live verification on the real machine is still pending (plan Task 12).
 
 **Two things, one build:**
 1. **Plain pump on/off** (former item 4's whole scope) — time-based
@@ -557,10 +642,11 @@ NC-contact detail from item 4 is moot here (see the tradeoff note above).
 
 ### Firmware considerations
 
-- **On/off half (bring-up milestone, no item 7 needed):** reuse the
-  already-built `shotInProgress`/`shotAutoStopSec` (time) and future
-  BLE-scale-weight (item 5) logic, just retargeted to drive the dimmer at
-  ~100% or 0% duty instead of a relay pin.
+- **On/off half (bring-up milestone, no item 7 needed):** implemented
+  2026-10-02 - `shotInProgress` plus the phase planner (each profile's
+  `max_sec` is the time stop; the old global `shotAutoStopSec` no longer
+  exists) drive the dimmer; future BLE-scale-weight (item 5) logic would
+  plug in as another stop condition.
 - **Pressure-target half requires item 7 (pressure transducer) already
   wired and reading correctly** — this is the feedback signal the control
   loop closes on. Without it, "control to 9 bar" has nothing to measure
@@ -579,8 +665,8 @@ NC-contact detail from item 4 is moot here (see the tradeoff note above).
 Same bench-first sequence as item 4's procedure above (steps 1-8),
 substituting the dimmer module for the relay. **First live power-up:**
 confirm firing at a fixed ~100% duty reproduces plain pass-through, exactly
-like an unmodified machine. **Second milestone:** verify time/weight
-auto-stop works by dropping to 0% duty mid-shot (this alone delivers
+like an unmodified machine. **Second milestone:** verify time (profile
+`max_sec`) / weight auto-stop works by dropping to 0% duty mid-shot (this alone delivers
 everything item 4 would have). **Only after both of those**, start
 closed-loop pressure-target tuning against the transducer (item 7) —
 expect this to take real iteration, the same way brew-temperature PID

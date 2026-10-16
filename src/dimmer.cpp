@@ -1,130 +1,209 @@
 #include "dimmer.h"
 
 #include <Arduino.h>
+#include <driver/gpio.h>
+#include <driver/gptimer.h>
 #include <esp_timer.h>
 
 #include "config.h"
 
-// Stored as tenths-of-a-percent (0-1000), NOT a float, and deliberately so:
-// onZeroCross() below runs in genuine GPIO interrupt context, and on this
-// chip the floating-point coprocessor's register state is only saved/
-// restored across FreeRTOS task context switches, not interrupt entry/exit.
-// Any float math reachable from an ISR risks corrupting whatever task's FPU
-// state was live at the moment of interruption, surfacing as an
-// intermittent "Guru Meditation Error: Coprocessor exception" panic -
-// confirmed on real hardware (2026-09-15): the crash only started once the
-// dimmer began receiving real zero-cross pulses from live mains for the
-// first time (all earlier bench testing never exercised this path). Every
-// value the ISR touches, directly or via a function it calls, must stay
-// integer-only from here down.
-static volatile int32_t targetPercentX10 = 0; // 0-1000 = 0.0%-100.0%
-static esp_timer_handle_t fireTimer = nullptr;
+// ISR-SAFETY: onZeroCross() and onGateAlarm() run in genuine interrupt
+// context, where this chip does not save FPU state - any float math
+// reachable from them can corrupt a task's FPU registers ("Guru Meditation
+// Error: Coprocessor exception", confirmed on real hardware 2026-09-15).
+// Everything the ISRs touch below is integer-only. Floats appear only in
+// task-context functions (dimmerSetPowerPercent*, dimmerTick, getters).
+
+static volatile int32_t requestedX10 = 0; // 0-1000 = 0.0-100.0 %
+static volatile int32_t appliedX10 = 0;   // what the ISR actually fires
 static volatile int64_t lastZcUs = 0;
-
-// Temporary bring-up diagnostic (2026-09-15) - counts accepted zero-cross
-// interrupts, so main.cpp can expose a rate (crossings/sec) via /status and
-// confirm whether the ESP32 is actually seeing a real, continuous ~100Hz
-// signal from the dimmer's Z-C output, independent of whether the module
-// has a status LED at all or whether the TRIAC is actually firing. Plain
-// integer increment - ISR-safe, no float involved.
+static volatile int32_t debounceUs = DIMMER_AC_HALF_CYCLE_US / 2;
 static volatile uint32_t zcCount = 0;
+static volatile uint32_t firedCycles = 0;
+static volatile bool psmResetRequested = false;
+// Diagnostic only (not persisted, resets to DIMMER_GATE_HOLD_US on boot): lets
+// us A/B lost TRIAC latching against genuinely low flow. Integer - ISR-safe.
+static volatile int32_t gateHoldUs = DIMMER_GATE_HOLD_US;
+static gptimer_handle_t gateTimer = nullptr;
 
-// Pulse-skip state - touched only from onZeroCross() (ISR context), so no
-// locking needed. A "cycle" is two consecutive accepted zero-crossings; the
-// fire/skip decision is made on the first and held for the second, so a
-// fired cycle always contains both half-cycles (one of which is the
-// polarity the pump's internal diode conducts on - we can't tell which from
-// the zero-cross signal, and don't need to). If a crossing is ever missed
-// the pairing just shifts by one half-cycle; every fired pair still spans
-// exactly one useful half-cycle, so power stays correct.
-static int32_t psmAccumulator = 0;
+// Pulse-skip state - ISR-owned. A "cycle" is two consecutive accepted
+// crossings; the fire/skip decision is made on the first and held for the
+// second, so a fired cycle always covers the half-cycle the pump's diode
+// conducts on. Accumulator starts half full so a low duty fires its first
+// stroke promptly instead of after up to 1/duty cycles.
+static int32_t psmAccumulator = 500;
 static bool psmFireThisCycle = false;
 static bool psmSecondHalf = false;
 
-static void IRAM_ATTR fireGate(void *arg) {
-  digitalWrite(PIN_DIMMER_GATE, HIGH);
-  ets_delay_us(DIMMER_GATE_PULSE_US);
-  digitalWrite(PIN_DIMMER_GATE, LOW);
+// Mains health - task-owned (dimmerTick).
+static uint32_t windowStartMs = 0;
+static uint32_t windowStartZc = 0;
+static float mainsHz = DIMMER_MAINS_HZ_DEFAULT;
+static float lastWindowHz = DIMMER_MAINS_HZ_DEFAULT;
+static MainsState mainsState = MainsState::ABSENT;
+
+static inline void gateLow() { gpio_set_level((gpio_num_t)PIN_DIMMER_GATE, 0); }
+static inline void gateHigh() { gpio_set_level((gpio_num_t)PIN_DIMMER_GATE, 1); }
+
+static bool IRAM_ATTR onGateAlarm(gptimer_handle_t, const gptimer_alarm_event_data_t *, void *) {
+  gateLow();
+  return false;
 }
 
-// Fires on every zero-cross transition. Debounced by elapsed time rather
-// than a manual re-arm flag - a real zero-cross module can chatter multiple
-// transitions around the same physical crossing; ignore anything closer
-// than half a half-cycle to the last accepted crossing. Integer-only (see
-// the ISR-safety note at the top of this file).
-static void IRAM_ATTR onZeroCross(void *arg) {
+static void IRAM_ATTR onZeroCross(void *) {
   int64_t now = esp_timer_get_time();
-  if (now - lastZcUs < (DIMMER_AC_HALF_CYCLE_US / 2)) return;
+  if (now - lastZcUs < debounceUs) return; // ZC modules chatter around the crossing
   lastZcUs = now;
   zcCount++;
 
-  int32_t percentX10 = targetPercentX10;
-  if (percentX10 <= 0) {
-    // Stay off - no timer scheduled at all - and reset the pulse-skip
-    // state so the next start begins from a clean, predictable pattern.
-    psmAccumulator = 0;
+  if (psmResetRequested) {
+    psmResetRequested = false;
+    psmAccumulator = 500;
     psmFireThisCycle = false;
     psmSecondHalf = false;
+  }
+
+  int32_t percentX10 = appliedX10;
+  if (percentX10 <= 0 || gateTimer == nullptr) {
+    psmAccumulator = 500;
+    psmFireThisCycle = false;
+    psmSecondHalf = false;
+    gateLow();
     return;
   }
 
   if (!psmSecondHalf) {
-    // Bresenham: add the requested fraction each cycle, fire whenever the
-    // accumulator overflows - spreads N% of cycles as evenly as possible
-    // (e.g. 80% = fire 4 of every 5 cycles) instead of bunching them.
     psmAccumulator += percentX10;
     if (psmAccumulator >= 1000) {
       psmAccumulator -= 1000;
       psmFireThisCycle = true;
+      firedCycles++;
     } else {
       psmFireThisCycle = false;
     }
   }
   psmSecondHalf = !psmSecondHalf;
 
-  if (!psmFireThisCycle) return;
-  esp_timer_stop(fireTimer);
-  esp_timer_start_once(fireTimer, DIMMER_MIN_FIRING_DELAY_US);
+  if (!psmFireThisCycle) {
+    gateLow();
+    return;
+  }
+  gateHigh();
+  uint64_t count = 0;
+  gptimer_get_raw_count(gateTimer, &count);
+  gptimer_alarm_config_t alarm = {};
+  alarm.alarm_count = count + gateHoldUs; // 1 MHz timer: counts = us
+  gptimer_set_alarm_action(gateTimer, &alarm);
 }
 
 void dimmerInit() {
   pinMode(PIN_DIMMER_GATE, OUTPUT);
-  digitalWrite(PIN_DIMMER_GATE, LOW);
-  // Opto-isolated zero-cross detector outputs are commonly open-collector -
-  // pull up so a floating/idle line reads a deterministic HIGH instead of
-  // risking spurious interrupt triggers from a floating input.
+  gateLow();
+  // Opto-isolated ZC outputs are commonly open-collector - pull up so an
+  // idle line reads a deterministic HIGH, not a floating input.
   pinMode(PIN_DIMMER_ZC, INPUT_PULLUP);
 
-  esp_timer_create_args_t timerArgs = {};
-  timerArgs.callback = &fireGate;
-  timerArgs.name = "dimmer_fire";
-  esp_timer_create(&timerArgs, &fireTimer);
+  // Fail-safe: if the timer can't be set up, gateTimer stays null and the
+  // ISR never raises the gate - pump off, logged, rather than a boot loop.
+  gptimer_handle_t t = nullptr;
+  gptimer_config_t cfg = {};
+  cfg.clk_src = GPTIMER_CLK_SRC_DEFAULT;
+  cfg.direction = GPTIMER_COUNT_UP;
+  cfg.resolution_hz = 1000000;
+  gptimer_event_callbacks_t cbs = {};
+  cbs.on_alarm = onGateAlarm;
+  if (gptimer_new_timer(&cfg, &t) == ESP_OK && gptimer_register_event_callbacks(t, &cbs, nullptr) == ESP_OK &&
+      gptimer_enable(t) == ESP_OK && gptimer_start(t) == ESP_OK) {
+    gateTimer = t;
+  } else {
+    Serial.println("dimmer: gptimer setup FAILED - pump disabled");
+  }
 
-  attachInterruptArg(digitalPinToInterrupt(PIN_DIMMER_ZC),
-                      (void (*)(void *))onZeroCross, nullptr, RISING);
+  windowStartMs = millis();
+  windowStartZc = 0;
+  attachInterruptArg(digitalPinToInterrupt(PIN_DIMMER_ZC), (void (*)(void *))onZeroCross, nullptr, RISING);
 }
 
-// Float math here is safe - this always runs in normal FreeRTOS task
-// context (called from controlTick()/applyShotStagePumpOutput() etc.),
-// never from the ISR. The float-to-integer conversion below is the one
-// place a percent value crosses from "safe to use float" task context into
-// the ISR-visible integer representation.
-void dimmerSetPowerPercent(float percent) {
-  if (percent < 0.0f) percent = 0.0f;
+static int32_t toX10(float percent) {
+  if (!(percent > 0.0f)) return 0; // also NaN
   if (percent > 100.0f) percent = 100.0f;
-  int32_t x10 = (int32_t)(percent * 10.0f + 0.5f); // round to nearest tenth
-  targetPercentX10 = x10;
-  if (percent <= 0.0f) {
-    // A safety cutoff to 0% must not still be followed by one
-    // already-scheduled gate pulse up to ~10ms later from a timer armed
-    // just before the cutoff was requested - cancel it outright. Return
-    // code ignored, same as onZeroCross()'s own esp_timer_stop() call
-    // above: it's a no-op if the timer isn't currently armed.
-    esp_timer_stop(fireTimer);
+  return (int32_t)(percent * 10.0f + 0.5f);
+}
+
+void dimmerSetPowerPercent(float percent) {
+  int32_t x10 = toX10(percent);
+  requestedX10 = x10;
+  if (x10 < appliedX10) appliedX10 = x10; // decreases are instant
+  if (x10 == 0) gateLow();                // a cut must not wait for the alarm
+}
+
+void dimmerSetPowerPercentImmediate(float percent) {
+  int32_t x10 = toX10(percent);
+  requestedX10 = x10;
+  appliedX10 = x10;
+  if (x10 == 0) gateLow();
+}
+
+void dimmerTick(uint32_t dtMs) {
+  uint32_t nowMs = millis();
+  if (nowMs - windowStartMs >= 1000) {
+    uint32_t zc = zcCount;
+    float secs = (nowMs - windowStartMs) / 1000.0f;
+    lastWindowHz = ((zc - windowStartZc) / 2.0f) / secs;
+    windowStartZc = zc;
+    windowStartMs = nowMs;
+    if (lastWindowHz >= DIMMER_MAINS_HZ_MIN && lastWindowHz <= DIMMER_MAINS_HZ_MAX) {
+      mainsHz = lastWindowHz;
+      debounceUs = (int32_t)(250000.0f / mainsHz); // half of one half-cycle
+    }
+  }
+
+  MainsState prev = mainsState;
+  int64_t sinceZcUs = esp_timer_get_time() - lastZcUs;
+  if (lastZcUs == 0 || sinceZcUs > (int64_t)DIMMER_MAINS_ABSENT_MS * 1000) {
+    mainsState = MainsState::ABSENT;
+  } else if (lastWindowHz < DIMMER_MAINS_HZ_MIN || lastWindowHz > DIMMER_MAINS_HZ_MAX) {
+    mainsState = MainsState::UNSTABLE;
+  } else {
+    mainsState = MainsState::OK;
+  }
+  if (mainsState == MainsState::ABSENT) {
+    // Hold applied at 0 for as long as mains is absent and do NOT advance the
+    // slew, so the pump ramps up from 0 (not full duty) when power returns.
+    // requestedX10 stays untouched.
+    if (prev != MainsState::ABSENT) psmResetRequested = true; // clean pattern when power returns
+    appliedX10 = 0;
+    gateLow();
+  } else {
+    int32_t req = requestedX10, app = appliedX10;
+    if (app < req) {
+      int32_t step = (int32_t)((DIMMER_SLEW_PCT_PER_S * 10UL * dtMs) / 1000UL);
+      if (step < 1) step = 1;
+      app += step;
+      if (app > req) app = req;
+      appliedX10 = app;
+    }
+  }
+  if (appliedX10 == 0) gateLow();
+}
+
+void dimmerSetGateHoldUs(int32_t us) {
+  if (us < 500) us = 500;
+  if (us > 8000) us = 8000;
+  gateHoldUs = us;
+}
+int32_t dimmerGetGateHoldUs() { return gateHoldUs; }
+
+float dimmerGetPowerPercent() { return (float)appliedX10 / 10.0f; }
+uint32_t dimmerGetZcCount() { return zcCount; }
+uint32_t dimmerGetFiredCycles() { return firedCycles; }
+MainsState dimmerGetMainsState() { return mainsState; }
+float dimmerGetMainsHz() { return mainsHz; }
+
+const char *mainsStateName(MainsState s) {
+  switch (s) {
+    case MainsState::OK: return "ok";
+    case MainsState::UNSTABLE: return "unstable";
+    default: return "absent";
   }
 }
-
-float dimmerGetPowerPercent() { return (float)targetPercentX10 / 10.0f; }
-
-// Temporary bring-up diagnostic - see zcCount's declaration comment above.
-uint32_t dimmerGetZcCount() { return zcCount; }

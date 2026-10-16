@@ -54,12 +54,13 @@ README.
 | Temp sensor | **PT100, 3-wire**, PTFE cable, M4 thread | Replaces the original boiler thermostat |
 | Temp module | **UART PT100 + relay module** (silkscreen says "MAX31865" but it is NOT SPI — it's an ASCII AT-command UART board; see Section 3/4) | 9600 8N1, `AT+T` command |
 | Heater switch | **Fotek SSR-DA** (DC control → AC load) + heatsink | Switches the boiler heater |
-| PSU | **External USB wall-wart** (5V), routed into the case | Powers the ESP32; HLK-PM01 module dropped from the build 2026-08-14 |
+| PSU | **External USB wall-wart** (5V) today → **planned: HLK-PM01** (5V 3W) fed from always-on mains (2026-10-15) | HLK will power the ESP32 via its 5V pin and the 16-bar pressure sensor; see HARDWARE_ROADMAP.md item 7 |
 | Wiring | Wago 221 (mains), silicone wire (18AWG power / 22AWG signal), Dupont, PTFE tape | |
 | Boiler heating element | Stainless, **1000W**, 230V (Gaggia P/N `11001002`) | Factory spec, see OEM manuals below |
 | Boiler thermostats (factory) | Brew **95°C** / Steam **127°C**, both Gaggia `US-622AXTDNO` | T2 (steam, 127°C) is the one reused as the mains-wiring overheat cutoff — see Section 7 |
 | Pump | ULKA **EP5/S GW**, 230V-50Hz (Gaggia P/N `12000140`) | Vibration pump, factory spec |
 | Boiler safety valve | **16 bar** discharge rating (factory) | Relevant ceiling for roadmap item 7's pressure transducer range |
+| Water level sensor (bought 2026-10-15, not yet installed) | **Non-contact capacitive liquid level switch, 3.3-5V**, 3-wire JST lead, screw-mount tabs (AliExpress "3.3V-5V Non Contact Water Level Sensor"); red VCC / black GND / yellow OUT, OUT LOW = water present, 1.5 mA, 3.3-5.2 V | Planned on **GPIO7**, powered from 3V3 (its minimum - bench-test first) - see roadmap item 6. Replaces the float-switch plan |
 
 **Official OEM reference documents** (added 2026-08-30, user-supplied — this
 project's exact machine, "New Espresso 06 / Pure & Color"): electrical
@@ -83,11 +84,18 @@ Defined in [`include/config.h`](include/config.h). Chosen to avoid reserved S3
 pins (USB `GPIO19/20`, flash `GPIO26-32`, OPI PSRAM `GPIO33-37`, strapping
 `0/3/45/46`, RGB LED `48`).
 
+Planned power/sensor changes and their install steps:
+[`docs/install-guide-2026-10-15-hlk-pressure-water.md`](docs/install-guide-2026-10-15-hlk-pressure-water.md).
+
 | Function | GPIO |
 |----------|------|
 | SSR (heater) control | **4** |
+| Pump dimmer TRIAC gate (output) | **5** |
+| Pump dimmer zero-cross detect (input, pull-up, ISR) | **6** |
+| Pressure transducer analog in (ADC1_CH0, pull-down) | **1** |
 | Temp module UART RX (ESP receives, module TX) | **18** |
 | Temp module UART TX (ESP sends, module RX) | **17** |
+| Water level sensor OUT (digital in, pull-up) | **7** |
 
 The temp module also needs **3.3V** and **GND** from the DevKit (module is
 5V-rated but works powered from 3V3 — see Section 9 change log for why).
@@ -133,6 +141,15 @@ The temp module also needs **3.3V** and **GND** from the DevKit (module is
   - `include/config.h` — pins, sensor UART config, brew/steam gain-scheduling
     profile defaults, per-mode safety ceilings, eco-sleep default, autotune
     relay-feedback parameters.
+  - `src/pump_model.cpp` — the pure EP5 + reference-puck open-loop model;
+  - `src/pump_cal_math.cpp` and `src/pump_calibration.cpp` — 3-run scale
+    calibration, owning NVS `pump_mlpc`;
+  - `src/profile_codec.cpp` — built-ins, validation, legacy migration;
+  - `src/shot_planner.cpp` — the phase sequencer;
+  - `src/profiles.cpp` — the `/profiles.json` store.
+  - The pure units (`pump_model`, `pump_cal_math`, `profile_codec`,
+    `shot_planner`) are written to be host-testable, but there is currently
+    **no `test/` directory and no `[env:native]`** - user declined unit tests.
   - `src/sniffer.cpp` — standalone UART protocol prober, NOT part of the main
     app (its own env, excludes main/web/mqtt). Kept for future diagnostics.
 - **Persistence:** settings (per-mode target/Kp/Ki/Kd, MQTT, eco-sleep
@@ -180,6 +197,43 @@ The temp module also needs **3.3V** and **GND** from the DevKit (module is
   only thing controlling the heater regardless of switch position — not yet
   confirmed (same open thermostat-photo dependency as above).
 
+### Phase profiles + open-loop pump model (2026-10-02)
+- Shots run **phase profiles** (`/profiles.json`), addressed **by name** (active
+  one in NVS `profile_name`; unknown name falls back to "Classic 9 bar"). Phase
+  types: `pressure` (bar), `flow` (ml/s), `power` (% duty), `soak` (pump off);
+  each has a curve/ramp, optional limit, a hard `duration_s`, and optional
+  `press_gte`/`press_lte` stops (only honored when the pressure sensor is usable).
+- **6 built-ins** (flash, undeletable): Classic 9 bar, Londinium, Lever, IUIUIU
+  Classic, Blooming, Flush (Flush is a utility: no temp, not logged; utility
+  profiles may have up to 10 phases). No Backflush: this machine has no 3-way valve. Per profile: **Tweak** (temp 80-100 C, `max_sec`,
+  `pressure_scale` 0.7-1.1, `trim_pct` +-20; stored as overrides for built-ins),
+  **Copy**, **Rename**, **Delete** (user profiles only, max 8), **Reset**
+  (drops a built-in's override). Phase duration minimum 0.2 s; utility
+  `max_sec` up to 120. The per-profile `max_sec` replaces the old global shot
+  auto-stop. The old global pump %, fill/soak and pulse settings are gone.
+- `shot_planner` runs every 50 ms in `controlTick()` on top of `pump_model`:
+  `P_est` (integrated estimate) and `ml_est` come from the model, **not a
+  sensor** - `P_est` is an estimate, and the Now tab labels it so. Model
+  defaults: **0.213 ml/stroke** (Gaggiuino's effective free-flow value; scaled
+  by calibration), puck `Qref` = 2 ml/s at 9 bar (x trim), a **30 ml headspace**
+  (water volume) plus a 1.4 ml/bar compliance constant in the model. Safety cutoffs in `controlTick()` still override it.
+- The 0-5 bar sensor is **display-only**. Flipping
+  `PRESSURE_CLOSED_LOOP_AVAILABLE` after fitting a 0-16 bar sensor turns the
+  pressure PID into a **+-30 % trim** around the model duty - no profile changes.
+- **Pump calibration** (Settings -> Pump calibration): portafilter off, tared
+  cup on the scale, Brew switch on, 3 x 10 s runs at 100 % (no slew, requires
+  `pump_mains == ok`), enter grams each time; ml/stroke = grams / fired cycles,
+  plausible 0.08-0.40, any run >10 % off the mean is flagged for redo; Save
+  stores the mean (NVS `pump_mlpc`). Any safety cut/mains loss/shot start discards the run.
+- **Dimmer hardening** (`dimmer.cpp`): gate raised in the ZC ISR and held
+  1500 us, dropped by a gptimer alarm; mains Hz auto-detect; `/status`
+  `pump_mains` = `ok`/`absent` (no crossing >100 ms, nothing fires)/`unstable`;
+  permanent `zc_count` and `fired_cycles` counters (no longer a diagnostic);
+  +250 %/s slew on increases (cuts stay instant); clean start at accumulator 500.
+- **Legacy migration**: if `/profiles.json` is missing, `/profiles.csv` (really
+  JSON) is backed up byte-for-byte to `/profiles.csv.bak`, then converted.
+  `/profiles.csv` is the legacy path: read once for migration, never rewritten.
+
 ### Eco / Auto-Sleep
 - `lastActivityTime` (`main.cpp`) advances only on an explicit `/update` call
   (mode change, tuning edit, wake) — deliberately NOT on passive `/status`
@@ -192,6 +246,9 @@ The temp module also needs **3.3V** and **GND** from the DevKit (module is
   which restores `modeBeforeSleep` and resets the activity timer).
 - Autotune (below) is exempt from eco-sleep while running — they don't fight
   each other.
+- Any switch INTO `BREW`/`STEAM` through `setOpMode()` (mode button, MQTT,
+  scheduled warm-up, wake) clears `autoSleeping` and resets the activity
+  timer, so each new session gets a fresh auto-off window (fix 2026-10-15).
 
 ### PID Autotune (relay feedback / Ziegler-Nichols)
 - Hand-built in `main.cpp` (`AutotuneState` enum in `config.h`) — no external
@@ -315,6 +372,11 @@ $pio = "C:\Users\benny.koren\Desktop\esp32esso\.venv\Scripts\pio.exe"
    small, recurring, unsupervised risk rather than a one-off. **Do not
    silently re-add this as a blocker without checking whether the user has
    changed their mind.**
+   **Re-confirmed 2026-10-15** for the planned HLK-PM01 power: with the ESP32
+   fed from the machine's own mains, the boot window now coincides with
+   every plug-in / mains glitch (heater mains present at the same moment).
+   User was told and explicitly accepts the short boot pulse - no
+   pull-down.
 2. **ESP32 power source — external USB wall-wart (reverted 2026-08-14,
    was internal HLK-PM01 2026-08-01→2026-08-14).** User decided against the
    HLK-PM01 integration. Power the ESP32 the same way as on the bench: a
@@ -613,9 +675,10 @@ change/confirm the plan:
 #### Shipped — pure software, zero hardware
 1. **Shot timer** - elapsed time display during Brew mode (target window is
    ~25-30s per shot, per SCA-referenced extraction guidelines). **Extended
-   2026-08-16**: a configurable auto-stop (`shotAutoStopSec`, Web UI:
-   Settings -> Shot Timer, 0 = disabled) ends the timer/log/gain-profile
-   automatically at a set duration - no more manual "Stop Shot" tap needed.
+   2026-08-16**: an auto-stop ends the timer/log/gain-profile
+   automatically - no more manual "Stop Shot" tap needed. *(Since
+   2026-10-02 this is each phase profile's `max_sec`; the global
+   `shotAutoStopSec` setting was removed.)*
    Starting is still a manual "Start Shot" tap; see item 8 below (which
    folded in former item 4's role) for why that isn't automatic yet.
 2. **Shot history log** - duration + peak temp per shot now; extends
@@ -664,9 +727,9 @@ everything again.
    didn't previously have on the pump side. Judged acceptable: a stalled
    shot is an inconvenience, not a mains-safety hazard (unlike the heater).
    The already-built firmware (`brewActiveKp/Ki/Kd` gain-scheduling profile,
-   shot-start feedforward boost, `shotAutoStopSec` auto-stop bookkeeping) is
-   unaffected - it just now drives item 8's dimmer instead of a dedicated
-   relay.
+   shot-start feedforward boost) is unaffected. The old `shotAutoStopSec`
+   auto-stop was replaced 2026-10-02 by each profile's `max_sec`, and shots
+   now drive item 8's dimmer instead of a dedicated relay.
 
 5. **Bluetooth smart scale + brew-by-weight auto-stop.**
    **Hardware:** buy the scale itself - **Bookoo Themis or Felicita Arc**
@@ -683,14 +746,14 @@ everything again.
    pump at a target weight still needs item 8's active pump control.
 
 6. **Water tank level sensor.**
-   **Hardware:** one magnetic float switch (~$2-5), one free GPIO (digital
-   input, internal pull-up). **The tank is removable, not fixed** - the
-   Gaggia Espresso Color's water tank lifts out to refill, so a float
-   switch mounted inside it needs a connection that survives repeated
-   removal, not a bare soldered wire. Standard fix: spring-loaded contacts
-   (pogo pins) at the tank bay, mating with the tank's underside when
-   seated - the wire stays fixed to the chassis, only the contact tips
-   separate. Full reasoning in `HARDWARE_ROADMAP.md` item 6.
+   **Hardware (bought 2026-10-15):** a **non-contact capacitive** liquid
+   level switch (3.3-5V, 3 wires: VCC / GND / OUT), mounted on the
+   *outside* of the tank wall. It senses water through the plastic, so
+   nothing goes inside the tank and the removable-tank problem (pogo pins
+   for a float switch) goes away - the sensor can stay fixed to the
+   chassis, pressed against the tank wall when it's seated. Wiring:
+   VCC -> 3V3, GND -> GND, OUT -> **GPIO7**. Full detail in
+   `HARDWARE_ROADMAP.md` item 6.
    **Why:** low-water warning now; becomes a real pump interlock once
    item 8 (pump on/off + phase control, folded former item 4's role) exists.
 
@@ -727,7 +790,12 @@ everything again.
    pressure-target half - you cannot regulate to a bar target without a
    pressure reading to control against. The on/off half (time/weight
    auto-stop, driving the dimmer at ~100%/0% duty) does **not** need item 7
-   and is the planned first bring-up milestone, before closed-loop tuning.
+   and was the first bring-up milestone (implemented 2026-10-02 via phase
+   profiles, still pending live verification).
+   **Status (2026-10-02):** phase profiles + an open-loop pump model are
+   shipped (Section 4). The fitted 0-5 bar sensor is display-only; flipping
+   `PRESSURE_CLOSED_LOOP_AVAILABLE` after fitting a 0-16 bar sensor turns the
+   pressure PID into a +-30 % trim with no profile changes.
    **Why:** enables a phase-based profile system (pump power/pressure/flow
    target + time/volume/pressure stop conditions per phase, matching both
    competitor projects' architecture) - real pre-infusion and
@@ -835,6 +903,11 @@ everything again.
   placeholders per Section 4).
 - ⬜ Autotune not yet run on the real machine — first run should be
   supervised (Section 4, "PID Autotune").
+- ✅ **Phase profiles + open-loop pump model + dimmer hardening + pump
+  calibration shipped** (2026-10-02, OTA-flashed twice; legacy profiles
+  migrated, profile CRUD checked live) - see Section 4.
+- ⬜ Live verification of phase profiles + pump calibration (plan Task 12) —
+  pending, supervised. No shot, calibration run or heating done yet.
 
 > Serial-monitor note: the S3 USB-Serial/JTAG can drop the CDC link on `RST`, so
 > the boot banner is often missed by an already-attached monitor. Use the
@@ -847,6 +920,151 @@ everything again.
 ---
 
 ## 10. Change Log
+
+### 2026-10-15 — Claude Code (Opus 5.5) — Water sensor working on the machine (sensing face)
+
+- Wired (3V3 / GND / GPIO7) and tested live: against a full tank it first
+  read HIGH (no water) while reacting to a finger - the wrong face was on
+  the tank. Flipped, it reads a steady LOW = water (30/30 samples over
+  9 s) → "Tank OK". Noted in HARDWARE_ROADMAP item 6 and the install guide.
+  Still to do: permanent mounting, and a check with the tank removed / low.
+
+### 2026-10-15 — Claude Code (Opus 5.5) — Reverted the fast water debounce (back to 2 s) and 2 s UI polling
+
+- User: the 0.2 s / 1 s-poll version "doesn't work well" - asked to go back.
+  Water debounce is 20 x 100 ms (2 s) again and the Web UI polls every 2 s.
+  `PRESSURE_SENSOR_IS_16BAR` stays at 0 (unchanged - the old 5-bar settings).
+- **Flashed via OTA ~22:50** (CI `fbbbdb6`, fw_build "Oct 15 2026
+  19:47:31" UTC). Pre-checks: Off, no shot, pump 0%. After reboot: 5-bar
+  pressure settings (158 mV, no fault); water sensor enabled, raw pin HIGH
+  (= no water detected) - still to be checked against the real tank.
+
+### 2026-10-15 — Claude Code (Opus 5.5) — Water sensor reacts in ~0.2 s; pressure sensor model behind one switch
+
+- User wanted the tank state to show immediately. Water debounce cut from
+  20 x 100 ms (2 s) to 4 x 50 ms (0.2 s), and the Web UI now polls
+  `/status` every 1 s instead of 2 s → the UI reflects a change within
+  ~1.2 s worst case.
+- The 0-16 bar pressure settings (previous entry) are now behind
+  `PRESSURE_SENSOR_IS_16BAR` in `config.h` - **0 (the old 0-5 bar part on
+  3V3) until the new sensor is installed**, then flip to 1 and rebuild.
+  This lets the water-sensor build ship now without breaking pressure
+  readings. GPIO1's pull-down follows the switch.
+- **Flashed via OTA 2026-10-15 ~22:40** (CI `80523c7`, fw_build "Oct 15
+  2026 19:32:45" UTC). Pre-checks: Off, no shot, pump 0%, no cal/autotune.
+  After reboot: pressure on the 5-bar settings (`pressure_max_bar` 5,
+  closed loop off, 155 mV, no fault); water sensor enabled, reading raw
+  HIGH = "low" right after the user wired it - to be checked against the
+  real tank state.
+
+### 2026-10-15 — Claude Code (Opus 5.5) — Install guide for HLK power, 16-bar sensor and water sensor
+
+- Step-by-step install guide (parts, mains tap, 5V side, water sensor,
+  multimeter checks, first power-up, calibration, pin map):
+  [`docs/install-guide-2026-10-15-hlk-pressure-water.md`](docs/install-guide-2026-10-15-hlk-pressure-water.md).
+  A Hebrew user-facing copy lives in the user's Claude Doc of the same
+  subject. Hardware not installed yet.
+
+### 2026-10-15 — Claude Code (Opus 5.5) — Firmware switched to the 0-16 bar pressure sensor on 5V (HLK-PM01) + divider
+
+- User ordered a "G41 1.6Mpa IN5V" (0-16 bar, 5V, 0.5-4.5 V out) to
+  replace the 0-5 bar part, and will power it - and the ESP32 - from an
+  HLK-PM01 fed from always-on mains (tapped on the clean-bypass heater
+  wires). Signal into GPIO1 through a 4.3k/10k divider. Full wiring and
+  checks: `HARDWARE_ROADMAP.md` item 7, "Update (2026-10-15)".
+- `config.h`: ZERO_MV 350, MV_PER_BAR 175 (nominal from datasheet +
+  resistors - calibrate), MAX_BAR 16, `PRESSURE_CLOSED_LOOP_AVAILABLE`
+  true (PID trim on the model duty in pressure phases; falls back to the
+  model on a sensor fault). `PUMP_MAX_SAFETY_BAR` (12) can now trip on a
+  real reading.
+- `pressure_sensor.cpp`: GPIO1 now plain `INPUT` (the internal ~45k
+  pull-down would skew the divider by ~7%; the divider's 10k still pins an
+  unwired input to 0 mV -> OUT_OF_RANGE).
+- Web UI hint texts updated (no longer "until a 0-16 bar sensor is fitted").
+- **Do not flash this until the new sensor is installed** - the old 5-bar
+  part would read below zero and fault.
+
+### 2026-10-15 — Claude Code (Opus 5.5) — Water tank sensor implemented (firmware + Web UI); "Water (est.)" tile removed
+
+- Rebased the auto-off fix, CI and docs onto `wip/local` (the code flashed
+  Oct 2 12:47, pushed by the user today) as `feature/water-level-sensor`.
+- New `water_level.cpp/.h`: GPIO7 with pull-up, sampled every 100 ms, 2 s
+  debounce; settings `water_en` / `water_low_act` / `water_lock` in NVS
+  (sensor **off by default**). `startShot()` and `pumpCalStartRun()` refuse
+  to start on low water; a running shot is never stopped, the heater is
+  never touched.
+- `/status`: `water_enabled`, `water_state`, `water_raw_high`,
+  `water_active_low`, `water_interlock`, `shot_blocked`; `ml_est` removed.
+  `/update`: `water_enabled`, `water_active_low`, `water_interlock`. MQTT:
+  `water_state` + HA `binary_sensor.water_low` (only while enabled).
+- Web UI: tank chip in the header, amber low-water banner, "Refill to brew"
+  shot button with an inline reason, Tank stat tile (replaces "Water
+  (est.)"), "Heater off" caption when Off, sleep banner hidden on a manual
+  mode change, Settings → Power → "Water tank sensor" card with a live GPIO7
+  reading.
+- Details and decisions: `docs/superpowers/specs/2026-10-15-water-level-sensor-design.md` §7.
+- **Flashed via OTA 2026-10-15 ~17:46** (CI build `ca1545c`, fw_build
+  "Oct 15 2026 14:42:59" - CI clock is UTC). Pre-checks: Off, no shot, pump
+  0%, no calibration/autotune. After reboot: Off, `water_state` "disabled",
+  `auto_sleeping` false, "Heater off" caption shown, no stuck sleep banner.
+  Sensor not installed yet; the Steam auto-off check and the bench test
+  plan (spec §5) are still to do.
+
+### 2026-10-15 — Claude Code (Opus 5.5) — Water level sensor chosen: non-contact capacitive, planned on GPIO7
+
+- User bought a 3.3-5V non-contact capacitive liquid level switch
+  (3-wire). Docs updated: hardware table, pin map (GPIO7 reserved,
+  firmware not written yet), roadmap item 6 in both files. Replaces the
+  float switch + pogo-pin plan, since this one mounts outside the tank.
+- GPIO7 picked because it's free, not a strapping/flash/PSRAM/USB pin,
+  and sits next to GPIO6 on the DevKitC-1 J1 header.
+- Full backend + frontend design approved and written up in
+  `docs/superpowers/specs/2026-10-15-water-level-sensor-design.md`
+  (debounced `water_level` module, shot-start interlock, `/status` +
+  `/update` + MQTT/HA fields, Now-tab chip/banner/tile, Settings card,
+  removal of the "Water (est.)" tile). **Blocked:** the firmware on the
+  machine (build Oct 2 12:47) contains local changes not on GitHub - must
+  be pushed before implementing, or an OTA from `main` would drop them.
+
+### 2026-10-15 — Claude Code (Opus 5.5) — Fix: auto-off stopped working after the first auto-sleep
+
+- **Bug (seen live):** the machine sat on Steam at 120°C for a long time
+  even though Steam auto-off is 2 min. `/status` showed
+  `auto_sleeping: true` while the mode had been Steam.
+- **Cause:** after an auto-sleep, `autoSleeping` was only cleared by the
+  "Wake Up" button (`wakeFromSleep()`) or autotune. Turning the machine
+  back on with the Brew/Steam button (or MQTT / a scheduled warm-up) left
+  it `true`, and `checkEcoSleep()` returns early while `autoSleeping` is
+  set - so auto-off never fired again until a reboot.
+- **Fix:** `setOpMode()` now clears `autoSleeping` and calls
+  `noteActivity()` whenever it switches into Brew or Steam. The second part
+  also stops a scheduled warm-up from being put to sleep immediately (its
+  `lastActivityTime` could be hours old).
+- Also: Section 3 pin map now lists the dimmer (GPIO5/6) and pressure
+  ADC (GPIO1) pins, which were in `config.h` but missing from the table.
+- Added `.github/workflows/build.yml`: builds the S3 env on every push and
+  uploads `firmware.bin` as an artifact (the agent session had no PyPI
+  access to install PlatformIO).
+
+### 2026-10-02 — Claude Code (Opus 5.5) — Phase profiles, open-loop pump model, dimmer hardening, pump calibration
+
+- **Research**: read Gaggiuino (`release/stm32-blackpill`) and GaggiMate (`master`) source. Both use 0-12/16 bar 0.5-4.5 V sensors via ADS1115 + Kalman filtering, and PSM pulse-skip pump drive. Their pump models disagree ~2x at 9 bar (Gaggiuino EP5 curve -> ~55-75% duty to hold 9 bar; GaggiMate linear 10.2 ml/s@1 bar / 5.5@9 -> ~27-36%) - hence a per-machine calibration instead of a fixed %. Peak targets are 8-9 bar with declines/flow phases, not flat 9 bar.
+- **User decisions**: keep the 0-5 bar sensor for now (closed loop must switch on later with no profile changes); phase-% from a model fitted by a 3-run scale calibration with a 10% outlier check; built-in profiles + simple tweaks, no full phase editor yet; harden the dimmer across the board; **no unit tests**.
+- **Built**:
+  - pure units `pump_model`, `pump_cal_math`, `profile_codec`, `shot_planner`, written to be host-testable but **currently without tests, by user decision** (no `test/`, no `[env:native]`);
+  - `/profiles.json` store addressed by name;
+  - 6 built-ins: Classic 9 bar, Londinium, Lever, IUIUIU Classic, Blooming, Flush;
+  - migration of the legacy profiles after a byte-for-byte backup to `/profiles.csv.bak`;
+  - the planner runs in `controlTick()`;
+  - a 3-run calibration card;
+  - Now-tab est. bar / phase / water / mains banners.
+- **Dimmer**: gate raised in the ZC ISR and held 1500 µs, dropped by a gptimer alarm (was a 100 µs pulse 300 µs after ZC - risk of lost strokes on the inductive pump); mains Hz auto-detect + 100 ms zero-cross watchdog; permanent `zc_count`/`fired_cycles`; +250 %/s slew (cuts stay instant).
+- **Removed settings**: global brew/pre-infusion pump %, fill/soak settings, global shot auto-stop (now each profile's `max_sec`).
+- **Unused NVS keys left in place**, for a future cleanup: `shot_auto_stop`, `pump_brew_pct` and `pump_pi_pct` (both read once for migration), `pi_fill_bar`, `pi_fill_max_s`, `pi_soak_s`, `pi_enabled`, `pi_pulses`, `pi_on_ms`, `pi_off_ms`, `press_en`, `press_ramp_bar`, `press_ramp_ms`, `press_dec_en`, `press_dec_bar`, `press_dec_ms`. (`active_profile` is removed after being mapped to a name.)
+- **Model defaults differing from the design spec text**: 0.213 ml/stroke default, 30 ml headspace, phase duration minimum 0.2 s, utility `max_sec` up to 120, profile temp range 80-100 °C, the Lever built-in is named "Lever".
+- **Two post-review fixes**: the migrated active profile name is persisted to NVS `profile_name` (legacy `active_profile` key removed); planner/dimmer `dt` use a signed delta so a shot can't end on its first tick.
+- **Flashed**: OTA twice on 2026-10-02 (fw_build "Oct  2 2026 12:01:07" after the profile/planner switch-over, "Oct  2 2026 12:13:37" with the new UI). On the device the 3 legacy profiles (Classic, Light Roast, Dark Roast) migrated, backup at `/profiles.csv.bak`, active profile stayed "Classic"; profile CRUD and the 409 refusal path checked live.
+- **Not yet verified on the real machine**: no shot, calibration run or heating was performed (machine on mains, unattended). See the plan's Task 12 checklist.
 
 ### 2026-10-01 — Claude Code (Opus 5.5) — Pre-infusion back to profile pulses; pressure fill gated off for the 5-bar sensor
 
@@ -963,6 +1181,15 @@ everything again.
 - Also noted for next time: an OTA was pushed while a shot was in progress
   (agent error - status showed `shot_in_progress: true`); the reboot ended
   the shot cleanly. Check that field before any OTA.
+
+### 2026-10-02 — Claude Code (Opus 5.5) — Final whole-branch review fixes
+
+- **Stale `now` fixed at the root**: `controlTick()` re-samples `millis()` right after taking `lockState()`, so timestamps written under the lock by `/update` (calibration run start, activity time, planner tick) can't be newer than `now` and wrap. `pumpCalTick` also compares with a signed delta.
+- **Calibration**: Stop during `await_grams` now discards just that run (UI button reads "Discard run"). **Live finding**: run 1 measured 56 g / 10 s, about 0.11 ml/stroke with cold water, below the old 0.15 floor, so `PUMP_ML_PER_CLICK_MIN` is now 0.08 (range 0.08-0.40, all messages/docs updated).
+- **Backflush built-in removed** (now 6 built-ins): no 3-way valve on this machine, so a blind-basket backflush would dead-head the pump. Flush stays.
+- **Dimmer**: on mains loss `appliedX10` is zeroed (request kept) so the slew ramps up again on return; the gate is forced low every tick when applied power is 0 or mains is absent. New runtime diagnostic `dimmer_gate_hold_us=<500-8000>` on `/update` (not persisted, resets to 1500 on boot) and `gate_hold_us` in `/status`, to A/B lost TRIAC latching against genuinely low flow. No UI.
+- Pump trim hint corrected (+ = more pump duty = faster shot). `profiles.cpp` init now promotes an orphaned `.tmp` store if the store file is missing (LittleFS rename overwrite semantics could not be confirmed from source, so the remove stays). Stale shot-timer/route comments fixed.
+- **Residual fixes**: `dimmerTick()` now computes mains state first and, while ABSENT, holds `appliedX10` at 0 without advancing the slew (previously the slew undid the zeroing within ~0.4 s, so the pump restarted at full duty on return). `noteActivity()` moved to after `lockState()` in `web.cpp` `/update` and `mqtt.cpp`, and `checkEcoSleep` uses a signed idle delta (negative = 0), closing a wrap that could spuriously turn Brew/Steam off.
 
 ### 2026-10-01 — Claude Code (Opus 5.5) — Replacement dimmer installed with a fuse; Milestone A re-confirmed
 
@@ -1145,7 +1372,7 @@ everything again.
   consistently reliable** and is what actually got both fixes onto the
   board. Worth a closer look in a future session if OTA continues to be
   flaky; for now, prefer USB when OTA fails more than once in a row.
-- **Added a temporary zero-cross counter diagnostic**
+- **Added a zero-cross counter** (kept permanently since 2026-10-02)
   (`dimmerGetZcCount()`, exposed as `/status`'s `dimmer_zc_count`) to get
   hard data during this bring-up rather than guessing - confirmed the
   ESP32 detects a genuine, continuous ~100Hz signal (matching 50Hz mains)
@@ -1154,8 +1381,7 @@ everything again.
   all when the **physical** Brew switch is on (it's spliced into the
   switched White wire) - Start Shot alone can't make the pump run if the
   physical switch is off, since firmware can only control duty cycle
-  *given* power is already present. Remove this diagnostic once hardware
-  bring-up is fully complete (Milestone C).
+  *given* power is already present.
 - **Result: Milestone A (HARDWARE_ROADMAP.md item 8, on/off dimmer
   control) is complete** - the dimmer is wired into the real machine,
   replacing the old relay, and Start Shot/Stop Shot correctly starts and

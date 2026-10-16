@@ -2,35 +2,33 @@
 
 #include <stdint.h>
 
-// AC dimmer driver (HARDWARE_ROADMAP.md item 8) - zero-cross detection +
-// TRIAC gate firing via a hardware one-shot timer, so firing timing survives
-// WiFi/BT scheduling jitter (a plain delayMicroseconds() in the zero-cross
-// ISR does not - see config.h). Power is pulse-skip modulation (PSM): whole
-// mains cycles are either fired near the zero-cross or skipped, which is
-// what a diode-fed vibration pump actually responds to (see config.h's
-// PUMP_BREW_POWER_PCT_DEFAULT comment).
+// AC dimmer driver (HARDWARE_ROADMAP.md item 8). Pulse-skip modulation:
+// whole mains cycles are fired or skipped (Bresenham-spread), which is what
+// a diode-fed ULKA pump responds to - one stroke per fired cycle. Hardened
+// 2026-10-02 (design spec §5): long gate hold via a gptimer, mains
+// frequency auto-detect + zero-cross watchdog, stroke counters, slew limit.
 
-// Configures PIN_DIMMER_ZC as an interrupt input and PIN_DIMMER_GATE as an
-// output, and creates the internal esp_timer used for gate firing. Call
-// once from setup().
+enum class MainsState { OK, ABSENT, UNSTABLE };
+
 void dimmerInit();
 
-// Sets the target power level (0-100), clamped to that range. 0 = TRIAC
-// never fires (pump off); 100 = every mains cycle fired (full pass-through);
-// N = N% of mains cycles fired, spread evenly (Bresenham accumulator). Safe to call from
-// any task - internally stored as a plain volatile integer (tenths of a
-// percent), not behind main.cpp's stateMutex, because it's also read from
-// the zero-cross ISR, where taking a FreeRTOS mutex isn't safe (and where
-// float math isn't safe either - see dimmer.cpp's ISR-safety note).
+// Target power 0-100 (clamped). Rises toward it at DIMMER_SLEW_PCT_PER_S
+// (advanced by dimmerTick()); any decrease, including 0, applies instantly.
 void dimmerSetPowerPercent(float percent);
+// Same, but with no slew - used only by the pump calibration run.
+void dimmerSetPowerPercentImmediate(float percent);
+// Call every control tick: advances the slew and updates mains health.
+void dimmerTick(uint32_t dtMs);
 
-// Returns the last percent passed to dimmerSetPowerPercent(), for bumpless
-// stage transitions and /status reporting.
+// The percent actually being fired right now (after slew).
 float dimmerGetPowerPercent();
 
-// Temporary bring-up diagnostic (2026-09-15) - count of zero-cross
-// interrupts actually accepted since boot, so /status can expose a rate
-// (crossings/sec) to confirm the ESP32 is really seeing a continuous
-// ~100Hz signal from the dimmer's Z-C output. Remove once real hardware
-// bring-up is complete and this is no longer needed.
-uint32_t dimmerGetZcCount();
+// Diagnostic: gate hold time in us (clamped 500-8000), not persisted.
+void dimmerSetGateHoldUs(int32_t us);
+int32_t dimmerGetGateHoldUs();
+
+uint32_t dimmerGetZcCount();     // accepted zero-crossings since boot
+uint32_t dimmerGetFiredCycles(); // fired mains cycles (= pump strokes) since boot
+MainsState dimmerGetMainsState();
+float dimmerGetMainsHz();        // last valid measurement; DIMMER_MAINS_HZ_DEFAULT until then
+const char *mainsStateName(MainsState s);

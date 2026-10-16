@@ -4,177 +4,259 @@
 #include <LittleFS.h>
 
 #include "config.h"
+#include "profile_codec.h"
 
-// ============================================================================
-// Storage format: JSON array on LittleFS (2026-08-23, replaces hand-rolled
-// CSV) - one profile per array entry, same field names the API
-// (profilesReadJson()) already returned, so this is now the on-disk format
-// AND the wire format with no reserialization step, mirroring GaggiMate's
-// own ProfileManager (research pass, 2026-08-23). Fixes the CSV format's
-// hard limitation along the way: profile names could not contain a comma or
-// newline (silently stripped); JSON has no such restriction.
-// ============================================================================
+static Profile baseBuiltins[PROFILE_BUILTIN_MAX];
+static bool builtinTweaked[PROFILE_BUILTIN_MAX];
+static ProfileTweak builtinTweaks[PROFILE_BUILTIN_MAX];
+static int builtinCount = 0;
+static Profile users[PROFILE_MAX_COUNT];
+static int userCount = 0;
+static Profile effective[PROFILE_BUILTIN_MAX + PROFILE_MAX_COUNT];
+static int effectiveCount = 0;
+static String legacyNames[PROFILE_MAX_COUNT];
+static int legacyCount = 0;
 
-static bool loadDoc(JsonDocument &doc) {
-  File f = LittleFS.open(PROFILE_LOG_PATH, "r");
-  if (!f) return false;
-  DeserializationError err = deserializeJson(doc, f);
-  f.close();
-  return !err;
+static int findBuiltin(const char *name) {
+  for (int i = 0; i < builtinCount; i++)
+    if (profileNameEquals(baseBuiltins[i].name, name)) return i;
+  return -1;
 }
 
-static void saveDoc(JsonDocument &doc) {
-  File f = LittleFS.open(PROFILE_LOG_PATH, "w");
+static int findUser(const char *name) {
+  for (int i = 0; i < userCount; i++)
+    if (profileNameEquals(users[i].name, name)) return i;
+  return -1;
+}
+
+static void rebuildEffective() {
+  effectiveCount = 0;
+  for (int i = 0; i < builtinCount; i++) {
+    effective[effectiveCount] = baseBuiltins[i];
+    if (builtinTweaked[i]) profileApplyTweak(effective[effectiveCount], builtinTweaks[i]);
+    effectiveCount++;
+  }
+  for (int i = 0; i < userCount; i++) effective[effectiveCount++] = users[i];
+}
+
+// Write-then-rename so a power cut mid-save can't leave a half-written store.
+static bool saveStore() {
+  JsonDocument doc;
+  doc["version"] = 1;
+  JsonArray u = doc["user"].to<JsonArray>();
+  for (int i = 0; i < userCount; i++) profileToJson(users[i], u.add<JsonObject>());
+  JsonObject ov = doc["builtin_overrides"].to<JsonObject>();
+  for (int i = 0; i < builtinCount; i++) {
+    if (!builtinTweaked[i]) continue;
+    JsonObject t = ov[baseBuiltins[i].name].to<JsonObject>();
+    t["temp"] = builtinTweaks[i].temp;
+    t["max_sec"] = builtinTweaks[i].maxSec;
+    t["pressure_scale"] = builtinTweaks[i].pressureScale;
+    t["trim_pct"] = builtinTweaks[i].trimPct;
+  }
+  const char *tmp = PROFILE_STORE_PATH ".tmp";
+  File f = LittleFS.open(tmp, "w");
   if (!f) {
-    Serial.println("profiles: failed to open for write");
-    return;
+    Serial.println("profiles: can't open temp file for write");
+    return false;
   }
   serializeJson(doc, f);
   f.close();
+  LittleFS.remove(PROFILE_STORE_PATH);
+  if (!LittleFS.rename(tmp, PROFILE_STORE_PATH)) {
+    Serial.println("profiles: rename of temp store failed");
+    return false;
+  }
+  return true;
 }
 
-static void addProfile(JsonArray &arr, const char *name, double temp,
-                        unsigned long autoStopSec, bool preinfusionEnabled,
-                        int pulses, int onMs, int offMs) {
-  JsonObject p = arr.add<JsonObject>();
-  p["name"] = name;
-  p["temp"] = temp;
-  p["auto_stop_sec"] = autoStopSec;
-  p["preinfusion"] = preinfusionEnabled;
-  p["pulses"] = pulses;
-  p["on_ms"] = onMs;
-  p["off_ms"] = offMs;
-  // Pressure control (HARDWARE_ROADMAP.md item 8) - none of the seeded
-  // starter profiles use it; disabled by default, same as every other
-  // field's "no data yet" convention in this file.
-  p["pressure_enabled"] = false;
-  p["pressure_ramp_bar"] = 0.0;
-  p["pressure_ramp_ms"] = 0;
-  p["pressure_decline_enabled"] = false;
-  p["pressure_decline_bar"] = 0.0;
-  p["pressure_decline_ms"] = 0;
+static bool loadStore() {
+  File f = LittleFS.open(PROFILE_STORE_PATH, "r");
+  if (!f) return false;
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, f);
+  f.close();
+  if (err) {
+    Serial.printf("profiles: %s unreadable (%s) - moved aside, starting from built-ins\n", PROFILE_STORE_PATH, err.c_str());
+    LittleFS.remove(PROFILE_STORE_PATH ".bad");
+    LittleFS.rename(PROFILE_STORE_PATH, PROFILE_STORE_PATH ".bad");
+    return false;
+  }
+  for (JsonVariantConst v : doc["user"].as<JsonArrayConst>()) {
+    if (userCount >= PROFILE_MAX_COUNT) break;
+    const char *e = nullptr;
+    Profile p;
+    if (!profileFromJson(v.as<JsonObjectConst>(), p, &e)) {
+      Serial.printf("profiles: skipped invalid user profile (%s)\n", e);
+      continue;
+    }
+    p.builtin = false;
+    users[userCount++] = p;
+  }
+  for (JsonPairConst kv : doc["builtin_overrides"].as<JsonObjectConst>()) {
+    int bi = findBuiltin(kv.key().c_str());
+    if (bi < 0) continue;
+    JsonObjectConst t = kv.value().as<JsonObjectConst>();
+    ProfileTweak tw = profileGetTweak(baseBuiltins[bi]);
+    tw.temp = t["temp"] | tw.temp;
+    tw.maxSec = t["max_sec"] | tw.maxSec;
+    tw.pressureScale = t["pressure_scale"] | tw.pressureScale;
+    tw.trimPct = t["trim_pct"] | tw.trimPct;
+    builtinTweaks[bi] = tw;
+    builtinTweaked[bi] = true;
+  }
+  return true;
 }
 
-void profilesInit() {
-  if (!LittleFS.begin(true)) {
-    Serial.println("profilesInit: LittleFS mount failed even after format");
+static void migrateLegacy(int legacyBrewPct, int legacyPreinfusionPct) {
+  if (!LittleFS.exists(PROFILE_LOG_PATH)) return;
+  File f = LittleFS.open(PROFILE_LOG_PATH, "r");
+  if (!f) return;
+  String legacy = f.readString();
+  f.close();
+
+  // Backup FIRST, byte for byte - the 2026-08-23 migration lost data with no backup.
+  File b = LittleFS.open(PROFILE_LEGACY_BACKUP_PATH, "w");
+  if (!b || b.print(legacy) != legacy.length()) {
+    if (b) b.close();
+    Serial.println("profiles: legacy backup failed - NOT migrating, legacy file left untouched");
     return;
   }
-  if (LittleFS.exists(PROFILE_LOG_PATH)) return;
+  b.close();
 
-  // Seed starter profiles grounded in real community consensus (2026-08-16
-  // research pass) - temp-by-roast from Papel Espresso's roast guide,
-  // SCA-referenced shot-time windows, and pulsed pre-infusion timings
-  // translated from Profitec/Gicar/Gaggiuino roast-tuning guidance (light
-  // roasts benefit from a longer low-pressure soak for CO2 degassing/even
-  // saturation; dark roasts need little to none). "Classic" is first/
-  // default - straight extraction, no pulsing at all.
+  JsonDocument names;
+  if (!deserializeJson(names, legacy)) {
+    for (JsonVariantConst v : names.as<JsonArrayConst>()) {
+      if (legacyCount >= PROFILE_MAX_COUNT) break;
+      legacyNames[legacyCount++] = v["name"] | "";
+    }
+  }
+
+  int warnings = 0;
+  LegacyPowers powers = {legacyBrewPct, legacyPreinfusionPct};
+  userCount = migrateLegacyProfiles(legacy.c_str(), powers, baseBuiltins, builtinCount, users, PROFILE_MAX_COUNT, &warnings);
+  Serial.printf("profiles: migrated %d legacy profiles (%d warnings); backup at %s\n", userCount, warnings,
+                PROFILE_LEGACY_BACKUP_PATH);
+}
+
+void profilesInit(int legacyBrewPct, int legacyPreinfusionPct) {
+  builtinCount = builtinProfilesLoad(baseBuiltins, PROFILE_BUILTIN_MAX);
+  if (builtinCount == 0) Serial.println("profiles: BUILT-IN TABLE FAILED TO PARSE");
+  if (!LittleFS.begin(true)) {
+    Serial.println("profiles: LittleFS mount failed - built-ins only");
+    rebuildEffective();
+    return;
+  }
+  // saveStore() removes the store before renaming the temp into place; a power
+  // cut in between leaves only the (complete) .tmp - promote it.
+  if (!LittleFS.exists(PROFILE_STORE_PATH) && LittleFS.exists(PROFILE_STORE_PATH ".tmp")) {
+    if (LittleFS.rename(PROFILE_STORE_PATH ".tmp", PROFILE_STORE_PATH)) Serial.println("profiles: recovered store from .tmp");
+  }
+  if (LittleFS.exists(PROFILE_STORE_PATH)) {
+    if (!loadStore()) saveStore();
+  } else {
+    migrateLegacy(legacyBrewPct, legacyPreinfusionPct);
+    saveStore();
+  }
+  rebuildEffective();
+}
+
+int profileCount() { return effectiveCount; }
+const Profile *profileAt(int i) { return (i >= 0 && i < effectiveCount) ? &effective[i] : nullptr; }
+
+const Profile *profileFind(const char *name) {
+  if (!name) return nullptr;
+  for (int i = 0; i < effectiveCount; i++)
+    if (profileNameEquals(effective[i].name, name)) return &effective[i];
+  return nullptr;
+}
+
+String profilesListJson() {
   JsonDocument doc;
   JsonArray arr = doc.to<JsonArray>();
-  addProfile(arr, "Classic", 93.0, 27, false, 0, 0, 0);
-  addProfile(arr, "Medium Roast", 93.0, 27, true, 3, 1000, 2000);
-  addProfile(arr, "Light Roast", 95.0, 28, true, 4, 1000, 3000);
-  addProfile(arr, "Dark Roast", 90.0, 26, true, 2, 1000, 1000);
-  addProfile(arr, "Ristretto", 93.0, 22, true, 2, 1000, 1000);
-  addProfile(arr, "Lungo", 92.0, 40, true, 3, 1000, 2000);
-  addProfile(arr, "Decaf", 90.0, 27, true, 3, 1000, 2000);
-  saveDoc(doc);
-  Serial.println("profiles: seeded starter profiles (Classic/Medium/Light/Dark/Ristretto/Lungo/Decaf)");
-}
-
-int profileCount() {
-  JsonDocument doc;
-  if (!loadDoc(doc)) return 0;
-  return doc.as<JsonArray>().size();
-}
-
-// The on-disk format IS the wire format now - no rebuilding needed, just
-// hand the stored document straight back out.
-String profilesReadJson() {
-  JsonDocument doc;
-  if (!loadDoc(doc)) return "[]";
+  for (int i = 0; i < effectiveCount; i++) {
+    JsonObject o = arr.add<JsonObject>();
+    profileToJson(effective[i], o);
+    int bi = effective[i].builtin ? findBuiltin(effective[i].name) : -1;
+    o["tweaked"] = bi >= 0 && builtinTweaked[bi];
+  }
   String out;
   serializeJson(doc, out);
   return out;
 }
 
-bool profileGet(int index, String &name, double &temp, unsigned long &autoStopSec,
-                bool &preinfusionEnabled, int &pulses, int &onMs, int &offMs,
-                bool &pressureEnabled, double &pressureRampBar, unsigned long &pressureRampMs,
-                bool &pressureDeclineEnabled, double &pressureDeclineBar,
-                unsigned long &pressureDeclineMs) {
-  JsonDocument doc;
-  if (!loadDoc(doc)) return false;
-  JsonArray arr = doc.as<JsonArray>();
-  if (index < 0 || index >= (int)arr.size()) return false;
+String profileLegacyNameAt(int legacyIndex) {
+  if (legacyIndex < 0 || legacyIndex >= legacyCount) return "";
+  const String &n = legacyNames[legacyIndex];
+  if (findUser(n.c_str()) >= 0) return n;
+  char renamed[PROFILE_NAME_MAX_LEN + 1];
+  profileMakeOldName(n.c_str(), renamed, sizeof renamed);
+  return findUser(renamed) >= 0 ? String(renamed) : String("");
+}
 
-  JsonObject p = arr[index];
-  name = p["name"].as<String>();
-  temp = p["temp"].as<double>();
-  autoStopSec = p["auto_stop_sec"].as<unsigned long>();
-  preinfusionEnabled = p["preinfusion"].as<bool>();
-  pulses = p["pulses"].as<int>();
-  onMs = p["on_ms"].as<int>();
-  offMs = p["off_ms"].as<int>();
-  // `| default` so profiles saved before this field existed (missing key)
-  // deserialize as "pressure control disabled" instead of an unpredictable
-  // JSON-null coercion.
-  pressureEnabled = p["pressure_enabled"] | false;
-  pressureRampBar = p["pressure_ramp_bar"] | 0.0;
-  pressureRampMs = p["pressure_ramp_ms"] | 0UL;
-  pressureDeclineEnabled = p["pressure_decline_enabled"] | false;
-  pressureDeclineBar = p["pressure_decline_bar"] | 0.0;
-  pressureDeclineMs = p["pressure_decline_ms"] | 0UL;
+static bool checkNewName(const char *name, const char *except, const char **err) {
+  if (!name || !*name) { *err = "Name can't be empty"; return false; }
+  if (strlen(name) > PROFILE_NAME_MAX_LEN) { *err = "Name longer than 20 characters"; return false; }
+  const Profile *other = profileFind(name);
+  if (other && !(except && profileNameEquals(other->name, except))) { *err = "A profile with that name already exists"; return false; }
   return true;
 }
 
-int profileSave(int index, String name, double temp, unsigned long autoStopSec,
-                bool preinfusionEnabled, int pulses, int onMs, int offMs,
-                bool pressureEnabled, double pressureRampBar, unsigned long pressureRampMs,
-                bool pressureDeclineEnabled, double pressureDeclineBar,
-                unsigned long pressureDeclineMs) {
-  if (name.length() > PROFILE_NAME_MAX_LEN) name = name.substring(0, PROFILE_NAME_MAX_LEN);
-  if (name.length() == 0) name = "Profile";
-
-  JsonDocument doc;
-  loadDoc(doc); // ok if the file doesn't exist yet - doc just stays empty
-  JsonArray arr = doc.is<JsonArray>() ? doc.as<JsonArray>() : doc.to<JsonArray>();
-  int count = arr.size();
-
-  JsonObject target;
-  int targetIndex;
-  if (index >= 0 && index < count) {
-    targetIndex = index;
-    target = arr[index];
-  } else {
-    if (count >= PROFILE_MAX_COUNT) return -1; // full
-    targetIndex = count;
-    target = arr.add<JsonObject>();
-  }
-  target["name"] = name;
-  target["temp"] = temp;
-  target["auto_stop_sec"] = autoStopSec;
-  target["preinfusion"] = preinfusionEnabled;
-  target["pulses"] = pulses;
-  target["on_ms"] = onMs;
-  target["off_ms"] = offMs;
-  target["pressure_enabled"] = pressureEnabled;
-  target["pressure_ramp_bar"] = pressureRampBar;
-  target["pressure_ramp_ms"] = pressureRampMs;
-  target["pressure_decline_enabled"] = pressureDeclineEnabled;
-  target["pressure_decline_bar"] = pressureDeclineBar;
-  target["pressure_decline_ms"] = pressureDeclineMs;
-
-  saveDoc(doc);
-  return targetIndex;
+static bool commit() {
+  rebuildEffective();
+  return saveStore();
 }
 
-void profileDelete(int index) {
-  JsonDocument doc;
-  if (!loadDoc(doc)) return;
-  JsonArray arr = doc.as<JsonArray>();
-  int count = arr.size();
-  if (index < 0 || index >= count || count <= 1) return; // always keep at least one
-  arr.remove(index);
-  saveDoc(doc);
+bool profileTweak(const char *name, const ProfileTweak &t, const char **err) {
+  int bi = findBuiltin(name);
+  if (bi >= 0) {
+    Profile tmp = baseBuiltins[bi];
+    profileApplyTweak(tmp, t); // clamps
+    builtinTweaks[bi] = profileGetTweak(tmp);
+    builtinTweaked[bi] = true;
+    return commit();
+  }
+  int ui = findUser(name);
+  if (ui < 0) { *err = "No such profile"; return false; }
+  profileApplyTweak(users[ui], t);
+  return commit();
+}
+
+bool profileDuplicate(const char *src, const char *newName, const char **err) {
+  const Profile *s = profileFind(src);
+  if (!s) { *err = "No such profile"; return false; }
+  if (userCount >= PROFILE_MAX_COUNT) { *err = "Profile list is full (8 of your own)"; return false; }
+  if (!checkNewName(newName, nullptr, err)) return false;
+  Profile p = *s;
+  p.builtin = false;
+  strncpy(p.name, newName, PROFILE_NAME_MAX_LEN);
+  p.name[PROFILE_NAME_MAX_LEN] = '\0';
+  users[userCount++] = p;
+  return commit();
+}
+
+bool profileRename(const char *oldName, const char *newName, const char **err) {
+  if (findBuiltin(oldName) >= 0) { *err = "Built-in profiles can't be renamed - duplicate it instead"; return false; }
+  int ui = findUser(oldName);
+  if (ui < 0) { *err = "No such profile"; return false; }
+  if (!checkNewName(newName, users[ui].name, err)) return false;
+  strncpy(users[ui].name, newName, PROFILE_NAME_MAX_LEN);
+  users[ui].name[PROFILE_NAME_MAX_LEN] = '\0';
+  return commit();
+}
+
+bool profileDeleteUser(const char *name, const char **err) {
+  if (findBuiltin(name) >= 0) { *err = "Built-in profiles can't be deleted"; return false; }
+  int ui = findUser(name);
+  if (ui < 0) { *err = "No such profile"; return false; }
+  for (int i = ui; i < userCount - 1; i++) users[i] = users[i + 1];
+  userCount--;
+  return commit();
+}
+
+bool profileReset(const char *name, const char **err) {
+  int bi = findBuiltin(name);
+  if (bi < 0) { *err = "Only built-in profiles can be reset"; return false; }
+  builtinTweaked[bi] = false;
+  return commit();
 }

@@ -1,0 +1,48 @@
+name: Build firmware
+
+on:
+  push:
+    branches: ["**"]
+    paths-ignore: ["**.md", "docs/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-${{ hashFiles('platformio.ini') }}
+      - run: pip install platformio
+      - name: Build
+        shell: bash
+        run: |
+          set -o pipefail
+          pio run -e esp32-s3-devkitc-1 2>&1 | tee build.log
+      - name: Surface compiler errors as annotations
+        if: failure()
+        shell: bash
+        run: |
+          grep -E "error:|undefined reference|Error [0-9]" build.log | head -40 | while IFS= read -r l; do echo "::error::$l"; done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ github.sha }}
+          path: .pio/build/esp32-s3-devkitc-1/firmware.bin
+      - name: Publish firmware.bin to the ota-bin branch (for browser-based OTA)
+        if: github.ref != 'refs/heads/ota-bin'
+        run: |
+          mkdir /tmp/ota && cp .pio/build/esp32-s3-devkitc-1/firmware.bin /tmp/ota/
+          echo "${GITHUB_SHA} ${GITHUB_REF_NAME}" > /tmp/ota/BUILD.txt
+          cd /tmp/ota && git init -q -b ota-bin && git add . \
+            && git -c user.name=ci -c user.email=ci@users.noreply.github.com commit -qm "firmware ${GITHUB_SHA}" \
+            && git push -qf "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git" ota-bin

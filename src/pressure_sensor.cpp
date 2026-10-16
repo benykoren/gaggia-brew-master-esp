@@ -17,17 +17,18 @@ static volatile uint32_t lastMv = 0;
 uint32_t pressureSensorLastMv() { return lastMv; }
 
 void pressureSensorInit() {
-  // Pulled down, not a plain floating input: an unconnected ADC1 pin floats
-  // and reads noisy mid-scale voltages, which the calibration formula below
-  // converts to plausible-looking bar values right around
-  // PUMP_MAX_SAFETY_BAR - exactly the failure mode that let sensor noise
-  // intermittently force the pump off during Milestone A's dimmer bench
-  // test, before the transducer is even wired in (see main.cpp's
-  // pressureClosedLoopActive-gated safety-ceiling check). With the pulldown,
-  // an unwired sensor reads ~0mV -> bar ~= -2.0 -> below the -0.5
-  // plausibility floor below -> deterministically OUT_OF_RANGE instead of a
-  // plausible-but-wrong reading.
+#if PRESSURE_SENSOR_IS_16BAR
+  // Plain input, no internal pull: the external 4.3k/10k divider (config.h)
+  // already holds GPIO1 to GND through 10k, and the internal pull-down
+  // (~45k) in parallel would skew the divider ratio by ~7%. A disconnected
+  // sensor still reads ~0 mV through the 10k -> bar ~= -2 -> below the
+  // -0.5 plausibility floor -> deterministically OUT_OF_RANGE.
+  pinMode(PIN_PRESSURE_ADC, INPUT);
+#else
+  // 0-5 bar part wired straight to GPIO1: pull-down so an unwired pin reads
+  // ~0 mV (-> OUT_OF_RANGE) instead of floating to plausible-looking values.
   pinMode(PIN_PRESSURE_ADC, INPUT_PULLDOWN);
+#endif
   analogReadResolution(12); // 0-4095, matches the ESP32-S3 ADC's native width
 }
 
