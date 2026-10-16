@@ -921,6 +921,18 @@ everything again.
 
 ## 10. Change Log
 
+### 2026-10-16 — Claude Code (Opus 5.5) — Dial shows "at working temperature"; live chart shows numbers (redesign UI)
+- **Dial:** when the boiler is within ±1 °C of the target (existing margin),
+  `.dial.at-temp` adds a green halo along the arc up to the target marker,
+  a pulse at the temp dot, a green target marker, and the caption reads
+  "✓ At temp · 94.0°" instead of "Target 94.0°" (aria-live). Not shown Off.
+- **Live chart:** pressure axis 0/4/8/12 bar in the left gutter (scale moved
+  10 → 12 bar to match the dial and land on the gridlines), whole-degree temp
+  axis in the right gutter on the same gridlines, and pill tags with the
+  latest temp / pressure at the line ends (pressure tag hidden at 0 without
+  a closed-loop sensor).
+- Built on `feature/ui-redesign` (what the machine runs). Frontend only.
+
 ### 2026-10-15 — Claude Code (Opus 5.5) — Water sensor working on the machine (sensing face)
 
 - Wired (3V3 / GND / GPIO7) and tested live: against a full tank it first
