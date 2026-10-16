@@ -921,6 +921,21 @@ everything again.
 
 ## 10. Change Log
 
+### 2026-10-16 — Claude Code (Opus 5.5) — Temp ring shows "at working temperature"; live charts show numbers
+- **Temp ring** now fills from room temperature (20 °C) to the target instead
+  of `temp/target`, so it closes into a full circle exactly when the boiler
+  reaches working temperature (it used to start ~25% full at room temp).
+  On reaching target (±1 °C, unchanged margin) it turns green as before,
+  **glows and pulses twice**, and the caption under it changes from
+  "Target 94.0 °C" to "✓ At temp · 94.0 °C" (`#temp_caption.is-ready`,
+  aria-live, hidden while Off).
+- **Temp and pressure charts** (Now tab) now draw y-axis numbers (whole °C
+  min/mid/max; 0/5/10 bar, growing in 5-bar steps if a reading exceeds 10)
+  with faint gridlines, and print the latest value at the right end of the
+  line. Canvases are now sized from their CSS box × devicePixelRatio on each
+  draw so text is crisp and not stretched; chart height 60 → 84 px.
+- Frontend only (`src/web.cpp`); no firmware logic, pins or JSON changes.
+
 ### 2026-10-15 — Claude Code (Opus 5.5) — Water sensor working on the machine (sensing face)
 
 - Wired (3V3 / GND / GPIO7) and tested live: against a full tank it first

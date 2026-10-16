@@ -283,7 +283,14 @@ const char *index_html = R"rawliteral(
        the number - also covers a shot's temperature sag, which is just
        "below target" again), red once over. */
     .gauge-fill.heating { stroke: var(--accent); }
-    .gauge-fill.ready { stroke: var(--success); }
+    .gauge-fill.ready { stroke: var(--success); filter: drop-shadow(0 0 6px rgba(72,181,131,.55)); animation: ringReadyPulse 1.2s var(--ease) 2; }
+    /* Plays once when the ring first turns ready (the class is re-applied in
+       the same tick on every poll, which does not restart an animation). */
+    @keyframes ringReadyPulse {
+      0%   { filter: drop-shadow(0 0 0 rgba(72,181,131,0)); }
+      50%  { filter: drop-shadow(0 0 14px rgba(72,181,131,.95)); }
+      100% { filter: drop-shadow(0 0 6px rgba(72,181,131,.55)); }
+    }
     .gauge-fill.over { stroke: var(--danger); }
     /* Pressure ring reuses the same heating/ready/over classes as the temp
        ring above - fill amount is a fixed 0-16 bar scale (this machine's
@@ -305,6 +312,12 @@ const char *index_html = R"rawliteral(
     .gauge-unit { font-size: clamp(0.8rem, 2.6vw, 1rem); color: var(--text-dim); font-weight: 600; margin-left: 3px; }
     .gauge-target { color: var(--text-dim); margin: 0; font-size: var(--fs-7); }
     .gauge-target b { color: var(--text); }
+    /* "At working temperature" caption - swaps in for the word "Target" once
+       the temp ring is ready, so the state reads in words, not only color. */
+    .gauge-target .ready-mark { display: none; color: var(--success); font-weight: 700; }
+    .gauge-target.is-ready .ready-mark { display: inline; }
+    .gauge-target.is-ready .target-word { display: none; }
+    .gauge-target.is-ready b { color: var(--success); }
 
     .mode-switch { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--sp-3); margin: var(--sp-4) 0; }
     .mode-btn {
@@ -337,7 +350,7 @@ const char *index_html = R"rawliteral(
        pressure graph (roadmap item 7) is meant to drop in as a second
        .chart-card with its own canvas id, same label/legend pattern. */
     .chart-card { margin-top: var(--sp-4); text-align: left; }
-    .chart-card canvas { width: 100%; height: 60px; display: block; }
+    .chart-card canvas { width: 100%; height: 84px; display: block; }
     .chart-label { display: flex; justify-content: space-between; font-size: var(--fs-2); color: var(--text-dim); margin-bottom: 6px; }
 
     .shot-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); }
@@ -613,7 +626,7 @@ const char *index_html = R"rawliteral(
                 <div class="gauge-value"><span id="temp" class="skeleton">--</span><span class="gauge-unit">&deg;C</span></div>
               </div>
             </div>
-            <div class="gauge-target"><span id="target_on">Target <b><span id="target" class="skeleton">--</span>&deg;C</b></span><span id="target_off" style="display:none">Heater off</span></div>
+            <div class="gauge-target" id="temp_caption" aria-live="polite"><span id="target_on"><span class="ready-mark">&#10003; At temp &middot; </span><span class="target-word">Target </span><b><span id="target" class="skeleton">--</span>&deg;C</b></span><span id="target_off" style="display:none">Heater off</span></div>
           </div>
 
           <div class="gauge-col">
@@ -1131,18 +1144,72 @@ function trackPhaseMarkers(shotPhase, shotInProgress) {
   lastSeenShotPhase = shotInProgress ? shotPhase : null;
 }
 
+// Charts are sized from their CSS box (x devicePixelRatio) on every draw,
+// so axis numbers stay crisp and unstretched at any screen width - the old
+// fixed 300px backing store got scaled horizontally by `width: 100%`, which
+// was fine for a bare line but would smear text. All drawing below is in
+// CSS px. Left gutter = y-axis numbers, right gutter = the current value.
+var CHART_PAD = { left: 30, right: 50, top: 9, bottom: 9 };
+var CHART_TEXT = "#b3a294"; // --text-dim
+
+function prepChart(canvas) {
+  var dpr = window.devicePixelRatio || 1;
+  var cw = canvas.clientWidth || canvas.width, ch = canvas.clientHeight || canvas.height;
+  var bw = Math.round(cw * dpr), bh = Math.round(ch * dpr);
+  if (canvas.width !== bw || canvas.height !== bh) { canvas.width = bw; canvas.height = bh; }
+  var ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cw, ch);
+  return { ctx: ctx, w: cw, h: ch,
+           x0: CHART_PAD.left, x1: cw - CHART_PAD.right,
+           yTop: CHART_PAD.top, yBot: ch - CHART_PAD.bottom };
+}
+
+// Faint gridline + number in the left gutter for each tick value.
+function drawYAxis(c, ticks, yOf, fmt) {
+  var ctx = c.ctx;
+  ctx.save();
+  ctx.font = "600 11px system-ui, -apple-system, sans-serif";
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+  ticks.forEach(function (t) {
+    var y = yOf(t);
+    ctx.strokeStyle = "rgba(179,162,148,.12)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(c.x0, Math.round(y) + 0.5);
+    ctx.lineTo(c.x1, Math.round(y) + 0.5);
+    ctx.stroke();
+    ctx.fillStyle = CHART_TEXT;
+    ctx.fillText(fmt(t), c.x0 - 6, y);
+  });
+  ctx.restore();
+}
+
+// The latest value, printed just right of the line's end point.
+function drawValueTag(c, y, text, color) {
+  var ctx = c.ctx;
+  ctx.save();
+  ctx.font = "700 12px system-ui, -apple-system, sans-serif";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = color;
+  ctx.fillText(text, c.x1 + 6, Math.max(c.yTop + 5, Math.min(c.yBot - 5, y)));
+  ctx.restore();
+}
+
 // Draws a dashed horizontal reference line at the given target value,
-// using the same min/max scale as the data line - shared by both charts.
-function drawTargetLine(ctx, w, h, min, max, target) {
+// using the same scale as the data line - shared by both charts.
+function drawTargetLine(c, yOf, target) {
   if (target === null || target === undefined) return;
-  var y = h - ((target - min) / (max - min)) * (h - 6) - 3;
+  var ctx = c.ctx, y = yOf(target);
   ctx.save();
   ctx.strokeStyle = "rgba(179,162,148,.55)"; // --text-dim, translucent
   ctx.lineWidth = 1.5;
   ctx.setLineDash([4, 3]);
   ctx.beginPath();
-  ctx.moveTo(0, y);
-  ctx.lineTo(w, y);
+  ctx.moveTo(c.x0, y);
+  ctx.lineTo(c.x1, y);
   ctx.stroke();
   ctx.restore();
 }
@@ -1150,42 +1217,49 @@ function drawTargetLine(ctx, w, h, min, max, target) {
 function drawSparkline(data, target) {
   var canvas = document.getElementById("temp_chart");
   if (!canvas || !data || data.length < 2) return;
-  var ctx = canvas.getContext("2d");
-  var w = canvas.width, h = canvas.height;
-  ctx.clearRect(0, 0, w, h);
+  var c = prepChart(canvas), ctx = c.ctx;
   var scaleValues = (target === null || target === undefined) ? data : data.concat([target]);
-  var min = Math.min.apply(null, scaleValues), max = Math.max.apply(null, scaleValues);
-  if (max - min < 1) { max += 0.5; min -= 0.5; }
+  // Whole-degree bounds, so the axis reads as round numbers.
+  var min = Math.floor(Math.min.apply(null, scaleValues));
+  var max = Math.ceil(Math.max.apply(null, scaleValues));
+  if (max - min < 2) { max = min + 2; }
+  var n = data.length;
+  function X(i) { return c.x0 + (i / (n - 1)) * (c.x1 - c.x0); }
+  function Y(v) { return c.yBot - ((v - min) / (max - min)) * (c.yBot - c.yTop); }
 
-  phaseMarkers = phaseMarkers.filter(function (m) { return m.age < data.length; });
+  var ticks = [min, max];
+  if ((max - min) % 2 === 0) ticks.splice(1, 0, (min + max) / 2);
+  drawYAxis(c, ticks, Y, function (t) { return t.toFixed(0) + "°"; });
+
+  phaseMarkers = phaseMarkers.filter(function (m) { return m.age < n; });
   if (phaseMarkers.length) {
     ctx.save();
     ctx.strokeStyle = "rgba(224,161,58,.55)"; // --amber, translucent
     ctx.lineWidth = 1;
     ctx.setLineDash([3, 2]);
     phaseMarkers.forEach(function (m) {
-      var idx = data.length - 1 - m.age;
-      var x = (idx / (data.length - 1)) * w;
+      var x = X(n - 1 - m.age);
       ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, h);
+      ctx.moveTo(x, c.yTop);
+      ctx.lineTo(x, c.yBot);
       ctx.stroke();
     });
     ctx.restore();
   }
 
-  drawTargetLine(ctx, w, h, min, max, target);
+  drawTargetLine(c, Y, target);
 
   ctx.beginPath();
   data.forEach(function (v, i) {
-    var x = (i / (data.length - 1)) * w;
-    var y = h - ((v - min) / (max - min)) * (h - 6) - 3;
-    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    if (i === 0) ctx.moveTo(X(i), Y(v)); else ctx.lineTo(X(i), Y(v));
   });
   ctx.strokeStyle = "#d98c3f";
   ctx.lineWidth = 2.5;
   ctx.lineJoin = "round";
   ctx.stroke();
+
+  var last = data[n - 1];
+  drawValueTag(c, Y(last), last.toFixed(1) + "°", "#d98c3f");
 }
 
 // Pressure chart: the model estimate (or the real reading once the closed
@@ -1197,19 +1271,23 @@ function drawPressureChart(est, sensor, target, closedLoop) {
   if (!canvas) return;
   var main = closedLoop ? sensor : est;
   if (!main || main.length < 2) return;
-  var ctx = canvas.getContext("2d");
-  var w = canvas.width, h = canvas.height;
-  ctx.clearRect(0, 0, w, h);
-  var max = 10;
-  function y(v) { return h - (Math.min(max, Math.max(0, v)) / max) * (h - 6) - 3; }
+  var c = prepChart(canvas), ctx = c.ctx;
+  // 0-10 bar normally; grows in 5-bar steps if a reading goes past it
+  // (the 16-bar sensor can), so the line is never clipped flat.
+  var peak = Math.max.apply(null, main);
+  var max = Math.max(10, Math.ceil(peak / 5) * 5);
+  function Y(v) { return c.yBot - (Math.min(max, Math.max(0, v)) / max) * (c.yBot - c.yTop); }
+  var ticks = [];
+  for (var t = 0; t <= max; t += 5) ticks.push(t);
+  drawYAxis(c, ticks, Y, function (v) { return v.toFixed(0); });
   function line(data, color, width, dashed, gapsBelowZero) {
     if (!data || data.length < 2) return;
     ctx.beginPath();
     var pen = false;
     data.forEach(function (v, i) {
-      var x = (i / (data.length - 1)) * w;
+      var x = c.x0 + (i / (data.length - 1)) * (c.x1 - c.x0);
       if (gapsBelowZero && v < 0) { pen = false; return; }
-      if (!pen) { ctx.moveTo(x, y(v)); pen = true; } else ctx.lineTo(x, y(v));
+      if (!pen) { ctx.moveTo(x, Y(v)); pen = true; } else ctx.lineTo(x, Y(v));
     });
     ctx.setLineDash(dashed ? [5, 4] : []);
     ctx.strokeStyle = color;
@@ -1221,6 +1299,9 @@ function drawPressureChart(est, sensor, target, closedLoop) {
   line(target, "#d98c3f", 1.5, true, true);
   if (!closedLoop) line(sensor, "#6b5d52", 1, false, false);
   line(main, "#3f8cd9", 2.5, false, false);
+
+  var last = main[main.length - 1];
+  drawValueTag(c, Y(last), last.toFixed(1) + " bar", "#3f8cd9");
 }
 
 function formatElapsed(ms) {
@@ -1546,7 +1627,13 @@ function applyStatus(json) {
   }
   applyWaterStatus(json, mode);
 
-  var tempPct = (temp > 0 && hasTarget) ? clamp((temp / target) * 100) : 0;
+  // Ring fills from room temperature up to the target, so it closes into a
+  // full circle exactly when the boiler reaches working temperature (the
+  // old temp/target fill was already ~25% full at room temp and never read
+  // as "done").
+  var RING_BASE_C = 20;
+  var tempPct = (temp > 0 && hasTarget && target > RING_BASE_C)
+    ? clamp(((temp - RING_BASE_C) / (target - RING_BASE_C)) * 100) : 0;
   var ring = document.getElementById("temp_ring_fill");
   var RING_CIRCUMFERENCE = 603;
   ring.style.strokeDashoffset = RING_CIRCUMFERENCE * (1 - tempPct / 100);
@@ -1557,6 +1644,8 @@ function applyStatus(json) {
     else if (temp > target + READY_MARGIN_C) ring.classList.add("over");
     else ring.classList.add("ready");
   }
+  var tempCaption = document.getElementById("temp_caption");
+  if (tempCaption) tempCaption.classList.toggle("is-ready", ring.classList.contains("ready") && mode !== "off");
 
   // Pressure gauge: the model estimate during a shot (no usable sensor),
   // the real reading once the closed loop exists. Goal = the current
