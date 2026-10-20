@@ -37,7 +37,15 @@ PressureSensorStatus pressureSensorRead(float &outBar) {
   // its nonlinearity correction near the rails, instead of a hand-rolled
   // raw-count-to-mV linear scale - improves accuracy for the bench
   // calibration step (Milestone B).
-  uint32_t mv = analogReadMilliVolts(PIN_PRESSURE_ADC);
+  // Oversampled (2026-10-20): single reads jumped ~170-215 mV at rest
+  // (+-0.15 bar at 175 mV/bar). Averaging a burst of reads cuts that before
+  // the EMA in main.cpp, so the EMA can stay light (fast for the safety
+  // ceiling) and pressure_mv in /status is steady enough to calibrate from.
+  // 16 reads take well under 1 ms.
+  const int PRESSURE_OVERSAMPLE = 16;
+  uint32_t sum = 0;
+  for (int i = 0; i < PRESSURE_OVERSAMPLE; i++) sum += analogReadMilliVolts(PIN_PRESSURE_ADC);
+  uint32_t mv = (sum + PRESSURE_OVERSAMPLE / 2) / PRESSURE_OVERSAMPLE;
   lastMv = mv;
 
   float bar = ((float)mv - PRESSURE_SENSOR_ZERO_MV) / PRESSURE_SENSOR_MV_PER_BAR;

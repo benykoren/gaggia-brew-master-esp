@@ -938,6 +938,14 @@ everything again.
   `MV_PER_BAR` 175 still nominal. **`PRESSURE_CLOSED_LOOP_AVAILABLE` set to
   false for now**: real pressure is read, shown and enforced by the 12 bar
   ceiling, pump stays on the model until the slope is checked.
+- Flashed via OTA ~19:30 local (CI `8c666a8`, fw_build "Oct 20 2026 16:29:50"
+  UTC): `pressure_max_bar` 16, no fault, 0.01-0.04 bar at rest.
+- Blind-basket runs leak at the group gasket after ~5 s, so the ~1588 mV
+  peak is where the gasket gives, not the pump plateau - no slope reference
+  from them. Sensor red confirmed on 5V by the user, so the low zero is the
+  part's own offset; MV_PER_BAR stays at the nominal 175 (best estimate).
+  Group gasket (catalog part 38, 11004543) likely worn - user to replace.
+- Pressure reads now average 16 ADC samples (raw reads jumped +-20 mV).
 
 ### 2026-10-16 — Claude Code (Opus 5.5) — Dial shows "at working temperature"; live chart shows numbers (redesign UI)
 - **Dial:** when the boiler is within ±1 °C of the target (existing margin),
