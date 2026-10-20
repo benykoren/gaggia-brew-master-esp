@@ -921,6 +921,18 @@ everything again.
 
 ## 10. Change Log
 
+### 2026-10-20 — Claude Code (Opus 5.5) — 0-16 bar sensor and HLK-PM01 installed; firmware switched to the 16-bar sensor
+- User installed the "G41 1.6Mpa IN5V" sensor, the 4.3k/10k divider and the
+  HLK-PM01 (machine no longer on USB). HLK live tapped at the SSR terminal
+  fed by T2 (user's choice, no new splice) - so the ESP reboots if T2 opens
+  (~127 C). No multimeter was available for the install checks.
+- Before flashing, `/status` with the old firmware read `pressure_mv` 404
+  with the pump off: the divider works (a wrong divider would read 3300+).
+- `PRESSURE_SENSOR_IS_16BAR` 1, `PRESSURE_SENSOR_ZERO_MV` 404 (measured),
+  `MV_PER_BAR` 175 still nominal. **`PRESSURE_CLOSED_LOOP_AVAILABLE` set to
+  false for now**: real pressure is read, shown and enforced by the 12 bar
+  ceiling, pump stays on the model until the slope is checked.
+
 ### 2026-10-16 — Claude Code (Opus 5.5) — Dial shows "at working temperature"; live chart shows numbers (redesign UI)
 - **Dial:** when the boiler is within ±1 °C of the target (existing margin),
   `.dial.at-temp` adds a green halo along the arc up to the target marker,
