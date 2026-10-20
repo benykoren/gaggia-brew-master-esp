@@ -928,7 +928,13 @@ everything again.
   (~127 C). No multimeter was available for the install checks.
 - Before flashing, `/status` with the old firmware read `pressure_mv` 404
   with the pump off: the divider works (a wrong divider would read 3300+).
-- `PRESSURE_SENSOR_IS_16BAR` 1, `PRESSURE_SENSOR_ZERO_MV` 404 (measured),
+- Logged a blind-basket test (3 runs, ~4.5 s at 100 %): rest 195 mV once
+  vented (the 404 was trapped pressure - no 3-way valve), peaks 1561-1588 mV
+  still rising (~7.9 bar nominal). Sensor responds; divider the right way
+  round (a swapped one tops out at 1353 mV). Zero is ~0.30 V at the sensor,
+  under the 0.5 V spec - supply possibly < 5 V, unverified (no multimeter).
+- `PRESSURE_SENSOR_IS_16BAR` 1, `PRESSURE_SENSOR_ZERO_MV` 208 (195 x 1.067:
+  the new build drops the old INPUT_PULLDOWN across the 10k),
   `MV_PER_BAR` 175 still nominal. **`PRESSURE_CLOSED_LOOP_AVAILABLE` set to
   false for now**: real pressure is read, shown and enforced by the 12 bar
   ceiling, pump stays on the model until the slope is checked.

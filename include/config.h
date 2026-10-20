@@ -183,13 +183,21 @@
 #if PRESSURE_SENSOR_IS_16BAR
 // 0-16 bar on 5V, 0.5-4.5 V out, divider ratio 10 / 14.3 = 0.699:
 //   0 bar ~350 mV, 16 bar ~3147 mV, ~175 mV/bar (nominal).
-//   ZERO_MV MEASURED 2026-10-20 on the machine: pressure_mv = 404 with the
-//   pump off and the machine Off (part's own offset, within its tolerance).
-//   MV_PER_BAR is still NOMINAL - set it from a reference (safety-valve
-//   plateau or a gauge) before turning the closed loop on.
+//   ZERO_MV from a logged blind-basket test 2026-10-20 (old firmware):
+//   rest = 195 mV (sd 14) once the pressure was vented - a first single read
+//   of 404 was pressure trapped above the puck (no 3-way valve). The old
+//   firmware also had INPUT_PULLDOWN (~45k) across the 10k, so x 1.067 for
+//   this plain-input build -> 208. Re-check pressure_mv at rest after flashing.
+//   That is ~0.30 V out of the sensor at 0 bar, below the 0.5 V datasheet
+//   zero, so its supply may be under 5 V - unverified (no multimeter).
+//   MV_PER_BAR is still NOMINAL - set it from a reference (a portafilter
+//   gauge) before turning the closed loop on. Blind-basket peaks reached
+//   1561-1588 mV after ~4.5 s at 100 % (still rising), i.e. ~7.9 bar nominal;
+//   above the 1353 mV a swapped 10k/4.3k divider could ever give, so the
+//   divider is the right way round.
 //   Note: the S3 ADC tops out near ~3100 mV, so readings clip around 15 bar;
 //   the 12 bar safety ceiling (~2500 mV) is well inside the range.
-#define PRESSURE_SENSOR_ZERO_MV 404.0f
+#define PRESSURE_SENSOR_ZERO_MV 208.0f
 #define PRESSURE_SENSOR_MV_PER_BAR 175.0f
 #define PRESSURE_SENSOR_MAX_BAR 16.0f
 // Closed loop: in pressure phases the pressure PID adds a +/-
