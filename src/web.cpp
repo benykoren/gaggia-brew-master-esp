@@ -30,6 +30,8 @@ extern int tempHistoryHead;
 extern int tempHistoryCount;
 
 extern float currentPressure;
+extern float lastShotAvgBar, lastShotTargetBar, lastShotPeakBar;
+extern long long lastShotTs;
 extern bool pressureFault;
 extern double pressureKp, pressureKi, pressureKd;
 extern float pressureHistory[];
@@ -400,6 +402,11 @@ const char *index_html = R"rawliteral(
     }
     .taste-btn.active { color: var(--text); font-weight: 600; background: rgba(227,154,98,.12); border-color: rgba(227,154,98,.55); }
     .taste-tip { min-height: 20px; margin: 10px 0 0; font-size: 13px; color: var(--text-2); }
+    .dialin { margin: 12px 0 2px; padding: 10px 12px; border-radius: 12px; background: rgba(255,255,255,.035); border: 1px solid rgba(255,255,255,.07); font-size: 14px; line-height: 1.45; color: var(--text); }
+    .dialin b { font-weight: 600; }
+    .dialin.act { border-color: rgba(227,154,98,.45); background: rgba(227,154,98,.08); }
+    .dialin.ok { border-color: rgba(95,211,154,.4); background: rgba(95,211,154,.07); }
+    .dialin small { display: block; margin-top: 3px; font-size: 12px; color: var(--text-2); }
     .link-btn { border: 0; background: none; padding: 8px 0; color: var(--text-2); font-size: 13px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 
     /* Focus mode while a shot runs: nothing to wander off to. */
@@ -715,6 +722,7 @@ const char *index_html = R"rawliteral(
           <section class="card last-shot-card" id="last_shot_card" aria-label="Last shot" hidden>
             <div class="section-head"><span class="label" id="last_shot_title">Last shot</span></div>
             <div class="last-shot-sum" id="last_shot_sum"></div>
+            <div class="dialin" id="dialin_tip" role="status" hidden></div>
             <div class="taste-row" role="group" aria-label="How did it taste?">
               <button type="button" class="taste-btn" data-taste="Sour" onclick="quickTaste('Sour')">Sour</button>
               <button type="button" class="taste-btn" data-taste="Balanced" onclick="quickTaste('Balanced')">Balanced</button>
@@ -729,6 +737,7 @@ const char *index_html = R"rawliteral(
                 <div class="field-row">
                   <div class="field"><label for="input_shot_note_bean">Bean</label><input type="text" id="input_shot_note_bean" maxlength="24" placeholder="e.g. Ethiopia Yirgacheffe"></div>
                   <div class="field"><label for="input_shot_note_dose">Dose in (g)</label><input type="number" step="0.1" id="input_shot_note_dose" value="18"></div>
+                  <div class="field"><label for="input_shot_note_yield">Yield out (g)</label><input type="number" step="0.1" min="0" id="input_shot_note_yield" placeholder="cup weight"></div>
                 </div>
                 <div class="field-row">
                   <div class="field"><label for="input_shot_note_grind">Grind setting</label><input type="text" id="input_shot_note_grind" maxlength="16" placeholder="e.g. 3.2"></div>
@@ -1224,7 +1233,7 @@ function fitCanvas(canvas) {
 // One combined live chart (2026-10-15 redesign): boiler temp (copper, own
 // auto-scaled axis incl. the target) and pressure (cyan, 0-10 bar) on the
 // same 2-min window, each target dashed, phase changes as cyan ticks.
-function drawLiveChart(temps, tempTarget, est, sensor, pTarget, closedLoop) {
+function drawLiveChart(temps, tempTarget, est, sensor, pTarget, sensorLive) {
   var canvas = document.getElementById("live_chart");
   if (!canvas) return;
   var fit = fitCanvas(canvas);
@@ -1291,7 +1300,12 @@ function drawLiveChart(temps, tempTarget, est, sensor, pTarget, closedLoop) {
     ctx.fillText(text, tx + tw / 2, ty2 + th / 2 + 0.5);
   }
 
-  var main = closedLoop ? sensor : est;
+  // Main (cyan) line = the real reading whenever a usable sensor is fitted
+  // (2026-10-21: independent of the closed loop being on); the other series
+  // is drawn thin underneath for reference (model estimate, or the raw
+  // sensor while it can't read brew pressure).
+  var main = sensorLive ? sensor : est;
+  var other = sensorLive ? est : sensor;
   // 0-12 bar (same scale as the dial's pressure ring) so the 3 gridline
   // intervals land on whole numbers: 0 / 4 / 8 / 12.
   var PMAX = 12;
@@ -1314,8 +1328,8 @@ function drawLiveChart(temps, tempTarget, est, sensor, pTarget, closedLoop) {
     ctx.strokeStyle = "rgba(255,255,255,.45)"; ctx.lineWidth = 1.2; ctx.stroke();
     ctx.setLineDash([]);
   }
-  if (!closedLoop && sensor && sensor.length > 1) {
-    path(sensor, py, false);
+  if (other && other.length > 1) {
+    path(other, py, false);
     ctx.strokeStyle = "rgba(255,255,255,.16)"; ctx.lineWidth = 1; ctx.stroke();
   }
   if (main && main.length > 1) {
@@ -1354,7 +1368,7 @@ function drawLiveChart(temps, tempTarget, est, sensor, pTarget, closedLoop) {
   }
   if (main && main.length > 1) {
     var pLast = main[main.length - 1];
-    if (closedLoop || pLast > 0.05) valueTag(pLast.toFixed(1) + " bar", py(pLast), "#46e3f0", "rgba(70,227,240,.5)");
+    if (sensorLive || pLast > 0.05) valueTag(pLast.toFixed(1) + " bar", py(pLast), "#46e3f0", "rgba(70,227,240,.5)");
   }
 }
 
@@ -1424,6 +1438,53 @@ var TASTE_TIPS = {
 };
 var TASTE_RATING = { Sour: 2, Balanced: 5, Bitter: 2 };
 
+// Dial-in advice (2026-10-21) for the last shot, from two signals:
+//  - pressure: the sensor's average over the pressure phases vs that same
+//    moment's profile target (from /status last_*). Too low = the puck is
+//    too loose (grind finer), too high = too tight (grind coarser).
+//  - ratio: yield / dose, once the cup weight is entered. Shots stop on
+//    time, so a long ratio means the water ran through too fast (finer)
+//    and a short one too slow (coarser).
+// Target ratios per profile style; anything else aims for 1:2.
+var lastShotPress = null;
+var RATIO_TARGET = { "Turbo": 2.75, "Blooming": 2.5, "Lever": 2.0 };
+var RATIO_BAND = 0.35;      // +- around the target counts as on target
+var PRESS_BAND_BAR = 1.5;   // +- around the profile target counts as on target
+
+function renderDialIn(s, lp) {
+  var el = document.getElementById("dialin_tip");
+  if (!el) return;
+  var votes = [], reasons = [];
+  if (lp && lp.target > 0) {
+    var d = lp.avg - lp.target;
+    if (d <= -PRESS_BAND_BAR) { votes.push(-1); reasons.push("Pressure averaged <b>" + lp.avg.toFixed(1) + " bar</b> against a " + lp.target.toFixed(1) + " bar target: the puck is too loose."); }
+    else if (d >= PRESS_BAND_BAR || lp.peak >= 11.5) { votes.push(1); reasons.push("Pressure averaged <b>" + lp.avg.toFixed(1) + " bar</b> (peak " + lp.peak.toFixed(1) + ") against " + lp.target.toFixed(1) + ": the puck is too tight."); }
+    else { votes.push(0); reasons.push("Pressure on target: <b>" + lp.avg.toFixed(1) + "</b> / " + lp.target.toFixed(1) + " bar."); }
+  }
+  if (s.weight > 0 && s.dose_in > 0) {
+    var r = s.weight / s.dose_in;
+    var want = RATIO_TARGET[activeProfileName] || 2.0;
+    var secs = (s.duration_ms / 1000).toFixed(0);
+    if (r > want + RATIO_BAND) { votes.push(-1); reasons.push("Ratio <b>1:" + r.toFixed(1) + "</b> in " + secs + " s, aiming for 1:" + want.toFixed(1) + ": water ran through too fast."); }
+    else if (r < want - RATIO_BAND) { votes.push(1); reasons.push("Ratio <b>1:" + r.toFixed(1) + "</b> in " + secs + " s, aiming for 1:" + want.toFixed(1) + ": water ran through too slow."); }
+    else { votes.push(0); reasons.push("Ratio on target: <b>1:" + r.toFixed(1) + "</b> in " + secs + " s."); }
+  }
+  if (!votes.length) {
+    el.hidden = false; el.className = "dialin";
+    el.innerHTML = "Weigh the cup and add <b>Yield out</b> under Bean, dose &amp; grind for a grind tip.";
+    return;
+  }
+  var finer = votes.indexOf(-1) >= 0, coarser = votes.indexOf(1) >= 0;
+  var head;
+  if (finer && coarser) head = "<b>Mixed signals</b> - low pressure but slow flow can mean channeling. Check distribution and tamp before changing the grind.";
+  else if (finer) head = "<b>Grind finer</b> next shot (or dose a little more).";
+  else if (coarser) head = "<b>Grind coarser</b> next shot (or dose a little less).";
+  else head = "<b>Dialled in</b> - keep this grind and dose.";
+  el.hidden = false;
+  el.className = "dialin " + ((finer || coarser) ? "act" : "ok");
+  el.innerHTML = head + "<small>" + reasons.join(" ") + "</small>";
+}
+
 function shotAgo(ts) {
   if (!ts || ts < 1600000000) return "";
   var mins = Math.round((Date.now() / 1000 - ts) / 60);
@@ -1456,7 +1517,11 @@ function renderLastShot() {
   part((s.duration_ms / 1000).toFixed(1), "s");
   part(s.peak_temp.toFixed(1), "\u00b0 peak");
   if (s.weight > 0) part(s.weight.toFixed(1), "g");
+  if (s.weight > 0 && s.dose_in > 0) part("1:" + (s.weight / s.dose_in).toFixed(1), "ratio");
+  var lp = (lastShotPress && lastShotPress.ts === s.ts && lastShotPress.avg >= 0) ? lastShotPress : null;
+  if (lp) part(lp.avg.toFixed(1), "bar avg");
   if (s.bean) part(s.bean, "");
+  renderDialIn(s, lp);
   var taste = null;
   for (var k in TASTE_TIPS) { if (s.notes === k) taste = k; }
   var btns = document.querySelectorAll(".taste-btn");
@@ -1485,6 +1550,7 @@ function fillShotNotes(idx) {
   document.getElementById("input_shot_note_index").value = idx;
   document.getElementById("input_shot_note_bean").value = s.bean || "";
   document.getElementById("input_shot_note_dose").value = s.dose_in || 18;
+  document.getElementById("input_shot_note_yield").value = s.weight > 0 ? s.weight : "";
   document.getElementById("input_shot_note_grind").value = s.grind || "";
   document.getElementById("input_shot_note_rating").value = s.rating || 0;
   document.getElementById("input_shot_note_text").value = s.notes || "";
@@ -1503,6 +1569,8 @@ function shotNotesQuery() {
   q += "&shot_note_grind=" + encodeURIComponent(document.getElementById("input_shot_note_grind").value);
   q += "&shot_note_rating=" + document.getElementById("input_shot_note_rating").value;
   q += "&shot_note_text=" + encodeURIComponent(document.getElementById("input_shot_note_text").value);
+  var y = document.getElementById("input_shot_note_yield").value;
+  if (y !== "") q += "&shot_note_yield=" + y;
   return q;
 }
 
@@ -1722,7 +1790,23 @@ function applyStatus(json) {
 
   trackPhaseMarkers(json.phase_index, json.shot_in_progress);
   var closedLoop = json.press_available === true && !json.pressure_fault;
-  drawLiveChart(json.history, hasTarget ? target : null, json.est_history, json.pressure_history, json.target_history, closedLoop);
+  // sensorLive (2026-10-21): a sensor that reads brew pressure is fitted and
+  // healthy - show ITS reading on the dial, the live readout and the chart
+  // even while the closed loop is off (it only decides whether the pump
+  // follows the reading, not whether we show it).
+  var sensorLive = json.press_sensor === true && !json.pressure_fault;
+  // Last shot's pressure stats for the dial-in tip; re-render the card when
+  // a new shot lands (its log row arrives through fetchShotHistory()).
+  if (typeof json.last_shot_ts === "number") {
+    var lpNew = { ts: json.last_shot_ts, avg: json.last_avg_bar, target: json.last_target_bar, peak: json.last_peak_bar };
+    var changed = !lastShotPress || lastShotPress.ts !== lpNew.ts || lastShotPress.avg !== lpNew.avg;
+    lastShotPress = lpNew;
+    if (changed && lpNew.ts > 0) {
+      if (!shotsCache.length || shotsCache[shotsCache.length - 1].ts !== lpNew.ts) fetchShotHistory();
+      else renderLastShot();
+    }
+  }
+  drawLiveChart(json.history, hasTarget ? target : null, json.est_history, json.pressure_history, json.target_history, sensorLive);
   var pLabel = document.getElementById("pressure_label");
   if (pLabel) {
     pLabel.textContent = json.pressure_fault ? "sensor fault"
@@ -1741,8 +1825,8 @@ function applyStatus(json) {
   updateDial(json.fault ? 0 : temp, hasTarget ? target : null, scaleHi, tempState, mode);
 
   var PRESSURE_GAUGE_MAX_BAR = 12;
-  var showPressure = closedLoop || json.shot_in_progress;
-  var pressureVal = closedLoop ? json.pressure : (json.shot_in_progress ? json.pressure_est : 0);
+  var showPressure = sensorLive || json.shot_in_progress;
+  var pressureVal = sensorLive ? json.pressure : (json.shot_in_progress ? json.pressure_est : 0);
   var pressureGoal = (json.shot_in_progress && json.phase_type === "pressure") ? json.phase_target : null;
   var pRing = document.getElementById("pressure_ring_fill");
   if (pRing) {
@@ -1773,7 +1857,7 @@ function applyStatus(json) {
   setText("pressure_gauge_val", showPressure ? pressureVal.toFixed(1) : "0.0");
   var pCap = document.getElementById("pressure_target_caption");
   if (pCap) {
-    pCap.textContent = pressureGoal !== null ? (closedLoop ? "" : "est. \u00b7 ") + "target " + pressureGoal.toFixed(1)
+    pCap.textContent = pressureGoal !== null ? (sensorLive ? "" : "est. \u00b7 ") + "target " + pressureGoal.toFixed(1)
       : shotPeakBar > 0.5 ? "Last peak " + shotPeakBar.toFixed(1)
       : "pump idle";
   }
@@ -2536,6 +2620,8 @@ static void handleStatus(AsyncWebServerRequest *request) {
   }
   bool snapPressureFault = pressureFault;
   float snapPressure = currentPressure;
+  float snapLastAvgBar = lastShotAvgBar, snapLastTargetBar = lastShotTargetBar, snapLastPeakBar = lastShotPeakBar;
+  long long snapLastShotTs = lastShotTs;
   double snapPressKp = pressureKp, snapPressKi = pressureKi, snapPressKd = pressureKd;
   // Pump telemetry - lets a bench operator (Milestones A-C) distinguish
   // "pump idle" / "pump at 100% duty" / "PID commanding some percent" /
@@ -2644,6 +2730,9 @@ static void handleStatus(AsyncWebServerRequest *request) {
   json += "\"";
   json += ",\"pressure_max_bar\":" + String(PRESSURE_SENSOR_MAX_BAR, 1);
   json += ",\"press_available\":" + String(PRESSURE_CLOSED_LOOP_AVAILABLE ? "true" : "false");
+  // A sensor that reads brew pressure is fitted (shown in the UI even while
+  // the closed loop is off) - the 0-5 bar part clipped below brew pressure.
+  json += ",\"press_sensor\":" + String(PRESSURE_SENSOR_IS_16BAR ? "true" : "false");
 
   json += ",\"autotune_state\":\"";
   switch (snapAutotuneState) {
@@ -2693,6 +2782,11 @@ static void handleStatus(AsyncWebServerRequest *request) {
   }
   json += "]";
   json += ",\"pressure_mv\":" + String(snapPressureMv);
+  // Last shot's pressure vs its profile targets (dial-in advice, -1 = unknown).
+  json += ",\"last_shot_ts\":" + String((double)snapLastShotTs, 0);
+  json += ",\"last_avg_bar\":" + String(snapLastAvgBar, 2);
+  json += ",\"last_target_bar\":" + String(snapLastTargetBar, 2);
+  json += ",\"last_peak_bar\":" + String(snapLastPeakBar, 2);
   json += ",\"pressure_ceiling_tripped\":" + String(snapPressureCeilingTripped ? "true" : "false");
   json += ",\"press_kp\":" + String(snapPressKp, 4);
   json += ",\"press_ki\":" + String(snapPressKi, 4);
@@ -2977,7 +3071,10 @@ static void handleUpdate(AsyncWebServerRequest *request) {
     String grind = hasArg("shot_note_grind") ? arg("shot_note_grind") : "";
     int rating = hasArg("shot_note_rating") ? arg("shot_note_rating").toInt() : 0;
     String notes = hasArg("shot_note_text") ? arg("shot_note_text") : "";
-    shotLogUpdateNotes(idx, bean, doseIn, grind, rating, notes);
+    // Cup weight after the shot (no scale) - only sent by the notes form;
+    // the one-tap taste buttons leave it as stored.
+    float yieldG = hasArg("shot_note_yield") ? arg("shot_note_yield").toFloat() : -1.0f;
+    shotLogUpdateNotes(idx, bean, doseIn, grind, rating, notes, yieldG);
   }
 
   // Shot profiles (profiles.cpp) - addressed by NAME (design spec §7).

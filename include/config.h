@@ -171,27 +171,47 @@
 
 // Which pressure sensor is fitted - flip to 1 when the 0-16 bar part is
 // installed (HARDWARE_ROADMAP.md item 7, docs/install-guide-2026-10-15-*).
-//   0 = 0-0.5 MPa "G41 0.5Mpa IN5V" on 3V3, straight into GPIO1 (installed now)
+//   0 = 0-0.5 MPa "G41 0.5Mpa IN5V" on 3V3, straight into GPIO1 (removed)
 //   1 = 0-1.6 MPa "G41 1.6Mpa IN5V" on 5V (HLK-PM01), 4.3k/10k divider into GPIO1
-// Kept as one switch so the water-sensor work could ship while the new
-// pressure sensor is still in the post - flashing the 16-bar settings with
-// the old part fitted reads below zero and faults.
-#define PRESSURE_SENSOR_IS_16BAR 0
+//       (installed 2026-10-20, machine now powered from the HLK)
+// Flashing the 16-bar settings with the old part fitted reads below zero
+// and faults, so this only goes back to 0 if the old sensor goes back in.
+#define PRESSURE_SENSOR_IS_16BAR 1
 
 // Pressure transducer calibration - linear mapping from ADC millivolts to
 // bar: bar = (mv - PRESSURE_SENSOR_ZERO_MV) / PRESSURE_SENSOR_MV_PER_BAR.
 #if PRESSURE_SENSOR_IS_16BAR
 // 0-16 bar on 5V, 0.5-4.5 V out, divider ratio 10 / 14.3 = 0.699:
-//   0 bar ~350 mV, 16 bar ~3147 mV, ~175 mV/bar. NOMINAL (datasheet +
-//   resistor values) until calibrated: ZERO_MV from pressure_mv with the
-//   pump off, MV_PER_BAR from a reference (safety-valve plateau or a gauge).
-#define PRESSURE_SENSOR_ZERO_MV 350.0f
+//   0 bar ~350 mV, 16 bar ~3147 mV, ~175 mV/bar (nominal).
+//   ZERO_MV from a logged blind-basket test 2026-10-20 (old firmware):
+//   rest = 195 mV (sd 14) once the pressure was vented - a first single read
+//   of 404 was pressure trapped above the puck (no 3-way valve). The old
+//   firmware also had INPUT_PULLDOWN (~45k) across the 10k, so x 1.067 for
+//   this plain-input build -> 208. Re-check pressure_mv at rest after flashing.
+//   That is ~0.30 V out of the sensor at 0 bar, below the 0.5 V datasheet
+//   zero, so its supply may be under 5 V - unverified (no multimeter).
+//   MV_PER_BAR is still NOMINAL - set it from a reference (a portafilter
+//   gauge) before turning the closed loop on. Blind-basket peaks reached
+//   1561-1588 mV after ~4.5 s at 100 % (still rising), i.e. ~7.9 bar nominal;
+//   above the 1353 mV a swapped 10k/4.3k divider could ever give, so the
+//   divider is the right way round.
+//   Note: the S3 ADC tops out near ~3100 mV, so readings clip around 15 bar;
+//   the 12 bar safety ceiling (~2500 mV) is well inside the range.
+//   WARM re-check 2026-10-21 (user's call: zero as the machine works): Brew
+//   at 96 C, pump off, no trapped pressure, new firmware (16-read average,
+//   no pull-down): median 218 mV over 20 reads (213-246). A reading of
+//   ~1200 mV earlier that morning with the machine Off was pressure trapped
+//   in the line, gone once it was vented.
+#define PRESSURE_SENSOR_ZERO_MV 218.0f
 #define PRESSURE_SENSOR_MV_PER_BAR 175.0f
 #define PRESSURE_SENSOR_MAX_BAR 16.0f
 // Closed loop: in pressure phases the pressure PID adds a +/-
 // PUMP_PRESSURE_PID_TRIM_PCT trim on the pump-model duty; falls back to the
 // pure model whenever the sensor is faulted.
-#define PRESSURE_CLOSED_LOOP_AVAILABLE true
+// OFF for the first flash (2026-10-20): the sensor is read, shown and used
+// by the 12 bar safety ceiling, but the pump still runs the model alone
+// until MV_PER_BAR is checked against a real pressure. Flip to true then.
+#define PRESSURE_CLOSED_LOOP_AVAILABLE false
 #else
 // 0-5 bar on 3V3 (2026-10-01): zero measured 155-160 mV; the output clips at
 // ~1620-1640 mV (supply headroom), MV_PER_BAR is an estimate assuming that

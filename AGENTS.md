@@ -921,6 +921,77 @@ everything again.
 
 ## 10. Change Log
 
+### 2026-10-21 — Claude Code (Opus 5.5) — Dial-in advice on the last-shot card
+- User asked for an end-of-shot recommendation from the ratio and the
+  pressure (e.g. only 6 bar -> change the grind).
+- `main.cpp`: during a non-utility shot, with the 16-bar sensor healthy,
+  averages the reading and the planner's (ramped) target over the pressure-
+  phase samples, plus the shot peak. On stop: `lastShotAvgBar`,
+  `lastShotTargetBar`, `lastShotPeakBar`, `lastShotTs` (= the log row's ts).
+  RAM only. `/status`: `last_shot_ts`, `last_avg_bar`, `last_target_bar`,
+  `last_peak_bar` (-1 = unknown, < 20 samples).
+- Shot notes: new "Yield out (g)" field, stored in the log's existing
+  `weight` column (`shotLogUpdateNotes(..., yieldGrams)`, < 0 keeps it; the
+  taste buttons don't send it). Ratio = weight / dose_in.
+- Web UI: last-shot card shows ratio + bar avg and a `.dialin` box. Pressure
+  avg <= target - 1.5 -> finer; >= target + 1.5 or peak >= 11.5 -> coarser.
+  Ratio vs per-profile target (Turbo 1:2.75, Blooming 1:2.5, else 1:2.0,
+  +-0.35): long -> finer, short -> coarser (shots stop on time). Opposite
+  votes -> "mixed signals, check distribution/tamp". No data -> prompt to
+  enter the yield. Pressure verdicts use the nominal 175 mV/bar slope.
+- Warm zero (user asked for it from the hot machine): Brew, 96 C, pump off,
+  median 218 mV of 20 reads -> `PRESSURE_SENSOR_ZERO_MV` 218 (was 208,
+  +0.06 bar). An earlier 1180-1235 mV with the machine Off was trapped
+  pressure, not the zero.
+- **Flashed via OTA 2026-10-21 ~10:55 local** (CI `1c4a6f5`, fw_build "Oct 21
+  2026 07:52:45" UTC): came back Off, no fault, `press_sensor` true, 0.00 bar
+  at rest, new `last_*` fields present (-1 until the first shot).
+
+### 2026-10-21 — Claude Code (Opus 5.5) — Dial shows the real pressure reading while the closed loop is off
+- `/status` gains `press_sensor` (= `PRESSURE_SENSOR_IS_16BAR`). The Web UI's
+  dial, live readout, peak marker and the chart's main cyan line now use the
+  sensor reading whenever `press_sensor` and no `pressure_fault` - before,
+  they followed `press_available` (the closed loop), so with the loop off the
+  dial showed the model estimate during shots. The other series (model) is
+  drawn thin underneath. The "est." caption only shows without a sensor.
+- Checked the 5 built-in profiles against the 16-bar switch: all targets
+  <= 9 bar (cap 11, ceiling 12); `press_gte` fill stops stay inactive until
+  the closed loop is on (by design); only behaviour change is that the 12 bar
+  ceiling now acts on a real reading.
+- **Flashed via OTA 2026-10-21 ~08:00 local** (CI `075fbac`, includes the
+  16-sample averaging; fw_build "Oct 21 2026 04:57:05" UTC). Machine was in
+  Brew (hot, no shot) and came back Off after the reboot. `press_sensor`
+  true, no fault. Averaged `pressure_mv` steady at 229-236 (was +-20), but
+  0.17-0.31 bar at rest with the boiler at 96 C - either real pressure (group
+  closed / hot water) or the sensor's temperature drift; to be checked by
+  venting.
+
+### 2026-10-20 — Claude Code (Opus 5.5) — 0-16 bar sensor and HLK-PM01 installed; firmware switched to the 16-bar sensor
+- User installed the "G41 1.6Mpa IN5V" sensor, the 4.3k/10k divider and the
+  HLK-PM01 (machine no longer on USB). HLK live tapped at the SSR terminal
+  fed by T2 (user's choice, no new splice) - so the ESP reboots if T2 opens
+  (~127 C). No multimeter was available for the install checks.
+- Before flashing, `/status` with the old firmware read `pressure_mv` 404
+  with the pump off: the divider works (a wrong divider would read 3300+).
+- Logged a blind-basket test (3 runs, ~4.5 s at 100 %): rest 195 mV once
+  vented (the 404 was trapped pressure - no 3-way valve), peaks 1561-1588 mV
+  still rising (~7.9 bar nominal). Sensor responds; divider the right way
+  round (a swapped one tops out at 1353 mV). Zero is ~0.30 V at the sensor,
+  under the 0.5 V spec - supply possibly < 5 V, unverified (no multimeter).
+- `PRESSURE_SENSOR_IS_16BAR` 1, `PRESSURE_SENSOR_ZERO_MV` 208 (195 x 1.067:
+  the new build drops the old INPUT_PULLDOWN across the 10k),
+  `MV_PER_BAR` 175 still nominal. **`PRESSURE_CLOSED_LOOP_AVAILABLE` set to
+  false for now**: real pressure is read, shown and enforced by the 12 bar
+  ceiling, pump stays on the model until the slope is checked.
+- Flashed via OTA ~19:30 local (CI `8c666a8`, fw_build "Oct 20 2026 16:29:50"
+  UTC): `pressure_max_bar` 16, no fault, 0.01-0.04 bar at rest.
+- Blind-basket runs leak at the group gasket after ~5 s, so the ~1588 mV
+  peak is where the gasket gives, not the pump plateau - no slope reference
+  from them. Sensor red confirmed on 5V by the user, so the low zero is the
+  part's own offset; MV_PER_BAR stays at the nominal 175 (best estimate).
+  Group gasket (catalog part 38, 11004543) likely worn - user to replace.
+- Pressure reads now average 16 ADC samples (raw reads jumped +-20 mV).
+
 ### 2026-10-16 — Claude Code (Opus 5.5) — Dial shows "at working temperature"; live chart shows numbers (redesign UI)
 - **Dial:** when the boiler is within ±1 °C of the target (existing margin),
   `.dial.at-temp` adds a green halo along the arc up to the target marker,
