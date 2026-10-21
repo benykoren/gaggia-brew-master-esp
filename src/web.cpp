@@ -1224,7 +1224,7 @@ function fitCanvas(canvas) {
 // One combined live chart (2026-10-15 redesign): boiler temp (copper, own
 // auto-scaled axis incl. the target) and pressure (cyan, 0-10 bar) on the
 // same 2-min window, each target dashed, phase changes as cyan ticks.
-function drawLiveChart(temps, tempTarget, est, sensor, pTarget, closedLoop) {
+function drawLiveChart(temps, tempTarget, est, sensor, pTarget, sensorLive) {
   var canvas = document.getElementById("live_chart");
   if (!canvas) return;
   var fit = fitCanvas(canvas);
@@ -1291,7 +1291,12 @@ function drawLiveChart(temps, tempTarget, est, sensor, pTarget, closedLoop) {
     ctx.fillText(text, tx + tw / 2, ty2 + th / 2 + 0.5);
   }
 
-  var main = closedLoop ? sensor : est;
+  // Main (cyan) line = the real reading whenever a usable sensor is fitted
+  // (2026-10-21: independent of the closed loop being on); the other series
+  // is drawn thin underneath for reference (model estimate, or the raw
+  // sensor while it can't read brew pressure).
+  var main = sensorLive ? sensor : est;
+  var other = sensorLive ? est : sensor;
   // 0-12 bar (same scale as the dial's pressure ring) so the 3 gridline
   // intervals land on whole numbers: 0 / 4 / 8 / 12.
   var PMAX = 12;
@@ -1314,8 +1319,8 @@ function drawLiveChart(temps, tempTarget, est, sensor, pTarget, closedLoop) {
     ctx.strokeStyle = "rgba(255,255,255,.45)"; ctx.lineWidth = 1.2; ctx.stroke();
     ctx.setLineDash([]);
   }
-  if (!closedLoop && sensor && sensor.length > 1) {
-    path(sensor, py, false);
+  if (other && other.length > 1) {
+    path(other, py, false);
     ctx.strokeStyle = "rgba(255,255,255,.16)"; ctx.lineWidth = 1; ctx.stroke();
   }
   if (main && main.length > 1) {
@@ -1354,7 +1359,7 @@ function drawLiveChart(temps, tempTarget, est, sensor, pTarget, closedLoop) {
   }
   if (main && main.length > 1) {
     var pLast = main[main.length - 1];
-    if (closedLoop || pLast > 0.05) valueTag(pLast.toFixed(1) + " bar", py(pLast), "#46e3f0", "rgba(70,227,240,.5)");
+    if (sensorLive || pLast > 0.05) valueTag(pLast.toFixed(1) + " bar", py(pLast), "#46e3f0", "rgba(70,227,240,.5)");
   }
 }
 
@@ -1722,7 +1727,12 @@ function applyStatus(json) {
 
   trackPhaseMarkers(json.phase_index, json.shot_in_progress);
   var closedLoop = json.press_available === true && !json.pressure_fault;
-  drawLiveChart(json.history, hasTarget ? target : null, json.est_history, json.pressure_history, json.target_history, closedLoop);
+  // sensorLive (2026-10-21): a sensor that reads brew pressure is fitted and
+  // healthy - show ITS reading on the dial, the live readout and the chart
+  // even while the closed loop is off (it only decides whether the pump
+  // follows the reading, not whether we show it).
+  var sensorLive = json.press_sensor === true && !json.pressure_fault;
+  drawLiveChart(json.history, hasTarget ? target : null, json.est_history, json.pressure_history, json.target_history, sensorLive);
   var pLabel = document.getElementById("pressure_label");
   if (pLabel) {
     pLabel.textContent = json.pressure_fault ? "sensor fault"
@@ -1741,8 +1751,8 @@ function applyStatus(json) {
   updateDial(json.fault ? 0 : temp, hasTarget ? target : null, scaleHi, tempState, mode);
 
   var PRESSURE_GAUGE_MAX_BAR = 12;
-  var showPressure = closedLoop || json.shot_in_progress;
-  var pressureVal = closedLoop ? json.pressure : (json.shot_in_progress ? json.pressure_est : 0);
+  var showPressure = sensorLive || json.shot_in_progress;
+  var pressureVal = sensorLive ? json.pressure : (json.shot_in_progress ? json.pressure_est : 0);
   var pressureGoal = (json.shot_in_progress && json.phase_type === "pressure") ? json.phase_target : null;
   var pRing = document.getElementById("pressure_ring_fill");
   if (pRing) {
@@ -1773,7 +1783,7 @@ function applyStatus(json) {
   setText("pressure_gauge_val", showPressure ? pressureVal.toFixed(1) : "0.0");
   var pCap = document.getElementById("pressure_target_caption");
   if (pCap) {
-    pCap.textContent = pressureGoal !== null ? (closedLoop ? "" : "est. \u00b7 ") + "target " + pressureGoal.toFixed(1)
+    pCap.textContent = pressureGoal !== null ? (sensorLive ? "" : "est. \u00b7 ") + "target " + pressureGoal.toFixed(1)
       : shotPeakBar > 0.5 ? "Last peak " + shotPeakBar.toFixed(1)
       : "pump idle";
   }
@@ -2644,6 +2654,9 @@ static void handleStatus(AsyncWebServerRequest *request) {
   json += "\"";
   json += ",\"pressure_max_bar\":" + String(PRESSURE_SENSOR_MAX_BAR, 1);
   json += ",\"press_available\":" + String(PRESSURE_CLOSED_LOOP_AVAILABLE ? "true" : "false");
+  // A sensor that reads brew pressure is fitted (shown in the UI even while
+  // the closed loop is off) - the 0-5 bar part clipped below brew pressure.
+  json += ",\"press_sensor\":" + String(PRESSURE_SENSOR_IS_16BAR ? "true" : "false");
 
   json += ",\"autotune_state\":\"";
   switch (snapAutotuneState) {

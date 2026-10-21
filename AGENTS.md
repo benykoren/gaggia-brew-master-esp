@@ -921,6 +921,18 @@ everything again.
 
 ## 10. Change Log
 
+### 2026-10-21 — Claude Code (Opus 5.5) — Dial shows the real pressure reading while the closed loop is off
+- `/status` gains `press_sensor` (= `PRESSURE_SENSOR_IS_16BAR`). The Web UI's
+  dial, live readout, peak marker and the chart's main cyan line now use the
+  sensor reading whenever `press_sensor` and no `pressure_fault` - before,
+  they followed `press_available` (the closed loop), so with the loop off the
+  dial showed the model estimate during shots. The other series (model) is
+  drawn thin underneath. The "est." caption only shows without a sensor.
+- Checked the 5 built-in profiles against the 16-bar switch: all targets
+  <= 9 bar (cap 11, ceiling 12); `press_gte` fill stops stay inactive until
+  the closed loop is on (by design); only behaviour change is that the 12 bar
+  ceiling now acts on a real reading.
+
 ### 2026-10-20 — Claude Code (Opus 5.5) — 0-16 bar sensor and HLK-PM01 installed; firmware switched to the 16-bar sensor
 - User installed the "G41 1.6Mpa IN5V" sensor, the 4.3k/10k divider and the
   HLK-PM01 (machine no longer on USB). HLK live tapped at the SSR terminal
