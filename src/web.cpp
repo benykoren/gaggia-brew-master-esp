@@ -61,7 +61,9 @@ extern void stopAutotune();
 extern bool shotInProgress;
 extern unsigned long shotStartMillis;
 extern void startShot();
-extern void stopShot();
+extern void stopShot(bool byUser);
+extern bool lastShotStoppedByUser;
+extern String lastShotProfile;
 extern bool waterSensorEnabled, waterActiveLow, waterInterlock;
 extern void applyWaterSettings();
 extern const char *shotBlockedReason;
@@ -396,6 +398,10 @@ const char *index_html = R"rawliteral(
     .last-shot-sum { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; color: var(--text-2); font-size: 14px; }
     .last-shot-sum b { color: var(--text); font-weight: 400; font-size: 22px; letter-spacing: -.02em; }
     .taste-row { display: flex; gap: var(--sp-2); margin-top: var(--sp-3); }
+    .yield-row { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+    .yield-row label { font-size: 13px; color: var(--text-2); white-space: nowrap; }
+    .yield-row input { flex: 1; min-width: 0; height: 44px; }
+    .yield-row button { height: 44px; padding: 0 18px; border-radius: 12px; border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.06); color: var(--text); font: inherit; font-size: 14px; cursor: pointer; }
     .taste-btn {
       flex: 1 1 0; height: 48px; border-radius: var(--radius-sm); cursor: pointer;
       background: var(--surface); border: 1px solid var(--border); color: var(--text-2); font-size: 14px;
@@ -722,6 +728,11 @@ const char *index_html = R"rawliteral(
           <section class="card last-shot-card" id="last_shot_card" aria-label="Last shot" hidden>
             <div class="section-head"><span class="label" id="last_shot_title">Last shot</span></div>
             <div class="last-shot-sum" id="last_shot_sum"></div>
+            <form class="yield-row" onsubmit="saveYield(event)">
+              <label for="input_yield_quick">Cup weight (g)</label>
+              <input type="number" inputmode="decimal" step="0.1" min="1" id="input_yield_quick" placeholder="e.g. 36">
+              <button type="submit">Save</button>
+            </form>
             <div class="dialin" id="dialin_tip" role="status" hidden></div>
             <div class="taste-row" role="group" aria-label="How did it taste?">
               <button type="button" class="taste-btn" data-taste="Sour" onclick="quickTaste('Sour')">Sour</button>
@@ -729,7 +740,6 @@ const char *index_html = R"rawliteral(
               <button type="button" class="taste-btn" data-taste="Bitter" onclick="quickTaste('Bitter')">Bitter</button>
             </div>
             <p class="taste-tip" id="taste_tip">How did it taste?</p>
-            <button type="button" class="link-btn" onclick="toggleShotDetails()">Bean, dose &amp; grind</button>
             <div id="shot_notes_card" hidden>
               <span id="shot_notes_title" hidden>Shot notes</span>
               <form onsubmit="submitShotNotes(event)">
@@ -1438,51 +1448,100 @@ var TASTE_TIPS = {
 };
 var TASTE_RATING = { Sour: 2, Balanced: 5, Bitter: 2 };
 
-// Dial-in advice (2026-10-21) for the last shot, from two signals:
-//  - pressure: the sensor's average over the pressure phases vs that same
-//    moment's profile target (from /status last_*). Too low = the puck is
-//    too loose (grind finer), too high = too tight (grind coarser).
-//  - ratio: yield / dose, once the cup weight is entered. Shots stop on
-//    time, so a long ratio means the water ran through too fast (finer)
-//    and a short one too slow (coarser).
-// Target ratios per profile style; anything else aims for 1:2.
+// Dial-in advice (2026-10-21, revised same day): the dose is always 18 g;
+// the user only weighs the cup. The verdict reads the yield against the
+// time, the way the shot ended, and the profile's style:
+//  - ran to the end by itself: the time was fixed by the profile, so the
+//    yield says how fast the water went (too much = too fast = finer).
+//  - stopped by hand: the time it took to get that yield (scaled to the
+//    target yield) vs the profile's time window (too quick = finer).
+// The sensor's pressure vs the profile's own target backs it up.
 var lastShotPress = null;
-var RATIO_TARGET = { "Turbo": 2.75, "Blooming": 2.5, "Lever": 2.0 };
-var RATIO_BAND = 0.35;      // +- around the target counts as on target
+var SHOT_DOSE_G = 18;
+var PROFILE_STYLE = {
+  "Classic 9 bar": { ratio: 2.0, win: [25, 33] },
+  "Lever": { ratio: 2.0, win: [30, 42] },
+  "Blooming": { ratio: 2.5, win: [45, 60] },
+  "Turbo": { ratio: 2.75, win: [12, 20] }
+};
+var DEFAULT_STYLE = { ratio: 2.0, win: [25, 33] };
+var RATIO_BAND = 0.35;      // +- around the target ratio counts as on target
 var PRESS_BAND_BAR = 1.5;   // +- around the profile target counts as on target
+
+function profileRunSeconds(name) {
+  for (var i = 0; i < profilesCache.length; i++) {
+    var p = profilesCache[i];
+    if (p.name !== name) continue;
+    var t = 0;
+    (p.phases || []).forEach(function (ph) { t += ph.duration_s || 0; });
+    return p.max_sec > 0 ? Math.min(t, p.max_sec) : t;
+  }
+  return 0;
+}
 
 function renderDialIn(s, lp) {
   var el = document.getElementById("dialin_tip");
   if (!el) return;
-  var votes = [], reasons = [];
-  if (lp && lp.target > 0) {
+  var prof = (lp && lp.profile) || activeProfileName;
+  var st = PROFILE_STYLE[prof] || DEFAULT_STYLE;
+  var t = s.duration_ms / 1000, ts = t.toFixed(0);
+  var end = lp && lp.end;
+  if (end !== "user" && end !== "auto") {        // after a reboot: infer it
+    var run = profileRunSeconds(prof);
+    end = (run > 0 && t >= run - 1) ? "auto" : "user";
+  }
+  var y = s.weight, wantY = st.ratio * SHOT_DOSE_G;
+  var votes = [], reasons = [], extra = "";
+  if (y > 0) {
+    var r = y / SHOT_DOSE_G, rs = "1:" + r.toFixed(1);
+    if (end === "auto") {
+      if (r > st.ratio + RATIO_BAND) { votes.push(-1); reasons.push("It ran its full " + ts + " s and gave <b>" + y.toFixed(0) + " g</b> (" + rs + "), more than the ~" + wantY.toFixed(0) + " g target: the water went through too fast."); }
+      else if (r < st.ratio - RATIO_BAND) { votes.push(1); reasons.push("It ran its full " + ts + " s and gave only <b>" + y.toFixed(0) + " g</b> (" + rs + ") of ~" + wantY.toFixed(0) + " g: the water went through too slowly."); }
+      else { votes.push(0); reasons.push("<b>" + y.toFixed(0) + " g</b> (" + rs + ") in the full " + ts + " s."); }
+    } else {
+      var tAt = t * wantY / y;                     // time to reach the target yield at this pace
+      if (r < st.ratio - 0.5 && t >= st.win[1]) { votes.push(1); reasons.push("You stopped at <b>" + y.toFixed(0) + " g</b> after " + ts + " s, well short of ~" + wantY.toFixed(0) + " g: it was running too slowly."); }
+      else if (r < st.ratio - 0.5) { votes.push(0); reasons.push("You stopped at <b>" + y.toFixed(0) + " g</b> after " + ts + " s, short of the ~" + wantY.toFixed(0) + " g target."); extra = " Let the next one run to about " + wantY.toFixed(0) + " g before judging the grind."; }
+      else if (tAt < st.win[0]) { votes.push(-1); reasons.push("<b>" + y.toFixed(0) + " g</b> (" + rs + ") in " + ts + " s is faster than the " + st.win[0] + "–" + st.win[1] + " s this profile aims for."); }
+      else if (tAt > st.win[1]) { votes.push(1); reasons.push("<b>" + y.toFixed(0) + " g</b> (" + rs + ") in " + ts + " s is slower than the " + st.win[0] + "–" + st.win[1] + " s this profile aims for."); }
+      else { votes.push(0); reasons.push("<b>" + y.toFixed(0) + " g</b> (" + rs + ") in " + ts + " s, inside the " + st.win[0] + "–" + st.win[1] + " s window."); }
+    }
+  }
+  if (lp && lp.avg >= 0 && lp.target > 0) {
     var d = lp.avg - lp.target;
-    if (d <= -PRESS_BAND_BAR) { votes.push(-1); reasons.push("Pressure averaged <b>" + lp.avg.toFixed(1) + " bar</b> against a " + lp.target.toFixed(1) + " bar target: the puck is too loose."); }
+    if (d <= -PRESS_BAND_BAR) { votes.push(-1); reasons.push("Pressure averaged <b>" + lp.avg.toFixed(1) + " bar</b> against " + lp.target.toFixed(1) + ": the puck is too loose."); }
     else if (d >= PRESS_BAND_BAR || lp.peak >= 11.5) { votes.push(1); reasons.push("Pressure averaged <b>" + lp.avg.toFixed(1) + " bar</b> (peak " + lp.peak.toFixed(1) + ") against " + lp.target.toFixed(1) + ": the puck is too tight."); }
-    else { votes.push(0); reasons.push("Pressure on target: <b>" + lp.avg.toFixed(1) + "</b> / " + lp.target.toFixed(1) + " bar."); }
+    else { votes.push(0); reasons.push("Pressure on target: " + lp.avg.toFixed(1) + " / " + lp.target.toFixed(1) + " bar."); }
   }
-  if (s.weight > 0 && s.dose_in > 0) {
-    var r = s.weight / s.dose_in;
-    var want = RATIO_TARGET[activeProfileName] || 2.0;
-    var secs = (s.duration_ms / 1000).toFixed(0);
-    if (r > want + RATIO_BAND) { votes.push(-1); reasons.push("Ratio <b>1:" + r.toFixed(1) + "</b> in " + secs + " s, aiming for 1:" + want.toFixed(1) + ": water ran through too fast."); }
-    else if (r < want - RATIO_BAND) { votes.push(1); reasons.push("Ratio <b>1:" + r.toFixed(1) + "</b> in " + secs + " s, aiming for 1:" + want.toFixed(1) + ": water ran through too slow."); }
-    else { votes.push(0); reasons.push("Ratio on target: <b>1:" + r.toFixed(1) + "</b> in " + secs + " s."); }
-  }
-  if (!votes.length) {
-    el.hidden = false; el.className = "dialin";
-    el.innerHTML = "Weigh the cup and add <b>Yield out</b> under Bean, dose &amp; grind for a grind tip.";
+  el.hidden = false;
+  if (!(y > 0)) {
+    el.className = "dialin";
+    el.innerHTML = "Weigh the cup and enter it above for a grind tip." + (reasons.length ? "<small>" + reasons.join(" ") + "</small>" : "");
     return;
   }
   var finer = votes.indexOf(-1) >= 0, coarser = votes.indexOf(1) >= 0;
   var head;
-  if (finer && coarser) head = "<b>Mixed signals</b> - low pressure but slow flow can mean channeling. Check distribution and tamp before changing the grind.";
-  else if (finer) head = "<b>Grind finer</b> next shot (or dose a little more).";
-  else if (coarser) head = "<b>Grind coarser</b> next shot (or dose a little less).";
-  else head = "<b>Dialled in</b> - keep this grind and dose.";
-  el.hidden = false;
+  if (finer && coarser) head = "<b>Mixed signals</b> - the cup and the pressure disagree, which usually means channeling. Level the grounds and tamp evenly before touching the grind.";
+  else if (finer) head = "<b>Grind finer</b> next shot.";
+  else if (coarser) head = "<b>Grind coarser</b> next shot.";
+  else head = extra ? "<b>Keep the grind</b> for now." : "<b>Dialled in</b> - keep this grind.";
   el.className = "dialin " + ((finer || coarser) ? "act" : "ok");
-  el.innerHTML = head + "<small>" + reasons.join(" ") + "</small>";
+  el.innerHTML = head + "<small>" + reasons.join(" ") + extra + "</small>";
+}
+
+function saveYield(ev) {
+  ev.preventDefault();
+  var idx = shotsCache.length - 1;
+  var v = parseFloat(document.getElementById("input_yield_quick").value);
+  if (idx < 0 || !(v > 0)) return;
+  fillShotNotes(idx);
+  document.getElementById("input_shot_note_yield").value = v.toFixed(1);
+  document.getElementById("input_shot_note_dose").value = SHOT_DOSE_G;
+  shotsCache[idx].weight = v;
+  shotsCache[idx].dose_in = SHOT_DOSE_G;
+  document.getElementById("input_yield_quick").blur();
+  renderLastShot();
+  xhr("/update?" + shotNotesQuery(), function () { fetchShotHistory(); });
 }
 
 function shotAgo(ts) {
@@ -1517,10 +1576,11 @@ function renderLastShot() {
   part((s.duration_ms / 1000).toFixed(1), "s");
   part(s.peak_temp.toFixed(1), "\u00b0 peak");
   if (s.weight > 0) part(s.weight.toFixed(1), "g");
-  if (s.weight > 0 && s.dose_in > 0) part("1:" + (s.weight / s.dose_in).toFixed(1), "ratio");
-  var lp = (lastShotPress && lastShotPress.ts === s.ts && lastShotPress.avg >= 0) ? lastShotPress : null;
-  if (lp) part(lp.avg.toFixed(1), "bar avg");
-  if (s.bean) part(s.bean, "");
+  if (s.weight > 0) part("1:" + (s.weight / SHOT_DOSE_G).toFixed(1), "ratio");
+  var lp = (lastShotPress && lastShotPress.ts === s.ts) ? lastShotPress : null;
+  if (lp && lp.avg >= 0) part(lp.avg.toFixed(1), "bar avg");
+  var yq = document.getElementById("input_yield_quick");
+  if (yq && document.activeElement !== yq) yq.value = s.weight > 0 ? s.weight : "";
   renderDialIn(s, lp);
   var taste = null;
   for (var k in TASTE_TIPS) { if (s.notes === k) taste = k; }
@@ -1549,7 +1609,7 @@ function fillShotNotes(idx) {
   if (!s) return;
   document.getElementById("input_shot_note_index").value = idx;
   document.getElementById("input_shot_note_bean").value = s.bean || "";
-  document.getElementById("input_shot_note_dose").value = s.dose_in || 18;
+  document.getElementById("input_shot_note_dose").value = SHOT_DOSE_G;
   document.getElementById("input_shot_note_yield").value = s.weight > 0 ? s.weight : "";
   document.getElementById("input_shot_note_grind").value = s.grind || "";
   document.getElementById("input_shot_note_rating").value = s.rating || 0;
@@ -1798,7 +1858,7 @@ function applyStatus(json) {
   // Last shot's pressure stats for the dial-in tip; re-render the card when
   // a new shot lands (its log row arrives through fetchShotHistory()).
   if (typeof json.last_shot_ts === "number") {
-    var lpNew = { ts: json.last_shot_ts, avg: json.last_avg_bar, target: json.last_target_bar, peak: json.last_peak_bar };
+    var lpNew = { ts: json.last_shot_ts, avg: json.last_avg_bar, target: json.last_target_bar, peak: json.last_peak_bar, end: json.last_end, profile: json.last_profile };
     var changed = !lastShotPress || lastShotPress.ts !== lpNew.ts || lastShotPress.avg !== lpNew.avg;
     lastShotPress = lpNew;
     if (changed && lpNew.ts > 0) {
@@ -2622,6 +2682,8 @@ static void handleStatus(AsyncWebServerRequest *request) {
   float snapPressure = currentPressure;
   float snapLastAvgBar = lastShotAvgBar, snapLastTargetBar = lastShotTargetBar, snapLastPeakBar = lastShotPeakBar;
   long long snapLastShotTs = lastShotTs;
+  bool snapLastByUser = lastShotStoppedByUser;
+  String snapLastProfile = lastShotProfile;
   double snapPressKp = pressureKp, snapPressKi = pressureKi, snapPressKd = pressureKd;
   // Pump telemetry - lets a bench operator (Milestones A-C) distinguish
   // "pump idle" / "pump at 100% duty" / "PID commanding some percent" /
@@ -2787,6 +2849,8 @@ static void handleStatus(AsyncWebServerRequest *request) {
   json += ",\"last_avg_bar\":" + String(snapLastAvgBar, 2);
   json += ",\"last_target_bar\":" + String(snapLastTargetBar, 2);
   json += ",\"last_peak_bar\":" + String(snapLastPeakBar, 2);
+  json += ",\"last_end\":\"" + String(snapLastByUser ? "user" : "auto") + "\"";
+  json += ",\"last_profile\":\"" + jsonEscape(snapLastProfile) + "\"";
   json += ",\"pressure_ceiling_tripped\":" + String(snapPressureCeilingTripped ? "true" : "false");
   json += ",\"press_kp\":" + String(snapPressKp, 4);
   json += ",\"press_ki\":" + String(snapPressKi, 4);
@@ -3024,7 +3088,7 @@ static void handleUpdate(AsyncWebServerRequest *request) {
         actionErr = "Water tank is low - refill it first";
       }
     } else if (s == "stop") {
-      stopShot();
+      stopShot(true);
     }
   }
 

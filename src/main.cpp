@@ -467,6 +467,11 @@ float shotPeakTemp = 0.0;
 // pulled; lastShotTs matches that shot's log timestamp.
 float lastShotAvgBar = -1.0f, lastShotTargetBar = -1.0f, lastShotPeakBar = -1.0f;
 long long lastShotTs = 0;
+// How the last shot ended (2026-10-21): true = the user pressed Stop, false =
+// it ran to the end of its profile / auto-stop. With the profile's name it
+// lets the dial-in advice judge yield vs time the right way.
+bool lastShotStoppedByUser = false;
+String lastShotProfile = "";
 static double shotPressSum = 0.0, shotTargetSum = 0.0;
 static int shotPressN = 0;
 static float shotPressPeak = -1.0f;
@@ -608,7 +613,7 @@ void startShot() {
   currentShotPhase = ShotPhase::NONE;
 }
 
-void stopShot() {
+void stopShot(bool byUser) {
   if (!shotInProgress) return;
   shotInProgress = false;
   shotPlanner.stop();
@@ -632,6 +637,8 @@ void stopShot() {
     lastShotAvgBar = shotPressN >= 20 ? (float)(shotPressSum / shotPressN) : -1.0f;
     lastShotTargetBar = shotPressN >= 20 ? (float)(shotTargetSum / shotPressN) : -1.0f;
     lastShotPeakBar = shotPressPeak;
+    lastShotStoppedByUser = byUser;
+    lastShotProfile = activeProfileName;
   }
 
   // Bumpless reset back to the gentle profile: the aggressive active-brewing
@@ -1024,7 +1031,7 @@ static void controlTick(unsigned long now) {
     plannerOut = shotPlanner.tick(dtS, currentPressure, sensorUsable);
     if (plannerOut.done) {
       Serial.printf("Shot complete: %s finished after %.1f s\n", activeProfileName.c_str(), plannerOut.elapsedS);
-      stopShot();
+      stopShot(false);
     } else {
       float duty = plannerOut.dutyPct;
       if (sensorUsable && plannerOut.phaseType == PhaseType::PRESSURE) {
