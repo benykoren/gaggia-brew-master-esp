@@ -938,6 +938,10 @@ everything again.
   window; stopped well short -> coarser if it was already past the window,
   else "let it run to ~N g". Pressure vote as before; disagreement ->
   channeling / distribution + tamp.
+- **Flashed via OTA 2026-10-21 ~11:10 local** (CI `e1af42f`, fw_build "Oct 21
+  2026 08:06:01" UTC). Came back Off, no fault, `last_end` present. It read
+  5.5 bar right after the reboot - pressure trapped in the closed group
+  (no 3-way valve), like the 1200 mV seen that morning.
 
 ### 2026-10-21 — Claude Code (Opus 5.5) — Dial-in advice on the last-shot card
 - User asked for an end-of-shot recommendation from the ratio and the
