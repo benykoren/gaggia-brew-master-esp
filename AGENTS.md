@@ -932,6 +932,13 @@ everything again.
   <= 9 bar (cap 11, ceiling 12); `press_gte` fill stops stay inactive until
   the closed loop is on (by design); only behaviour change is that the 12 bar
   ceiling now acts on a real reading.
+- **Flashed via OTA 2026-10-21 ~08:00 local** (CI `075fbac`, includes the
+  16-sample averaging; fw_build "Oct 21 2026 04:57:05" UTC). Machine was in
+  Brew (hot, no shot) and came back Off after the reboot. `press_sensor`
+  true, no fault. Averaged `pressure_mv` steady at 229-236 (was +-20), but
+  0.17-0.31 bar at rest with the boiler at 96 C - either real pressure (group
+  closed / hot water) or the sensor's temperature drift; to be checked by
+  venting.
 
 ### 2026-10-20 — Claude Code (Opus 5.5) — 0-16 bar sensor and HLK-PM01 installed; firmware switched to the 16-bar sensor
 - User installed the "G41 1.6Mpa IN5V" sensor, the 4.3k/10k divider and the
