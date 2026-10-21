@@ -921,6 +921,25 @@ everything again.
 
 ## 10. Change Log
 
+### 2026-10-21 — Claude Code (Opus 5.5) — Dial-in advice on the last-shot card
+- User asked for an end-of-shot recommendation from the ratio and the
+  pressure (e.g. only 6 bar -> change the grind).
+- `main.cpp`: during a non-utility shot, with the 16-bar sensor healthy,
+  averages the reading and the planner's (ramped) target over the pressure-
+  phase samples, plus the shot peak. On stop: `lastShotAvgBar`,
+  `lastShotTargetBar`, `lastShotPeakBar`, `lastShotTs` (= the log row's ts).
+  RAM only. `/status`: `last_shot_ts`, `last_avg_bar`, `last_target_bar`,
+  `last_peak_bar` (-1 = unknown, < 20 samples).
+- Shot notes: new "Yield out (g)" field, stored in the log's existing
+  `weight` column (`shotLogUpdateNotes(..., yieldGrams)`, < 0 keeps it; the
+  taste buttons don't send it). Ratio = weight / dose_in.
+- Web UI: last-shot card shows ratio + bar avg and a `.dialin` box. Pressure
+  avg <= target - 1.5 -> finer; >= target + 1.5 or peak >= 11.5 -> coarser.
+  Ratio vs per-profile target (Turbo 1:2.75, Blooming 1:2.5, else 1:2.0,
+  +-0.35): long -> finer, short -> coarser (shots stop on time). Opposite
+  votes -> "mixed signals, check distribution/tamp". No data -> prompt to
+  enter the yield. Pressure verdicts use the nominal 175 mV/bar slope.
+
 ### 2026-10-21 — Claude Code (Opus 5.5) — Dial shows the real pressure reading while the closed loop is off
 - `/status` gains `press_sensor` (= `PRESSURE_SENSOR_IS_16BAR`). The Web UI's
   dial, live readout, peak marker and the chart's main cyan line now use the

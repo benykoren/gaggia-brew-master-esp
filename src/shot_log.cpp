@@ -162,7 +162,7 @@ String shotLogReadJson() {
 }
 
 void shotLogUpdateNotes(int index, String bean, float doseInGrams, String grind,
-                        int rating, String notes) {
+                        int rating, String notes, float yieldGrams) {
   // CSV storage, no quoting support - keep it simple (same simplification
   // profiles.cpp already makes for profile names).
   bean.replace(",", ""); bean.replace("\n", "");
@@ -186,7 +186,8 @@ void shotLogUpdateNotes(int index, String bean, float doseInGrams, String grind,
   BaseFields b = parseBaseFields(lines[index]);
   if (!b.ok) return;  // malformed, don't touch
 
-  lines[index] = b.ts + "," + b.dur + "," + b.peak + "," + b.weight + "," + b.endTemp +
+  String weight = yieldGrams >= 0.0f ? String(yieldGrams, 1) : b.weight;
+  lines[index] = b.ts + "," + b.dur + "," + b.peak + "," + weight + "," + b.endTemp +
                  "," + bean + "," + String(doseInGrams, 1) + "," + grind + "," +
                  String(rating) + "," + notes;
 

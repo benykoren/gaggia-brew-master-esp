@@ -30,5 +30,7 @@ String shotLogReadJson();
 // and newlines in free-text fields are stripped (CSV storage, no quoting
 // support - same simplification profiles.cpp already makes for names).
 // No-op if index is out of range.
+// `yieldGrams` (2026-10-21) is written into the record's weight field
+// (the cup weighed after the shot - there is no scale); < 0 keeps it.
 void shotLogUpdateNotes(int index, String bean, float doseInGrams, String grind,
-                        int rating, String notes);
+                        int rating, String notes, float yieldGrams = -1.0f);

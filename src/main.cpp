@@ -458,6 +458,19 @@ static void runAutotuneStep(unsigned long now) {
 unsigned long shotStartMillis = 0;
 float shotPeakTemp = 0.0;
 
+// Last shot's measured pressure vs the profile's own pressure targets
+// (2026-10-21), for the Web UI's dial-in advice. Averaged over the samples
+// taken in pressure phases with a healthy 16-bar sensor, comparing the
+// reading to that same moment's (ramped) target - so a declining profile
+// like Lever is judged against its decline, not a flat 9 bar. -1 = unknown
+// (no sensor / fault / too few samples). RAM only: it covers the shot just
+// pulled; lastShotTs matches that shot's log timestamp.
+float lastShotAvgBar = -1.0f, lastShotTargetBar = -1.0f, lastShotPeakBar = -1.0f;
+long long lastShotTs = 0;
+static double shotPressSum = 0.0, shotTargetSum = 0.0;
+static int shotPressN = 0;
+static float shotPressPeak = -1.0f;
+
 // Descale / maintenance reminder - both persisted in NVS.
 unsigned long shotCount = 0;         // shots since the last descale/reset
 time_t lastDescaleTime = 0;          // epoch seconds; 0 = never set (unknown)
@@ -583,6 +596,9 @@ void startShot() {
   lastPlannerTickMs = shotStartMillis;
   shotPeakTemp = currentTemperature;
   activeShotIsUtility = p->utility;
+  shotPressSum = shotTargetSum = 0.0;
+  shotPressN = 0;
+  shotPressPeak = -1.0f;
   // Switch Brew to the more aggressive active-brewing gains immediately -
   // see config.h (no bumpless reset on purpose).
   refreshActiveProfileIfChanged();
@@ -608,7 +624,14 @@ void stopShot() {
   if (!wasUtility) {
     // 0 = unknown, same convention as weight.
     float endTemp = (currentTemperature > 0) ? currentTemperature : 0.0f;
-    shotLogAppend(time(nullptr), durationMs, shotPeakTemp, 0.0, endTemp);
+    time_t ts = time(nullptr);
+    shotLogAppend(ts, durationMs, shotPeakTemp, 0.0, endTemp);
+    // Dial-in data for the Web UI (see the declaration). >= 20 samples =
+    // >= ~1 s of pressure phase at the 50 ms tick.
+    lastShotTs = (long long)ts;
+    lastShotAvgBar = shotPressN >= 20 ? (float)(shotPressSum / shotPressN) : -1.0f;
+    lastShotTargetBar = shotPressN >= 20 ? (float)(shotTargetSum / shotPressN) : -1.0f;
+    lastShotPeakBar = shotPressPeak;
   }
 
   // Bumpless reset back to the gentle profile: the aggressive active-brewing
@@ -1022,6 +1045,16 @@ static void controlTick(unsigned long now) {
       }
       dimmerSetPowerPercent(duty); // clamps to 0..100
       currentShotPhase = phaseForType(plannerOut.phaseType);
+      // Dial-in stats (lastShotAvgBar): only a sensor that reads brew
+      // pressure counts, whether or not the closed loop is on.
+      if (PRESSURE_SENSOR_IS_16BAR && !pressureFault && !activeShotIsUtility) {
+        if (currentPressure > shotPressPeak) shotPressPeak = currentPressure;
+        if (plannerOut.phaseType == PhaseType::PRESSURE) {
+          shotPressSum += currentPressure;
+          shotTargetSum += plannerOut.phaseTarget;
+          shotPressN++;
+        }
+      }
     }
   }
 
