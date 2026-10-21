@@ -921,6 +921,28 @@ everything again.
 
 ## 10. Change Log
 
+### 2026-10-21 — Claude Code (Opus 5.5) — Dial-in advice: fixed 18 g dose, cup weight only, judged by how the shot ended
+- User: drop bean/dose, assume 18 g, judge from the cup weight and the time
+  - whether he stopped early or the shot ran to the end - and advise on the
+  grind or anything else.
+- Firmware: `stopShot(bool byUser)` (web Stop = true, planner done = false)
+  -> `lastShotStoppedByUser`, `lastShotProfile`; `/status` `last_end`
+  ("user"/"auto") and `last_profile`. After a reboot the UI infers it from
+  the duration vs the profile's run time.
+- UI: the last-shot card has an inline "Cup weight (g)" + Save (stored as the
+  log's weight, dose saved as 18); the "Bean, dose & grind" link is gone.
+  Ratio = weight / 18. Per profile: ratio + time window (Classic 1:2 25-33 s,
+  Lever 1:2 30-42, Blooming 1:2.5 45-60, Turbo 1:2.75 12-20).
+  Ran to the end -> yield vs target (+-0.35): more = finer, less = coarser.
+  Stopped by hand -> time to the target yield (t x target/yield) vs the
+  window; stopped well short -> coarser if it was already past the window,
+  else "let it run to ~N g". Pressure vote as before; disagreement ->
+  channeling / distribution + tamp.
+- **Flashed via OTA 2026-10-21 ~11:10 local** (CI `e1af42f`, fw_build "Oct 21
+  2026 08:06:01" UTC). Came back Off, no fault, `last_end` present. It read
+  5.5 bar right after the reboot - pressure trapped in the closed group
+  (no 3-way valve), like the 1200 mV seen that morning.
+
 ### 2026-10-21 — Claude Code (Opus 5.5) — Dial-in advice on the last-shot card
 - User asked for an end-of-shot recommendation from the ratio and the
   pressure (e.g. only 6 bar -> change the grind).
