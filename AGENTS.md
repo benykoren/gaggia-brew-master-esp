@@ -939,6 +939,10 @@ everything again.
   +-0.35): long -> finer, short -> coarser (shots stop on time). Opposite
   votes -> "mixed signals, check distribution/tamp". No data -> prompt to
   enter the yield. Pressure verdicts use the nominal 175 mV/bar slope.
+- Warm zero (user asked for it from the hot machine): Brew, 96 C, pump off,
+  median 218 mV of 20 reads -> `PRESSURE_SENSOR_ZERO_MV` 218 (was 208,
+  +0.06 bar). An earlier 1180-1235 mV with the machine Off was trapped
+  pressure, not the zero.
 
 ### 2026-10-21 — Claude Code (Opus 5.5) — Dial shows the real pressure reading while the closed loop is off
 - `/status` gains `press_sensor` (= `PRESSURE_SENSOR_IS_16BAR`). The Web UI's

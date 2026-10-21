@@ -197,7 +197,12 @@
 //   divider is the right way round.
 //   Note: the S3 ADC tops out near ~3100 mV, so readings clip around 15 bar;
 //   the 12 bar safety ceiling (~2500 mV) is well inside the range.
-#define PRESSURE_SENSOR_ZERO_MV 208.0f
+//   WARM re-check 2026-10-21 (user's call: zero as the machine works): Brew
+//   at 96 C, pump off, no trapped pressure, new firmware (16-read average,
+//   no pull-down): median 218 mV over 20 reads (213-246). A reading of
+//   ~1200 mV earlier that morning with the machine Off was pressure trapped
+//   in the line, gone once it was vented.
+#define PRESSURE_SENSOR_ZERO_MV 218.0f
 #define PRESSURE_SENSOR_MV_PER_BAR 175.0f
 #define PRESSURE_SENSOR_MAX_BAR 16.0f
 // Closed loop: in pressure phases the pressure PID adds a +/-
