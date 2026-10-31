@@ -18,10 +18,10 @@ Color** espresso machine, running on an **ESP32-S3**. Started as a closed-loop
 **PID brew-temperature controller** replacing the machine's stock bang-bang
 thermostat, and has grown well beyond "just PID": Brew/Steam gain-scheduled
 modes, eco/auto-sleep, PID autotune, OTA updates, WiFi reconfiguration - with
-a local Wi-Fi Web UI (plus optional MQTT / Home Assistant), a Nextion
-touchscreen HMI decided but not yet started, and a phased roadmap toward
-pressure profiling, water-level safety, pump flow control, and Bluetooth
-scale integration (see
+a local Wi-Fi Web UI (shown on an old tablet next to the machine; plus
+optional MQTT / Home Assistant), pressure profiling with a 0-16 bar sensor
+and a pump dimmer, and a water-level sensor, with Bluetooth scale
+integration and a wiring cleanup still on the roadmap (see
 [Roadmap](#8-roadmap--future-work)).
 
 **Project name note (2026-08-15):** renamed from the working name "Gaggia
@@ -379,7 +379,9 @@ $pio = "C:\Users\benny.koren\Desktop\esp32esso\.venv\Scripts\pio.exe"
    every plug-in / mains glitch (heater mains present at the same moment).
    User was told and explicitly accepts the short boot pulse - no
    pull-down.
-2. **ESP32 power source — external USB wall-wart (reverted 2026-08-14,
+2. **Superseded 2026-10-20: the ESP32 is now powered by an HLK-PM01** fed
+   from the T2 side of the SSR (see [`docs/wiring-as-built.md`](docs/wiring-as-built.md)).
+   History below. **ESP32 power source — external USB wall-wart (reverted 2026-08-14,
    was internal HLK-PM01 2026-08-01→2026-08-14).** User decided against the
    HLK-PM01 integration. Power the ESP32 the same way as on the bench: a
    standard 5V USB charger/cable routed into the case through a grommeted
@@ -747,7 +749,7 @@ everything again.
    Reading a weight is not the same as *acting* on it - actually cutting the
    pump at a target weight still needs item 8's active pump control.
 
-6. **Water tank level sensor.**
+6. **Water tank level sensor. Status: installed and working (user, 2026-10-31).**
    **Hardware (bought 2026-10-15):** a **non-contact capacitive** liquid
    level switch (3.3-5V, 3 wires: VCC / GND / OUT), mounted on the
    *outside* of the tank wall. It senses water through the plastic, so
@@ -759,7 +761,7 @@ everything again.
    **Why:** low-water warning now; becomes a real pump interlock once
    item 8 (pump on/off + phase control, folded former item 4's role) exists.
 
-7. **Real-time pressure transducer + live pressure graph.**
+7. **Real-time pressure transducer + live pressure graph. Status: installed and working (user, 2026-10-31);** the slope (`PRESSURE_SENSOR_MV_PER_BAR`) is still the nominal value, not calibrated against a gauge.
    **Hardware:** one analog pressure transducer, **0-1.2 to 1.6MPa
    (12-16 bar) range** (confirmed spec - matches both competitor projects),
    plumbed at the **pump outlet** via a T-fitting (a real plumbing job, not
@@ -778,7 +780,7 @@ everything again.
 
 8. **Phase-control dimmer to a pressure target (e.g. 9 bar) - now also
    the project's pump on/off control, folding in former item 4 (2026-08-29,
-   see above for the fail-off tradeoff this accepts).**
+   see above for the fail-off tradeoff this accepts). Status: working (user, 2026-10-31); `PRESSURE_CLOSED_LOOP_AVAILABLE` is still false in firmware (pump runs on the model).**
    **Hardware:** a zero-cross detection + TRIAC module (e.g. RobotDyn AC
    dimmer, ~$10-15), spliced at the pump's own terminals (not the switch's
    terminal block - same unambiguous-splice-point reasoning documented for
@@ -822,7 +824,7 @@ everything again.
    sensor) and not a firmware migration onto the current board - explicitly
    decided against. Item 8 stays a from-scratch build on this hardware.
 
-9. **Nextion touchscreen HMI. Status: decided, not yet started** (corrected
+9. **CANCELLED (2026-10-31) - Nextion touchscreen HMI.** The user put an old tablet next to the machine showing `http://gaggia.local` instead, so no on-device screen. Original text kept below for history. (Was: "decided, not yet started", corrected
    2026-08-16 - previously mislabeled "in progress" here and in `README.md`;
    no hardware bought, no driver written). A different kind of item from
    4-8 and 10: an alternative *interface* to capabilities that already
@@ -837,7 +839,7 @@ everything again.
    only for live status + basic control). Full buy guidance, wiring, and
    firmware notes in `HARDWARE_ROADMAP.md` item 9.
 
-10. **Milk temperature probe for cappuccino/steaming.**
+10. **CANCELLED (2026-10-31) - Milk temperature probe.** The user uses an analog milk thermometer. Original text kept below for history.
     **Hardware:** one waterproof **DS18B20** digital temp probe (~$2-3),
     one free GPIO (OneWire protocol, needs a 4.7kΩ pull-up resistor).
     Dipped into the milk pitcher during steaming.
@@ -849,6 +851,19 @@ everything again.
     milk pitcher, so a wire (and probe tip) has to leave the machine and be
     handled externally every use - a real drawback flagged during
     prioritization.
+
+11. **Wiring cleanup / simplification (added 2026-10-31, not started).**
+    **Low voltage:** a carrier board (perfboard) with the ESP32 in female
+    headers, the 5V / 3V3 / GND rails and the pressure divider soldered on,
+    and one pluggable screw terminal per component (J1 power, J2 pressure,
+    J3 water, J4 temp, J5 dimmer, J6 SSR). Removes all 6 low-voltage
+    Wagos, the splices and the loose jumpers. **Mains:** same topology,
+    fewer joints - twin ferrules straight into SSR terminals 1 and 2, the
+    HLK-PM01 on a screw-terminal board, dimmer OUT straight to the pump, one
+    N Wago. Same GPIOs, so no firmware change. Diagram, shopping list and
+    build order:
+    [`docs/wiring-simplified.md`](docs/wiring-simplified.md). Today's wiring:
+    [`docs/wiring-as-built.md`](docs/wiring-as-built.md).
 
 ---
 
@@ -900,16 +915,28 @@ everything again.
   and verified live: new `/status` fields present, all previously-tuned
   brew/steam values survived the update intact (NVS persists independently
   of the firmware binary).
-- ⬜ Continue PID tuning (brew nearly there; steam largely untested at real
-  steam temps — remember `STEAM_MAX_SAFETY`/steam gains are still
-  placeholders per Section 4).
-- ⬜ Autotune not yet run on the real machine — first run should be
-  supervised (Section 4, "PID Autotune").
+- ✅ Autotune run on the real machine (2026-08-15, Brew profile, see the
+  change log).
 - ✅ **Phase profiles + open-loop pump model + dimmer hardening + pump
-  calibration shipped** (2026-10-02, OTA-flashed twice; legacy profiles
-  migrated, profile CRUD checked live) - see Section 4.
-- ⬜ Live verification of phase profiles + pump calibration (plan Task 12) —
-  pending, supervised. No shot, calibration run or heating done yet.
+  calibration shipped** (2026-10-02) - see Section 4. Shots are being
+  pulled on them since (dial-in entries 2026-10-21).
+- ✅ **HLK-PM01 power, 0-16 bar pressure sensor, water level sensor
+  installed** (2026-10-15 to 2026-10-20). User reports roadmap items 6, 7
+  and 8 working (2026-10-31).
+- ✅ **As-built wiring documented** (2026-10-31):
+  [`docs/wiring-as-built.md`](docs/wiring-as-built.md) +
+  [`docs/wiring-diagram.svg`](docs/wiring-diagram.svg).
+- ✅ Web UI shown on an old tablet next to the machine (replaces the
+  Nextion plan, item 9 cancelled). Milk probe (item 10) cancelled.
+- ⬜ Pressure sensor read a constant ~5.7 bar on 2026-10-31. Most likely
+  trapped pressure; check by venting (change log 2026-10-31).
+- ⬜ Calibrate the pressure slope (`PRESSURE_SENSOR_MV_PER_BAR`, still
+  nominal) against a gauge, then turn on `PRESSURE_CLOSED_LOOP_AVAILABLE`
+  and tune the pressure PID.
+- ⬜ Steam PID tuning at real steam temperatures. Live `steam_max_safety`
+  was 135 °C on 2026-10-01, above T2's 127 °C trip point: still the
+  user's decision.
+- ⬜ Roadmap item 5 (BLE scale) and item 11 (wiring cleanup).
 
 > Serial-monitor note: the S3 USB-Serial/JTAG can drop the CDC link on `RST`, so
 > the boot banner is often missed by an already-attached monitor. Use the
@@ -922,6 +949,21 @@ everything again.
 ---
 
 ## 10. Change Log
+
+### 2026-10-31 — Claude Code (Opus 5.5) — Roadmap/status brought up to date; wiring cleanup proposal added (item 11)
+- User: items 6, 7, 8 work. Item 9 (Nextion) cancelled: an old tablet next
+  to the machine shows `gaggia.local`. Item 10 (milk probe) cancelled: an
+  analog thermometer is used. Updated §1, §7 step 2 (HLK power now, USB
+  superseded), §8, §9, `HARDWARE_ROADMAP.md` summary, and the README
+  roadmap (it still described a relay and a float switch as unbuilt).
+- New roadmap item 11, wiring cleanup: an ESP carrier board with one plug
+  per component, twin ferrules on the SSR, the HLK on a screw board, one N
+  Wago. Proposal, diagram and shopping list in
+  [`docs/wiring-simplified.md`](docs/wiring-simplified.md) /
+  `docs/wiring-simplified.svg`. Not built; same GPIOs, no firmware change.
+- Facts kept open, not assumed done: pressure slope still nominal,
+  `PRESSURE_CLOSED_LOOP_AVAILABLE` false, steam tuning, the 135 °C live
+  steam ceiling.
 
 ### 2026-10-31 — Claude Code (Opus 5.5) — As-built wiring documented; leftover 3V3 wire and stuck 5.7 bar diagnosed
 - User traced every wire with the machine unplugged. Written up as
