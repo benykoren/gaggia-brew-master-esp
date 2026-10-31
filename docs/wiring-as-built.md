@@ -145,8 +145,11 @@ flowchart LR
    (from the HLK AC-2 / dimmer N Wago) joins the machine's Neutral ("0")
    wire, not the chassis. Its green color is just the wire used; it is
    not an earth.
-3. **Pressure stuck at ~5.7 bar.** See the diagnosis in `AGENTS.md`'s
-   change log (2026-10-31).
+3. **Pressure stuck at ~5.7 bar: found and fixed (2026-10-31).** The
+   pressure sensor's **black (GND) was not making contact in W-GND**. With
+   no ground the sensor floated and put out a constant ~1.67 V (~1170-1216
+   mV on GPIO1 = ~5.5 bar). Reseated firmly, the reading went to ~180 mV
+   (0 bar). If it ever sticks again, check that wire first.
 
 ## 5. To check (description incomplete or self-contradicting)
 
