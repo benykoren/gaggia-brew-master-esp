@@ -981,6 +981,8 @@ everything again.
 - **Zero re-measured:** warm, portafilter out, pump off: mean 185 / median
   186 mV over 30 reads (reads jump ~160 / ~205, ADC noise).
   `PRESSURE_SENSOR_ZERO_MV` 218 → **185**, so readings were ~0.2 bar low.
+- **Flashed via OTA 2026-10-31 ~14:35 local** (CI `4a5d0bb`, fw_build "Oct 31
+  2026 12:31:28" UTC). Came back Off, no pressure fault, water "ok".
 - Blind basket (Flush, 100 %, auto-stop at 11 bar):
   - 1st run: 0 bar for 6 s, the boiler was refilling its air pocket after
     steaming.
