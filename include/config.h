@@ -202,7 +202,12 @@
 //   no pull-down): median 218 mV over 20 reads (213-246). A reading of
 //   ~1200 mV earlier that morning with the machine Off was pressure trapped
 //   in the line, gone once it was vented.
-#define PRESSURE_SENSOR_ZERO_MV 218.0f
+//   CORRECTION 2026-10-31: the 218 (and the "trapped" ~1200 mV) were taken
+//   with the sensor's GND not seated in Wago GND, which offset and later
+//   froze the output. After reseating: warm (98 C, portafilter out, pump
+//   off) mean 185 / median 186 mV over 30 reads; cold ~182. The reads jump
+//   between two levels ~45 mV apart (~160 / ~205): ADC noise, not pressure.
+#define PRESSURE_SENSOR_ZERO_MV 185.0f
 #define PRESSURE_SENSOR_MV_PER_BAR 175.0f
 #define PRESSURE_SENSOR_MAX_BAR 16.0f
 // Closed loop: in pressure phases the pressure PID adds a +/-

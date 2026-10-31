@@ -950,6 +950,47 @@ everything again.
 
 ## 10. Change Log
 
+### 2026-10-31 — Claude Code (Opus 5.5) — Stuck 5.7 bar root-caused: pressure sensor GND not seated
+- Live checks (machine cold, Off):
+  - GPIO1 alternated 1170 / 1216 mV (~5.5 bar), flat-topped.
+  - A 2.4 s Flush with no portafilter (group open) didn't move it at all,
+    not even pump pulses. So not trapped pressure; the user had also
+    loosened the sensor earlier with no change.
+- Pulling one wire at a time, logged at 0.5 s:
+  - sensor yellow out of Wago A → 0 mV + fault (divider and GPIO1 fine);
+  - sensor red out of Wago 5V → 0 mV (supply reaches the sensor);
+  - sensor black out of Wago GND → the ESP rebooted twice (inconclusive).
+- **Black pushed back firmly → ~178-183 mV (0 bar), steady.** Root cause:
+  the sensor's GND was not making contact in Wago GND, so the sensor
+  floated at a constant ~1.67 V out. Probably the same since 2026-10-21,
+  when the "trapped pressure" ~1200 mV first appeared.
+- While it was stuck, the 12 bar ceiling was blind. Cold zero now reads
+  ~182 mV (vs 218 warm); to re-check with the slope calibration.
+- The water sensor read "low" with water in the tank; the user says it's
+  not seated well yet. Interlock was turned off for the test and restored.
+- Later the same day: the user reseated all the water sensor's wires. The
+  ESP dropped off for ~10 min while wires were being moved (loose low-
+  voltage power/GND in the Wagos). After reseating, the water sensor reads
+  water (raw LOW, "ok").
+- Shot check (Classic 9 bar, 18 g in, **80 g out** in ~35 s, stopped by
+  hand), sensor tracked it:
+  - 0 bar in pre-infusion; then 3.7 → 5.4 → 7.2-8.1 bar at 100 % pump
+    (avg 7.2, peak 8.46, target 8.54); back to 0 after stop.
+  - Way too fast (36 g reached at ~16 s): grind finer.
+  - Boiler fell 92.5 → 83.6 °C during the shot.
+- **Zero re-measured:** warm, portafilter out, pump off: mean 185 / median
+  186 mV over 30 reads (reads jump ~160 / ~205, ADC noise).
+  `PRESSURE_SENSOR_ZERO_MV` 218 → **185**, so readings were ~0.2 bar low.
+- Blind basket (Flush, 100 %, auto-stop at 11 bar):
+  - 1st run: 0 bar for 6 s, the boiler was refilling its air pocket after
+    steaming.
+  - 2nd run: 3.7 → 5.6 → 8.8 bar at 6 s, still rising; fell to 1 bar
+    within 4 s after stop.
+  - 3rd run: peak 6.3 bar; Flush ended itself at ~6 s.
+  - Water came out around the portafilter: **the group gasket leaks** (as
+    on 2026-10-20). Replace it (catalog part 38, 11004543) before using the
+    blind basket for a pump-max / slope check.
+
 ### 2026-10-31 — Claude Code (Opus 5.5) — Roadmap/status brought up to date; wiring cleanup proposal added (item 11)
 - User: items 6, 7, 8 work. Item 9 (Nextion) cancelled: an old tablet next
   to the machine shows `gaggia.local`. Item 10 (milk probe) cancelled: an
