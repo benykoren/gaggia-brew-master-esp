@@ -23,8 +23,9 @@ built**.
 - [Item 6 — Water tank level sensor](#item-6--water-tank-level-sensor)
 - [Item 7 — Pressure transducer + live pressure graph](#item-7--real-time-pressure-transducer--live-pressure-graph)
 - [Item 8 — Phase-control dimmer](#item-8--phase-control-dimmer-to-a-pressure-target-eg-9-bar)
-- [Item 9 — Nextion touchscreen HMI](#item-9--nextion-touchscreen-hmi)
-- [Item 10 — Milk temperature probe](#item-10--milk-temperature-probe)
+- [Item 9 — Nextion touchscreen HMI (cancelled)](#item-9--nextion-touchscreen-hmi--cancelled-2026-10-31-old-tablet-showing-gaggialocal-instead)
+- [Item 10 — Milk temperature probe (cancelled)](#item-10--milk-temperature-probe--cancelled-2026-10-31-user-uses-an-analog-thermometer)
+- [Item 11 — Wiring cleanup / simplification](#item-11--wiring-cleanup--simplification)
 
 ---
 
@@ -788,6 +789,79 @@ pull-up already on board — check before assuming a loose resistor is needed.
 
 **Firmware:** OneWire + DallasTemperature libraries (both common,
 well-trodden on ESP32). Simple polled read, no interrupt/timing sensitivity.
+
+---
+
+## Item 11 — Wiring cleanup / simplification
+
+**Status:** proposed 2026-10-31, not started. **Depends on:** nothing.
+**Firmware:** none, every GPIO stays the same.
+
+**Why:** the low-voltage side is 6 Wagos, 4 splices and ~10 loose jumpers
+on the ESP pins. On 2026-10-31 that cost real time:
+- the pressure sensor's GND not seated in a Wago froze the reading at
+  ~5.7 bar for ten days;
+- moving wires in the Wagos rebooted the ESP several times, and once took
+  it offline for ~10 minutes.
+
+Today's wiring, wire by wire: [`docs/wiring-as-built.md`](docs/wiring-as-built.md).
+
+![simplified wiring](docs/wiring-simplified.svg)
+
+**Low voltage: one carrier board.** A perfboard holds the ESP32 in female
+headers, with the 5V / 3V3 / GND rails and the pressure divider (4.3k /
+10k) soldered on. Each component plugs in with one pluggable screw
+terminal:
+
+| Plug | Pins | Component |
+|------|------|-----------|
+| J1 POWER | 5V, GND | HLK-PM01 +Vo / −Vo |
+| J2 PRESSURE | 5V, SIG (→ 4.3k → GPIO1, 10k → GND), GND | pressure sensor red / yellow / black |
+| J3 WATER | 3V3, OUT → GPIO7, GND | water sensor red / yellow / black |
+| J4 TEMP | 3V3, TX → GPIO18, RX ← GPIO17, GND | temp module |
+| J5 DIMMER | 3V3, GND, Z-C → GPIO6, PSM ← GPIO5 | dimmer logic side |
+| J6 SSR | GPIO4, GND | SSR 3 (+) / 4 (−) |
+| (J7 SCALE) | 3V3, GND, DT → GPIO15, SCK ← GPIO16 | HX711 load cell, if item 5 goes wired |
+
+**Mains: same circuit, fewer joints.** The mains can't get simpler without
+losing T2 or the fuses.
+- SSR terminal 2: T2 grey + HLK feed in one twin ferrule.
+- SSR terminal 1: heater black + Steam lamp red in one twin ferrule.
+- HLK-PM01 on a screw-terminal carrier board.
+- Dimmer OUT straight to the pump's white wire, no splice.
+- A single N Wago.
+
+**Wire colors from now on:** red = 5V, orange = 3V3, black = GND, signals
+in their own colors. The sensors keep their own leads.
+
+**Buy:**
+
+| Part | Qty | Cost |
+|---|---|---|
+| Double-sided perfboard 7x9 cm | 1 | ~$1 |
+| Female header 2.54 mm, 1x22 | 2 | ~$1 |
+| Pluggable terminal blocks 5.08 mm (2EDG / KF2EDGK), socket + plug | 2-pin x2, 3-pin x2, 4-pin x2 (+1 4-pin for J7) | ~$3-5 kit |
+| Ferrule kit 0.5-1.5 mm² incl. twin ferrules + crimper | 1 | ~$10-15 |
+| HLK-PM01 screw-terminal carrier (fuse + varistor if possible) | 1 | ~$2-3 |
+| 22 AWG wire red / orange / black + signal colors, solid wire for the rails | | ~$3 |
+| Optional: ABS box ~100x70x30 mm, spiral wrap | | ~$3 |
+
+Needs a soldering iron. **No-solder alternative:** a screw-terminal
+breakout for the ESP32-S3 DevKitC-1 (44-pin) plus a 5-way Wago 221-415 as
+the GND bus.
+
+**Procedure (machine unplugged):**
+1. Build the board on the bench. With a multimeter: no short between the
+   rails; 4.3k J2 SIG → GPIO1 pad; 10k GPIO1 pad → GND.
+2. ESP on USB only, nothing on J1-J6: boots and answers `/status`.
+3. In the machine, one component at a time onto its plug, checking
+   `/status` after each.
+4. Mains: twin ferrules on SSR 1 / 2, HLK on its carrier, dimmer OUT to the
+   pump direct, one N Wago.
+5. Supervised first power-up. Then update `docs/wiring-as-built.md` and
+   `docs/wiring-diagram.svg`.
+
+Full write-up: [`docs/wiring-simplified.md`](docs/wiring-simplified.md).
 
 ---
 
