@@ -34,11 +34,12 @@ built**.
 |---|---|---|---|---|
 | ~~4~~ | ~~Pump on/off relay~~ | — | **REMOVED 2026-08-29 — folded into item 8**, see item 4 section below | — |
 | **5** | BLE smart scale (36g auto-stop) | — | Yes | scale cost |
-| 6 | Water tank level sensor | — | No | $2-5 |
-| **7** | Live pressure reading | — | **Yes — hard prerequisite for item 8** | $15-30 |
-| **8** | Phase-control pressure profiling **+ pump on/off (folded item 4)** | Item 7 | **Yes** | $12-20+ |
-| 9 | Nextion touchscreen HMI | — | No | $15-40 |
-| 10 | Milk temperature probe | — | No | $2-3 |
+| 6 | Water tank level sensor | — | **Done, working (2026-10-31)** | $2-5 |
+| **7** | Live pressure reading | — | **Working (2026-10-31); slope not yet calibrated** | $15-30 |
+| **8** | Phase-control pressure profiling **+ pump on/off (folded item 4)** | Item 7 | **Working (2026-10-31); closed loop still off** | $12-20+ |
+| ~~9~~ | ~~Nextion touchscreen HMI~~ | — | **CANCELLED 2026-10-31** - old tablet shows gaggia.local | — |
+| ~~10~~ | ~~Milk temperature probe~~ | — | **CANCELLED 2026-10-31** - analog thermometer | — |
+| 11 | Wiring cleanup: ESP carrier board with one plug per component, fewer mains joints | — | No (maintenance) | ~$15-25 |
 
 **Numbering history:** this list was reordered by priority on 2026-08-16,
 continuing from the already-shipped items 1-3 rather than restarting at 1
@@ -674,7 +675,7 @@ tuning did (`AGENTS.md` §10 change log).
 
 ---
 
-## Item 9 — Nextion touchscreen HMI
+## Item 9 — Nextion touchscreen HMI — CANCELLED 2026-10-31 (old tablet showing gaggia.local instead)
 
 **Status:** decided, not yet started. (Corrected 2026-08-16 — `AGENTS.md`
 and `README.md` previously mislabeled this "in progress"; no hardware has
@@ -757,7 +758,7 @@ ordering the part.
 
 ---
 
-## Item 10 — Milk temperature probe
+## Item 10 — Milk temperature probe — CANCELLED 2026-10-31 (user uses an analog thermometer)
 
 **Status:** not started. **Depends on:** nothing. (Originally "item 4.")
 
