@@ -1,0 +1,288 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1080" width="1600" height="1080" font-family="Segoe UI, Arial, sans-serif">
+  <title>GaggiaBrewMasterESP - wiring as built (2026-10-31)</title>
+  <defs>
+    <filter id="ol" x="-5%" y="-5%" width="110%" height="110%">
+      <feMorphology in="SourceAlpha" operator="dilate" radius="1.3" result="d"/>
+      <feFlood flood-color="#222"/>
+      <feComposite in2="d" operator="in" result="o"/>
+      <feMerge><feMergeNode in="o"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <style>
+      .w{fill:none;stroke-width:3.5;stroke-linejoin:round;stroke-linecap:round}
+      .red{stroke:#d32f2f}.blk{stroke:#1a1a1a}.yel{stroke:#f5c400}.blu{stroke:#1e63d6}
+      .pur{stroke:#8e44ad}.org{stroke:#f57c00}.wht{stroke:#ffffff}.gry{stroke:#9a9a9a}
+      .grn{stroke:#2e9e44}.brn{stroke:#7b4a1e}.res{stroke:#444;stroke-width:2.5}
+      .unk{fill:none;stroke:#888;stroke-width:2;stroke-dasharray:6 5}
+      .box{fill:#eef4fb;stroke:#2b4a6f;stroke-width:2}
+      .mbox{fill:#fdeeee;stroke:#8a2b2b;stroke-width:2}
+      .xbox{fill:#f5f0fb;stroke:#5b3a7a;stroke-width:2}
+      .wago{fill:#ffe9a8;stroke:#7a5c00;stroke-width:2}
+      .empty{fill:#fff;stroke:#c00;stroke-width:2;stroke-dasharray:4 3}
+      .t{font-size:13px;fill:#111}.tb{font-size:15px;font-weight:700;fill:#111}
+      .ts{font-size:11px;fill:#333}.warn{font-size:12px;fill:#b00000;font-weight:600}
+      .q{font-size:12px;fill:#666;font-style:italic}
+      .dot{fill:#111}
+    </style>
+  </defs>
+  <rect width="1600" height="1080" fill="#ffffff"/>
+  <text x="30" y="32" class="tb" font-size="20">GaggiaBrewMasterESP - wiring as built (traced 2026-10-31)</text>
+  <text x="30" y="52" class="ts">Logical diagram, not physical pin positions. Line color = real wire color. Dashed grey = not traced yet (see wiring-as-built.md section 5).</text>
+
+  <!-- ===================== COMPONENT BOXES ===================== -->
+  <!-- HLK -->
+  <rect x="60" y="230" width="200" height="90" rx="6" class="xbox"/>
+  <text x="160" y="270" class="tb" text-anchor="middle">HLK-PM01</text>
+  <text x="160" y="288" class="ts" text-anchor="middle">230 V AC → 5 V DC</text>
+  <text x="110" y="246" class="ts" text-anchor="middle">AC 1</text>
+  <text x="210" y="246" class="ts" text-anchor="middle">AC 2</text>
+  <text x="110" y="314" class="ts" text-anchor="middle">+Vo</text>
+  <text x="210" y="314" class="ts" text-anchor="middle">−Vo</text>
+
+  <!-- Pressure sensor -->
+  <rect x="40" y="460" width="180" height="130" rx="6" class="box"/>
+  <text x="50" y="500" class="tb">Pressure</text>
+  <text x="50" y="517" class="tb">sensor</text>
+  <text x="50" y="534" class="ts">G41 0-16 bar, 5 V</text>
+  <text x="212" y="484" class="ts" text-anchor="end">VCC</text>
+  <text x="212" y="544" class="ts" text-anchor="end">OUT</text>
+  <text x="212" y="574" class="ts" text-anchor="end">GND</text>
+
+  <!-- Water sensor -->
+  <rect x="40" y="650" width="180" height="120" rx="6" class="box"/>
+  <text x="50" y="695" class="tb">Water level</text>
+  <text x="50" y="712" class="tb">sensor</text>
+  <text x="50" y="729" class="ts">capacitive</text>
+  <text x="212" y="674" class="ts" text-anchor="end">VCC</text>
+  <text x="212" y="714" class="ts" text-anchor="end">OUT</text>
+  <text x="212" y="754" class="ts" text-anchor="end">GND</text>
+
+  <!-- Temp module -->
+  <rect x="40" y="860" width="180" height="145" rx="6" class="box"/>
+  <text x="50" y="900" class="tb">Temp module</text>
+  <text x="50" y="917" class="ts">UART PT100</text>
+  <text x="50" y="931" class="ts">("MAX31865" silk)</text>
+  <text x="212" y="884" class="ts" text-anchor="end">5V</text>
+  <text x="212" y="919" class="ts" text-anchor="end">TX</text>
+  <text x="212" y="954" class="ts" text-anchor="end">RX</text>
+  <text x="212" y="989" class="ts" text-anchor="end">GND</text>
+
+  <!-- ESP32 -->
+  <rect x="640" y="370" width="220" height="650" rx="8" class="box"/>
+  <text x="750" y="680" class="tb" text-anchor="middle">ESP32-S3</text>
+  <text x="750" y="698" class="t" text-anchor="middle">DevKitC-1</text>
+  <g class="ts">
+    <text x="648" y="404">5V IN</text>
+    <text x="648" y="544">GPIO1 (ADC)</text>
+    <text x="648" y="644">3V3</text>
+    <text x="648" y="714">GPIO7</text>
+    <text x="648" y="809">GND</text>
+    <text x="648" y="919">GPIO18 (RX)</text>
+    <text x="648" y="954">GPIO17 (TX)</text>
+    <text x="648" y="989">GND</text>
+    <text x="852" y="444" text-anchor="end">3V3 (2nd)</text>
+    <text x="852" y="494" text-anchor="end">GND</text>
+    <text x="852" y="544" text-anchor="end">GPIO6</text>
+    <text x="852" y="594" text-anchor="end">GPIO5</text>
+    <text x="852" y="704" text-anchor="end">GPIO4</text>
+    <text x="852" y="764" text-anchor="end">GND</text>
+  </g>
+
+  <!-- Dimmer -->
+  <rect x="1000" y="410" width="200" height="210" rx="6" class="xbox"/>
+  <text x="1100" y="500" class="tb" text-anchor="middle">AC dimmer</text>
+  <text x="1100" y="517" class="ts" text-anchor="middle">TRIAC + zero-cross</text>
+  <text x="1008" y="444" class="ts">VCC</text>
+  <text x="1008" y="494" class="ts">GND</text>
+  <text x="1008" y="544" class="ts">Z-C</text>
+  <text x="1008" y="594" class="ts">PSM</text>
+  <text x="1030" y="428" class="ts" text-anchor="middle">IN</text>
+  <text x="1100" y="428" class="ts" text-anchor="middle">OUT</text>
+  <text x="1170" y="428" class="ts" text-anchor="middle">N</text>
+
+  <!-- SSR -->
+  <rect x="1000" y="670" width="200" height="130" rx="6" class="xbox"/>
+  <text x="1100" y="735" class="tb" text-anchor="middle">SSR</text>
+  <text x="1100" y="752" class="ts" text-anchor="middle">Fotek SSR-DA</text>
+  <text x="1008" y="704" class="ts">3 (+)</text>
+  <text x="1008" y="764" class="ts">4 (−)</text>
+  <text x="1192" y="704" class="ts" text-anchor="end">1</text>
+  <text x="1192" y="764" class="ts" text-anchor="end">2</text>
+
+  <!-- Mains components -->
+  <rect x="1210" y="80" width="100" height="50" rx="6" class="mbox"/>
+  <text x="1260" y="103" class="t" text-anchor="middle">Heater</text>
+  <text x="1260" y="120" class="ts" text-anchor="middle">1000 W</text>
+
+  <rect x="1400" y="225" width="120" height="50" rx="6" class="mbox"/>
+  <text x="1460" y="246" class="t" text-anchor="middle">T2 thermostat</text>
+  <text x="1460" y="263" class="ts" text-anchor="middle">steam, 127 °C</text>
+
+  <circle cx="1440" cy="330" r="20" class="mbox"/>
+  <text x="1440" y="334" class="ts" text-anchor="middle">lamp</text>
+  <text x="1440" y="368" class="ts" text-anchor="middle">Steam button lamp</text>
+
+  <rect x="985" y="215" width="90" height="30" rx="5" class="mbox"/>
+  <text x="1030" y="235" class="ts" text-anchor="middle">Brew switch</text>
+
+  <rect x="1078" y="290" width="70" height="30" rx="5" class="mbox"/>
+  <text x="1113" y="310" class="ts" text-anchor="middle">Pump</text>
+
+  <!-- ===================== WIRES ===================== -->
+  <g filter="url(#ol)">
+    <!-- 5V rail -->
+    <path class="w blu" d="M110 320 V400 H440"/>
+    <path class="w pur" d="M480 400 H640"/>
+    <path class="w red" d="M460 412 V480 H220"/>
+    <!-- pressure signal + divider -->
+    <path class="w yel" d="M220 540 H300"/>
+    <path class="w yel" d="M520 540 H640"/>
+    <!-- grounds -->
+    <path class="w wht" d="M210 320 V350 H400 V780"/>
+    <path class="w blk" d="M220 570 H260 V795 H390"/>
+    <path class="w blk" d="M220 750 H280 V815 H390"/>
+    <path class="w org" d="M540 805 H640"/>
+    <!-- 3V3 rail -->
+    <path class="w red" d="M220 670 H300 V640 H530"/>
+    <path class="w org" d="M600 640 H640"/>
+    <path class="w blk" d="M565 652 V880 H220"/>
+    <!-- water OUT -->
+    <path class="w yel" d="M220 710 H300"/>
+    <path class="w brn" d="M300 710 H640"/>
+    <!-- temp module -->
+    <path class="w wht" d="M220 915 H640"/>
+    <path class="w gry" d="M220 950 H640"/>
+    <path class="w pur" d="M220 985 H640"/>
+    <!-- dimmer logic -->
+    <path class="w yel" d="M860 440 H1000"/>
+    <path class="w org" d="M860 490 H1000"/>
+    <path class="w red" d="M860 540 H1000"/>
+    <path class="w brn" d="M860 590 H1000"/>
+    <!-- SSR control -->
+    <path class="w grn" d="M860 700 H930"/>
+    <path class="w yel" d="M930 700 H1000"/>
+    <path class="w red" d="M860 760 H920"/>
+    <path class="w yel" d="M950 760 H1000"/>
+    <!-- ===== mains ===== -->
+    <path class="w yel" d="M1200 700 H1260 V330"/>
+    <path class="w yel" d="M1200 760 H1340 V250"/>
+    <path class="w blk" d="M1260 330 V130"/>
+    <path class="w red" d="M1260 330 H1420"/>
+    <path class="w gry" d="M1340 250 H1400"/>
+    <path class="w red" d="M1340 250 V170 H390"/>
+    <path class="w red" d="M330 170 H110"/>
+    <path class="w yel" d="M110 170 V230"/>
+    <path class="w yel" d="M210 230 V140 H680"/>
+    <path class="w yel" d="M1170 410 V140 H760"/>
+    <path class="w grn" d="M720 128 V75"/>
+    <path class="w red" d="M1030 410 V370"/>
+    <path class="w red" d="M1030 330 V245"/>
+    <path class="w wht" d="M1100 410 V365"/>
+    <path class="w wht" d="M1100 365 V320"/>
+  </g>
+
+  <!-- resistors (values per position NOT confirmed - check L3) -->
+  <path class="w yel" d="M340 540 H410"/>
+  <path class="w res" d="M410 540 l5 -8 l10 16 l10 -16 l10 16 l10 -16 l10 16 l5 -8"/>
+  <path class="w res" d="M470 540 H480"/>
+  <text x="440" y="526" class="t" text-anchor="middle">4.3k</text>
+  <path class="w res" d="M500 552 V720"/>
+  <path class="w res" d="M500 720 l-8 5 l16 10 l-16 10 l16 10 l-16 10 l16 10 l-8 5"/>
+  <text x="514" y="756" class="t">10k</text>
+
+  <!-- fuses -->
+  <rect x="330" y="162" width="60" height="16" rx="3" fill="#fff" stroke="#333" stroke-width="2"/>
+  <line x1="330" y1="170" x2="390" y2="170" stroke="#333" stroke-width="1.5"/>
+  <text x="360" y="157" class="ts" text-anchor="middle">fuse (HLK)</text>
+  <rect x="1022" y="330" width="16" height="40" rx="3" fill="#fff" stroke="#333" stroke-width="2"/>
+  <line x1="1030" y1="330" x2="1030" y2="370" stroke="#333" stroke-width="1.5"/>
+  <text x="1016" y="354" class="ts" text-anchor="end">fuse (dimmer)</text>
+
+  <!-- not traced -->
+  <path class="unk" d="M1260 80 V58"/><text x="1270" y="70" class="q">→ Neutral? (M2)</text>
+  <path class="unk" d="M1520 250 H1560"/><text x="1525" y="290" class="q">→ Line (checked)</text>
+  <path class="unk" d="M1460 330 H1510"/><text x="1515" y="334" class="q">? (M3)</text>
+  <path class="unk" d="M1030 215 V195"/><text x="1030" y="190" class="q" text-anchor="middle">← machine L (via panel)</text>
+  <path class="unk" d="M1148 305 H1160"/><text x="1205" y="290" class="q" text-anchor="middle">pump 2nd wire</text><text x="1205" y="304" class="q" text-anchor="middle">→ Neutral? (M5)</text>
+  <text x="726" y="68" class="t">→ machine Neutral ("0") wire - confirmed, not chassis</text>
+
+  <!-- ===================== WAGOS ===================== -->
+  <rect x="440" y="388" width="40" height="24" rx="4" class="wago"/>
+  <text x="460" y="382" class="ts" text-anchor="middle">Wago 5V</text>
+  <rect x="300" y="528" width="40" height="24" rx="4" class="wago"/>
+  <text x="320" y="522" class="ts" text-anchor="middle">Wago A</text>
+  <rect x="480" y="528" width="40" height="24" rx="4" class="wago"/>
+  <text x="530" y="522" class="ts" text-anchor="middle">Wago B</text>
+  <rect x="530" y="628" width="70" height="24" rx="4" class="wago"/>
+  <text x="565" y="622" class="ts" text-anchor="middle">Wago 3V3</text>
+  <rect x="390" y="780" width="150" height="50" rx="4" class="wago"/>
+  <text x="465" y="810" class="t" text-anchor="middle">Wago GND</text>
+  <rect x="920" y="748" width="30" height="24" rx="4" class="wago"/>
+  <rect x="680" y="128" width="80" height="24" rx="4" class="wago"/>
+  <text x="720" y="166" class="ts" text-anchor="middle">Wago N</text>
+
+  <!-- splices / joints -->
+  <circle cx="300" cy="710" r="4" class="dot"/>
+  <circle cx="930" cy="700" r="4" class="dot"/>
+  <circle cx="110" cy="170" r="4" class="dot"/>
+  <circle cx="1100" cy="365" r="4" class="dot"/>
+  <circle cx="1260" cy="330" r="6" class="dot"/><text x="1230" y="350" class="ts" text-anchor="end">joint SSR 1</text>
+  <circle cx="1340" cy="250" r="6" class="dot"/><text x="1350" y="215" class="ts">joint SSR 2</text>
+
+  <!-- wire color tags -->
+  <g class="ts">
+    <text x="118" y="360">blue</text>
+    <text x="560" y="394">purple</text>
+    <text x="330" y="474">red</text>
+    <text x="230" y="534">yellow</text>
+    <text x="570" y="534">yellow</text>
+    <text x="300" y="344">white (HLK −Vo)</text>
+    <text x="265" y="620">black</text>
+    <text x="285" y="790">black</text>
+    <text x="575" y="799">orange</text>
+    <text x="320" y="634">red</text>
+    <text x="608" y="634">orange</text>
+    <text x="570" y="860">black</text>
+    <text x="230" y="704">yellow</text>
+    <text x="330" y="704">brown</text>
+    <text x="330" y="909">white</text>
+    <text x="330" y="944">grey</text>
+    <text x="330" y="979">purple</text>
+    <text x="900" y="434">yellow</text>
+    <text x="900" y="484">orange</text>
+    <text x="900" y="534">red</text>
+    <text x="900" y="584">brown</text>
+    <text x="880" y="694">green</text>
+    <text x="955" y="694">yellow</text>
+    <text x="875" y="754">red</text>
+    <text x="960" y="754">yellow</text>
+    <text x="1268" y="560">yellow</text>
+    <text x="1348" y="560">yellow</text>
+    <text x="1268" y="220">black</text>
+    <text x="1300" y="324">red</text>
+    <text x="1355" y="243">grey</text>
+    <text x="800" y="164">red</text>
+    <text x="230" y="164">red</text>
+    <text x="118" y="205">yellow</text>
+    <text x="400" y="134">yellow</text>
+    <text x="900" y="134">yellow</text>
+    <text x="728" y="105">green</text>
+    <text x="1036" y="396">red</text>
+    <text x="1036" y="280">red</text>
+    <text x="1106" y="396">white</text>
+    <text x="1106" y="348">white</text>
+  </g>
+
+  <!-- ===================== LEGEND ===================== -->
+  <rect x="1000" y="850" width="575" height="210" rx="8" fill="#fafafa" stroke="#999"/>
+  <text x="1015" y="875" class="tb">Notes</text>
+  <g class="ts">
+    <text x="1015" y="897">• Wago A = pressure OUT; Wago B = divider middle → GPIO1. Firmware expects 4.3k on the</text>
+    <text x="1015" y="912">  sensor side, 10k to GND (0.5-4.5 V → ~0.35-3.15 V). Checked 2026-10-31.</text>
+    <text x="1015" y="930">• The temp module's "5V" pin runs from 3V3, on purpose.</text>
+    <text x="1015" y="948">• The HLK's live comes from the T2 side of the SSR: if T2 trips (127 °C), the ESP loses power.</text>
+    <text x="1015" y="966">• The dimmer only gets mains while the physical Brew switch is on.</text>
+    <text x="1015" y="984">• Orange = both 3V3 and GND here; yellow = many signals. Trace, don't trust the color.</text>
+    <text x="1015" y="1020">• Dashed grey = not traced (M2 heater, M3 lamp, M5 pump); they work, so they are on Neutral.</text>
+    <text x="1015" y="1038">• Full tables: docs/wiring-as-built.md</text>
+  </g>
+</svg>

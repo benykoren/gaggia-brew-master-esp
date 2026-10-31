@@ -54,7 +54,7 @@ README.
 | Temp sensor | **PT100, 3-wire**, PTFE cable, M4 thread | Replaces the original boiler thermostat |
 | Temp module | **UART PT100 + relay module** (silkscreen says "MAX31865" but it is NOT SPI — it's an ASCII AT-command UART board; see Section 3/4) | 9600 8N1, `AT+T` command |
 | Heater switch | **Fotek SSR-DA** (DC control → AC load) + heatsink | Switches the boiler heater |
-| PSU | **External USB wall-wart** (5V) today → **planned: HLK-PM01** (5V 3W) fed from always-on mains (2026-10-15) | HLK will power the ESP32 via its 5V pin and the 16-bar pressure sensor; see HARDWARE_ROADMAP.md item 7 |
+| PSU | **HLK-PM01** (5V 3W), installed 2026-10-20 (was a USB wall-wart) | Fed from the T2 side of the SSR through a fuse; powers the ESP32 (5V IN) and the 16-bar pressure sensor. As-built wiring: [`docs/wiring-as-built.md`](docs/wiring-as-built.md) |
 | Wiring | Wago 221 (mains), silicone wire (18AWG power / 22AWG signal), Dupont, PTFE tape | |
 | Boiler heating element | Stainless, **1000W**, 230V (Gaggia P/N `11001002`) | Factory spec, see OEM manuals below |
 | Boiler thermostats (factory) | Brew **95°C** / Steam **127°C**, both Gaggia `US-622AXTDNO` | T2 (steam, 127°C) is the one reused as the mains-wiring overheat cutoff — see Section 7 |
@@ -84,7 +84,9 @@ Defined in [`include/config.h`](include/config.h). Chosen to avoid reserved S3
 pins (USB `GPIO19/20`, flash `GPIO26-32`, OPI PSRAM `GPIO33-37`, strapping
 `0/3/45/46`, RGB LED `48`).
 
-Planned power/sensor changes and their install steps:
+**Wire-by-wire as-built wiring (every Wago, wire color, and mains joint):
+[`docs/wiring-as-built.md`](docs/wiring-as-built.md)** - check it before
+touching any wire. Original install steps:
 [`docs/install-guide-2026-10-15-hlk-pressure-water.md`](docs/install-guide-2026-10-15-hlk-pressure-water.md).
 
 | Function | GPIO |
@@ -920,6 +922,35 @@ everything again.
 ---
 
 ## 10. Change Log
+
+### 2026-10-31 — Claude Code (Opus 5.5) — As-built wiring documented; leftover 3V3 wire and stuck 5.7 bar diagnosed
+- User traced every wire with the machine unplugged. Written up as
+  [`docs/wiring-as-built.md`](docs/wiring-as-built.md): the Wago nodes,
+  per-component pin/wire tables, the mains joints, and a diagram. All GPIOs
+  match `config.h`. Section 2 PSU row and Section 3 now point to it. (Section
+  7 step 2 still describes the old USB power. It is superseded by the
+  HLK-PM01, installed 2026-10-20.)
+- **Dangling wire:** the red wire to an empty Wago came off the 3V3 Wago
+  (most likely the old 0-5 bar sensor feed). The user removed it.
+- User then confirmed: T2 in series (grey from SSR 2 → T2 → Line), divider
+  4.3k sensor-side / 10k to GND, both orange wires on the right ESP pins.
+  Diagram added: `docs/wiring-diagram.svg`.
+- HLK AC-2 and dimmer N go through a green wire to the machine's "0". The
+  user confirmed it joins the machine's Neutral wire, not the chassis (OK).
+- **Pressure stuck at ~5.7 bar (machine off, nothing read live):** 5.7 bar =
+  218 + 5.7 x 175 ≈ 1215 mV on GPIO1. That is the same ~1200 mV seen twice on
+  2026-10-21 (trapped pressure, gone once vented). There is no 3-way valve,
+  so the pump's check valve and a sealed group can hold line pressure
+  indefinitely. Most likely real trapped pressure, not a fault. Test: vent it
+  (steam knob open into a cup, or portafilter off). If the reading still
+  doesn't drop to ~0.0 bar (~218 mV), measure with the machine on: sensor
+  out (W-PSIG) should be ~0.3 V at rest, and GPIO1 (W-ADC) ~0.7 x that. Out
+  ~1.7 V at rest means the sensor sees pressure or is damaged. GPIO1 not
+  0.7 x out means the divider or the sensor GND is bad.
+- The description conflicts in places and leaves the other ends of several
+  mains wires undescribed. These are listed as unverified checks (L1-L7,
+  M1-M6, V1-V3) in section 5 of the wiring doc, not resolved by assumption.
+- Documentation only, no firmware change.
 
 ### 2026-10-21 — Claude Code (Opus 5.5) — Dial-in advice: fixed 18 g dose, cup weight only, judged by how the shot ended
 - User: drop bean/dose, assume 18 g, judge from the cup weight and the time
